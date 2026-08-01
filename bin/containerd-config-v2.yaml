@@ -1,0 +1,16 @@
+
+[plugins."io.containerd.grpc.v1.cri".registry]
+  config_path = "/etc/containerd/certs.d"
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.crun]
+  base_runtime_spec = "/etc/containerd/cri-base.json"
+  runtime_type = "io.containerd.runc.v2"
+  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.crun.options]
+    BinaryName = "/usr/bin/crun"
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
+  runtime_type = "io.containerd.runsc.v1"
+  privileged_without_host_devices = true
+  pod_annotations = ["io.gvisor.*"]
+  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.gvisor.options]
+    # Pass the allow-suid flag directly to runsc
+    runsc_config = "allow-suid=true"

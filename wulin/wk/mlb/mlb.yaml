@@ -1,0 +1,17 @@
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: mlb-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - 10.89.0.100-10.89.0.200
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: mlb-l2a
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - mlb-pool

@@ -1,0 +1,111 @@
+#!/bin/bash
+[ "$1" == "" ] && echo "kcn <cluster>" && exit 1
+
+export cn=${1}
+export HDIR=~
+[ "${2}" != "" ] && export KVER=${2}
+
+[ ! -f ~/tk/conf/${cn}.conf ] && echo "~/tk/conf/${cn}.conf not found" && exit 1
+
+source ~/tk/conf/${cn}.conf
+([ "$LCTN" == "" ] || [ "$TKIND" == "" ] || [ "$NTP" == "" ]) && echo "~/tk/conf/${cn}.conf error" && exit 1
+
+# install cni
+if [ ! -d ~/cni ]; then
+   mkdir -p ~/cni
+   curl -sL "$(curl -sL https://api.github.com/repos/containernetworking/plugins/releases/latest | \
+   jq -r '.assets[].browser_download_url' | grep 'linux-amd64.*.tgz$')" -o ~/cni-plugins.tgz &>/dev/null
+   tar xf ~/cni-plugins.tgz -C ~/cni; rm ~/cni-plugins.tgz
+fi
+
+sudo rm -r /opt/zfs/"$cn" &>/dev/null
+sudo mkdir -p /opt/zfs/"$cn"/tkimg; sudo chmod -R 777 /opt/zfs/"$cn"
+
+case "$NTP" in
+  "Internal")
+     sudo podman network ls | grep $1 &>/dev/null
+     [ "$?" == "0" ] && echo "$1 cluster exist" && exit 1
+
+     cat /etc/hosts | grep "${NID%.*}" &>/dev/null
+     [ "$?" == "0" ] && echo "Network ID confict" && exit 1
+
+     sudo podman network create ${cn} --driver=bridge --subnet=${NID} --gateway=${NGW} --disable-dns &>/dev/null
+     [ "$?" != "0" ] && echo "$NID can not created" && exit 1
+     echo "${cn} Network (Local:$NID) created"
+
+     for c in ${LCTN}
+     do
+       cip=$(echo $c | cut -d':' -f1)
+       ctn=$(echo $c | cut -d':' -f2)
+       cm=$(echo $c | cut -d':' -f3)
+       cc=$(echo $c | cut -d':' -f4)
+
+       # The docker run --cgroupns=private command-line option in Docker 
+       # specifies that a container should run in its own private cgroup namespace.
+       controlVolume=$(sudo podman volume create --label ${ctn}=true ${ctn}-volume)       
+       sudo podman run -itd \
+         --name ${ctn} \
+         --hostname ${ctn} \
+         --cpus ${cc} \
+         --memory ${cm} \
+         --privileged \
+         --net ${cn} \
+         --ip ${cip} \
+         --dns 8.8.8.8 --dns 168.95.1.1 \
+         --env TZ=Asia/Taipei \
+         --volume ${HDIR}/cni:/opt/cni/bin \
+         --volume /lib/modules:/lib/modules:ro \
+         --volume ${controlVolume}:/var:suid,exec,dev,rbind \
+         --volume /opt/zfs/${cn}:/opt/zfs \
+         --volume ${HDIR}/tk/wulin:/opt/wulin \
+         --cgroupns=private \
+         $IMG bash &>/tmp/${ctn}.out
+         [ "$?" != "0" ] && echo "${ctn} container created error" && exit 1
+         echo "${ctn} container created ok"
+     done
+     ;;
+  "External")
+     for c in ${LCTN}
+     do
+       cnn=$(echo $c | cut -d':' -f1)
+       cif=$(echo $c | cut -d':' -f2)
+       nip=$(echo $c | cut -d':' -f3)
+       cip=$(echo $c | cut -d':' -f4)
+       ctn=$(echo $c | cut -d':' -f5)
+       cm=$(echo $c | cut -d':' -f6)
+       cc=$(echo $c | cut -d':' -f7)
+
+       sudo podman ps -a | grep "${ctn}"
+       [ "$?" == "0" ] && continue
+
+       controlVolume=$(sudo podman volume create --label ${ctn}=true)
+       sudo podman run -itd \
+         --name ${ctn} \
+         --hostname ${ctn} \
+         --cpus ${cc} \
+         --memory ${cm} \
+         --privileged \
+         --net none \
+         --volume ${HDIR}/cni:/opt/cni/bin \
+         --volume /lib/modules:/lib/modules:ro \
+         --volume ${controlVolume}:/var:suid,exec,dev,rbind \
+         --volume /opt/zfs/${cn}:/opt/zfs \
+         --volume ${HDIR}/tk/wulin:/opt/wulin \
+         --cgroupns=private \
+         $IMG bash &>/dev/null
+         [ "$?" == "0" ] && echo -n "${ctn} container created"
+
+         ctpid=$(sudo podman inspect ${ctn} --format "{{.State.Pid}}")
+         sudo ip link add "tkif${cnn}" link ${cif} type macvlan mode bridge
+         sudo ip link set "tkif${cnn}" netns $ctpid
+         sudo podman exec -it ${ctn} bash -c "ip addr add ${cip} dev tkif${cnn}"
+         sudo podman exec -it ${ctn} bash -c "ip link set dev tkif${cnn} up"
+         sudo podman exec -it ${ctn} bash -c "ip route add default via ${NGW} dev tkif${cnn}"
+         echo " ($cip)"
+     done
+     ;;
+  *)
+     echo "Netwrok Type Error"
+     exit 1
+     ;; 
+esac

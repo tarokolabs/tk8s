@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-crun
+spec:
+  runtimeClassName: crun
+  containers:
+  - name: nginx
+    image: quay.io/cloudwalker/nginx
+  nodeSelector:
+    kubernetes.io/hostname : c31-control-plane

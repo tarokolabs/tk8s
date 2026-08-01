@@ -1,0 +1,27 @@
+#!/bin/bash
+
+[ "$1" == "" ] && echo "kdg cluster" && exit 1
+
+[ ! -f ~/tk/conf/$1.conf ] && echo '~/tk/conf/$1.conf not exist' && exit 1
+source ~/tk/conf/$1.conf
+
+[ "$TKIND" != "K8S" ] && echo "$1 not K8S cluster" && exit 1
+[ ! -d /opt/zfs/$1 ] && echo "$1 cluster not found" && exit 1
+
+sudo podman ps -a | grep " $1-worker2" | grep 'Exited ' &>/dev/null
+[ "$?" == "0" ] && echo "$1-worker2 Exited" && exit 1
+
+if [ "$TKGW" == "true" ]; then
+   read -p "Are you sure ? " yn
+   [ "$yn" != "YES" ] && exit 1
+
+   # cif=${1}gw
+   sudo podman exec -it ${1}-worker2 bash -c "ip a show tkgw" &>/dev/null
+   if [ "$?" == "0" ]; then
+      sudo podman exec -it ${1}-worker2 bash -c "ip link set dev tkgw down"
+      sudo podman exec -it ${1}-worker2 bash -c "ip link delete tkgw"
+      echo "$1-worker2 Gateway removed (tkgw:${GWIP})"
+   else
+      echo "$1-worker2 Gateway not found (tkgw:${GWIP})"
+   fi
+fi

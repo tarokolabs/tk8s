@@ -1,8 +1,0 @@
-#!/bin/bash
-
-w="dtw1.hdp dtw2.hdp"
-
-for n in $w
-do
-  ssh $n 'nohup /opt/dtp/hdp3.3/bin/jpslog.sh &>/dev/null &'
-done

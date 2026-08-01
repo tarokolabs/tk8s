@@ -1,6 +1,0 @@
-#!/bin/bash
-
-scp -r ~/wulin/* 172.22.1.254:/home/bigred/wulin/ &>/dev/null
-[ "$?" == "0" ] && echo "wulin ok"
-
-

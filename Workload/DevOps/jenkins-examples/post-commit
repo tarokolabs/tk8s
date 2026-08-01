@@ -1,5 +1,0 @@
-#!/bin/bash
-jenkinsURL="http://devops.jenkins/git/notifyCommit?url="
-repo="ssh://kube-xadm.taroko:22102/home/bigred/wulin/devops/goweb"
-branchName=$(git rev-parse --abbrev-ref HEAD)
-curl -s "${jenkinsURL}${repo}&branches=${branchName}"

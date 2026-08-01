@@ -1,0 +1,12 @@
+apiVersion: certificates.k8s.io/v1
+kind: CertificateSigningRequest
+metadata:
+  name: ${STU}-csr
+spec:
+  groups:
+  - system:authenticated
+  request: ${BASE64_CSR}
+  signerName: kubernetes.io/kube-apiserver-client
+  expirationSeconds: 864000  # 240 day
+  usages:
+  - client auth

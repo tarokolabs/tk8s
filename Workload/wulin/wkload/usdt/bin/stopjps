@@ -1,9 +1,0 @@
-#!/bin/bash
-w="dtw1.hdp dtw2.hdp"
-
-for n in $w
-do
-  ssh $n 'touch /tmp/jlog.stop'
-  ssh $n "cat /tmp/jps-$n.log"
-  echo ""
-done
