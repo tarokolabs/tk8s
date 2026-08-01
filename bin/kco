@@ -1,0 +1,55 @@
+#!/bin/bash
+
+[ "$1" == "" ] && echo "kco cluster" && exit 1
+
+[ ! -d /opt/zfs/${1} ] && echo "$1 not exist" && exit 1
+
+sudo podman ps -a | grep " $1" | grep 'Exited ' &>/dev/null 
+[ "$?" == "0" ] && echo "$1 already Exited" && exit 1
+
+[ ! -f ~/tk/conf/${1}.conf ] && echo "~/tk/conf/${1}.conf not found" && exit 1
+source ~/tk/conf/${1}.conf
+
+read -p "Are you sure ? " yn
+[ "$yn" != "YES" ] && exit 1
+
+if [ "$TKIND" == "K8S" ]; then
+   ~/tk/bin/kns ${1}
+   [ "$?" != "0" ] && exit 1
+
+   if [ "$KUBEVIP" != "" ]; then
+      cpip=$(sudo podman inspect ${1}-control-plane --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
+      cp .kube/config /opt/zfs/$1/config.100
+      sed -i "s|${KUBEVIP}|$cpip|g" .kube/config
+      cp .kube/config /opt/zfs/$1/config.cp1
+
+      cpip=$(sudo podman inspect ${1}-control-plane1 --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
+      cp /opt/zfs/$1/config.100 .kube/config
+      sed -i "s|${KUBEVIP}|$cpip|g" .kube/config
+      cp .kube/config /opt/zfs/$1/config.cp2
+   else
+      [ ! -f /opt/zfs/$1/config ] && mv ~/.kube/config /opt/zfs/$1/
+   fi
+   echo > ~/.kube/config
+fi
+
+RLCTN=$(echo ${LCTN} | tr ' ' '\n' | tac | tr '\n' ' ')
+
+for x in ${RLCTN}
+do 
+   cn=$(echo $x | cut -d ':' -f2)
+   sudo podman exec ${cn} crictl pods | grep 'etcd-tkha-control-plane' &>/dev/null
+   if [ "$?" == "0" ]; then
+      sudo podman exec ${cn} stop kubelet &>/tmp/${cn}.kublet
+      echo "Please wait ${cn}:kubelet 30 seconds to stop the operation." && sleep 30
+   else
+      sudo podman exec ${cn} stop kubelet &>/tmp/${cn}.kublet
+      echo "Please wait ${cn}:kubelet 15 seconds to stop the operation." && sleep 15
+   fi
+   sudo podman exec ${cn} stop containerd &>/tmp/${cn}.containerd
+   sleep 10
+   sudo podman stop ${cn} -t=60 &>/tmp/${cn}.podman
+   [ "$?" == "0" ] && echo "${cn} Exited"
+done
+echo ""
+echo "$1: clock out"

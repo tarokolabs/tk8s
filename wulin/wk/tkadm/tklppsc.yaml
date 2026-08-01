@@ -1,0 +1,15 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: tk-local-path
+provisioner: rancher.io/local-path
+parameters:
+  nodePath: /opt/zfs/storage
+  type: DirectoryOrCreate
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+
+
+#  pathPattern: "{{ .PVC.Namespace }}/{{ .PVC.Name }}"
+#volumeBindingMode: WaitForFirstConsumer
+#reclaimPolicy: Retain

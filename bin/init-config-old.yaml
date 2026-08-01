@@ -1,0 +1,53 @@
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: $SVRIP                   # change from Master node IP
+  bindPort: 6443
+nodeRegistration:
+  criSocket: unix:///run/containerd/containerd.sock         # change from CRI-O Unix Socket
+  imagePullPolicy: IfNotPresent
+  name: $cn-control-plane                                      # change from Master node hsotname
+  taints: null
+---
+apiServer: {}
+apiVersion: kubeadm.k8s.io/v1beta3
+certificatesDir: /etc/kubernetes/pki
+clusterName: $cn                             # set your clusterName
+#controllerManager:
+#  extraArgs:
+#    - name: node-cidr-mask-size              # set pod cidr per node
+#      value: "25"
+dns: {}
+etcd:
+  local:
+    dataDir: /var/lib/etcd
+imageRepository: registry.k8s.io
+kind: ClusterConfiguration
+kubernetesVersion: $KVER
+networking:
+  dnsDomain: $cn.k8s                                    # DNS domain used by Kubernetes Services.
+  podSubnet: ${PNID}                             # the subnet used by Pods.
+  serviceSubnet: ${SNID}                           # subnet used by Kubernetes Services.
+scheduler: {}
+---
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+#mode: ipvs
+mode: iptables
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+maxPods: 80
+# podLogsDir: /opt/zfs/logs
+containerLogMaxFiles: 3    
+containerLogMaxSize: 1Mi   
+#evictionHard:
+#  memory.available: "1024Mi"
+#  nodefs.available: "10%"
+#kubeReserved:
+#  cpu: "500m"
+#  memory: "1Gi"
+#systemReserved:
+#  cpu: "1"
+#  memory: "1Gi"
+#  ephemeral-storage: "10Gi"

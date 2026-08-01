@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-crio
+spec:
+  runtimeClassName: crioclass
+  containers:
+  - name: mybase
+    image: quay.io/cloudwalker/alp.base
+    imagePullPolicy: IfNotPresent
+  nodeSelector:
+    kubernetes.io/hostname : c30-control-plane

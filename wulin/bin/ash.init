@@ -1,0 +1,7 @@
+#!/bin/bash
+for n in rbean gbean
+do
+  adduser -s /bin/ash -h /opt/zfs/users/${n} -s /bin/ash -G wheel -D ${n}
+  echo -e "${n}\n${n}\n" | passwd ${n}
+  mkdir -p /opt/zfs/users/${n}/.kube && chown ${n}:root /opt/zfs/users/${n}/.kube
+done

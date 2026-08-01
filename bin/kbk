@@ -1,0 +1,30 @@
+#!/bin/bash
+
+[ "$1" == "" ] && echo "kbk cluster" && exit 1
+
+[ ! -d /opt/zfs/${1} ] && echo "$1 not exist" && exit 1
+
+sudo podman ps -a | grep " $1" | grep 'Exited ' &>/dev/null
+[ "$?" == "0" ] && echo "$1 already Exited" && exit 1
+
+[ ! -f ~/tk/conf/${1}.conf ] && echo "~/tk/conf/${1}.conf not found" && exit 1
+source ~/tk/conf/${1}.conf
+
+cn=$1
+
+for x in tkadm:taroko dtadm:dt
+do
+  lb=${x%%:*}
+  ns=${x##*:}
+  pn=$(kubectl get pod -l app=${lb} -o jsonpath="{.items[0].metadata.name}" -n $ns 2>/dev/null)
+ 
+  if [ "$pn" != "" ]; then
+     kubectl exec $pn -n $ns -- mkdir -p /opt/zfs/${lb}bak/etc
+
+     kubectl exec $pn -n $ns -- sudo cp -p /etc/passwd /etc/group /etc/shadow /opt/zfs/${lb}bak/etc/
+     [ "$?" == "0" ] && echo "/opt/zfs/${lb}bak/etc/ ok"
+
+     kubectl exec $pn -n $ns -- bash -c "cd /;zip -rp /opt/zfs/${lb}bak/${lb}.zip home/ -x home/bigred/wulin\* &>/dev/null"
+     [ "$?" == "0" ] && echo "/opt/zfs/${lb}bak/${lb}.zip ok"
+  fi
+done

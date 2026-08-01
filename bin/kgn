@@ -1,0 +1,43 @@
+#!/bin/bash
+
+[ "$1"  == "" ] && echo "kgn cluster" && exit 1
+
+[ ! -f ~/tk/conf/$1.conf ] && echo "~/tk/conf/$1.conf not found" && exit 1 
+
+source ~/tk/conf/$1.conf
+
+sudo podman ps -a | grep $1 &>/dev/null
+if [ "$?" != "0" ]; then
+   sudo podman network ls | grep $1 &>/dev/null
+   [ "$?" == "0" ] && sudo podman network rm $1 &>/dev/null 
+   echo "$1 not exist" && exit 1
+fi
+
+read -p "Are you sure ? " yn
+if [ "$yn" == "YES" ]; then
+   if [ "$NTP" == "Internal" ]; then
+      for n in $LCTN; do
+        cname=$(echo $n | cut -d ':' -f2)
+        sudo podman rm -f ${cname} &>/dev/null
+        [ "$?" == "0" ] && echo "${cname} container removed ok"
+        sudo podman volume rm -f ${cname}-volume &>/tmp/${cname}-kgn.out
+        [ "$?" == "0" ] && echo "${cname}-volume removed ok"
+        sudo podman rmi localhost/${cname}:v${KVER} &>/dev/null
+        [ "$?" == "0" ] && echo "${cname} image removed ok"
+      done
+      sudo podman network rm $1 &>/dev/null
+   fi
+
+   if [ "$NTP" == "External" ]; then
+      for n in $LCTN; do
+        cname=$(echo $n | cut -d ':' -f 5)
+        sudo podman rm -f ${cname} &>/dev/null
+      done
+   fi
+
+   sudo rm -r /opt/zfs/$1 &>/dev/null
+   rm ~/.kube/config &>/dev/null && touch ~/.kube/config
+   sudo sed -i "/${1}/d" /etc/hosts &>/dev/null
+
+   echo "$1 cluster removed"
+fi

@@ -1,0 +1,104 @@
+#!/bin/bash
+
+[ "$1" == "" ] && echo "kns cluster" && exit 1
+
+[ ! -d /opt/zfs/$1 ] && echo "$1 not exist" && exit 1~
+
+sudo podman ps -a | grep " $1-worker2 " | grep 'Exited ' &>/dev/null
+[ "$?" == "0" ] && echo "$1-worker2 Exited" && exit 1
+
+kubectl get nodes 2>/tmp/$1-kns.out | grep "$1-worker2" &>/dev/null
+[ "$?" != "0" ] && echo "pls check /tmp/$1-kns.out" && exit 1
+
+[ ! -f ~/tk/conf/${1}.conf ] && echo "~/tk/conf/${1}.conf not found" && exit 1
+
+pn=$(kubectl get pods -n taroko | grep tkadm | head -n 1 | cut -d ' ' -f1)
+cip=$(kubectl exec $pn -n taroko -- printenv 'HOST_IP')
+
+#ip=$(sudo podman container inspect -f "{{.NetworkSettings.Networks.$1.IPAddress}}" $1-worker2)
+#sudo sed -i "/${1}/d" /etc/hosts
+cat /etc/hosts | grep "$cip ${1}" &>/dev/null
+[ "$?" != "0" ] && echo "$cip ${1}" | sudo tee -a /etc/hosts &>/dev/null
+
+echo "127.0.0.1 localhost" | sudo tee /opt/zfs/$1/hosts &>/dev/null
+
+sudo rm /opt/zfs/${1}/tkadd-dnat.sh &>/dev/null
+sudo mv /opt/zfs/${1}/tkdel-dnat.sh /opt/zfs/${1}/tkdel-dnat.sh.old &>/dev/null
+
+cn=${1}
+
+nslist="default taroko s3-system argo argocd jenkins dt dip lkh llm"
+for ns in $nslist 
+do
+  sn=$(kubectl get svc -n $ns 2>/dev/null | tail -n +2 | tr -s ' ' | cut -d ' ' -f3,1 | tr ' ' ':')
+  if [ "$sn" != "" ]; then
+     for x in $sn
+     do
+       n=$(echo $x | cut -d ':' -f1)
+       kubectl describe svc $n -n $ns > /tmp/svc.info
+       cat /tmp/svc.info | grep -e "Annotations:.*tkport" &>/dev/null
+       if [ "$?" == "0" ]; then 
+          s=$(cat /tmp/svc.info | grep -e "Annotations:.*tkport" | tr -s ' ' | cut -d ' ' -f 3)
+          d=$(echo $s | cut -d ':' -f 1)
+          p=$(echo $s | cut -d ':' -f 2)
+          tp=$(echo $s | cut -d ':' -f 3)
+   
+          ip=$(echo $x | cut -d ':' -f2)
+          echo $ip $n.$ns | sudo tee -a /opt/zfs/$1/hosts &>/dev/null 
+          if [ "$d" != "none" ]; then
+             echo "iptables -t nat -A PREROUTING -p tcp -i ${d} --dport $p -j DNAT --to-destination $ip:$tp" \
+             | sudo tee -a /opt/zfs/${cn}/tkadd-dnat.sh &>/dev/null
+  
+             echo "iptables -t nat -D PREROUTING -p tcp -i ${d} --dport $p -j DNAT --to-destination $ip:$tp" \
+             | sudo tee -a /opt/zfs/${cn}/tkdel-dnat.sh &>/dev/null
+
+             sudo chmod +x /opt/zfs/${cn}/tkadd-dnat.sh
+             sudo chmod +x /opt/zfs/${cn}/tkdel-dnat.sh
+             echo "tkadd-dnat.sh tkdel-dnat.sh created"
+          fi
+       fi
+     done
+  fi
+done
+
+source ~/tk/conf/${cn}.conf
+
+if [ "$TKGW" == "true" ]; then
+   if [ -f /opt/zfs/${cn}/tkdel-dnat.sh.old ]; then
+      sudo podman exec ${cn}-worker2 bash -c '/opt/zfs/tkdel-dnat.sh.old' &>/dev/null
+   else
+      sudo podman exec ${cn}-worker2 bash -c '/opt/zfs/tkdel-dnat.sh' &>/dev/null
+   fi
+
+   if [ -f /opt/zfs/${cn}/tkadd-dnat.sh ]; then
+      sudo podman exec ${cn}-worker2 bash -c '/opt/zfs/tkadd-dnat.sh' &>/dev/null
+      [ "$?" == "0" ] && echo "tkadd-dnat.sh ok"
+   fi
+fi
+
+for x in $LCTN
+do
+   n=$(echo $x | cut -d ':' -f2)
+   sudo podman exec $n cp /opt/zfs/hosts /etc/hosts
+   [ "$?" == "0" ] && echo "$n /etc/hosts ok"
+done
+
+echo "[${cn} Infrastructure]" > /opt/zfs/${cn}/net.info
+echo "${cn}-control-plane : ${NID%.*}.1" >> /opt/zfs/${cn}/net.info
+echo "${cn}-worker1 : ${NID%.*}.2" >> /opt/zfs/${cn}/net.info
+echo "${cn}-worker2 : ${NID%.*}.3" >> /opt/zfs/${cn}/net.info
+echo "" >> /opt/zfs/${cn}/net.info
+echo "[${cn} Cluster Network]" >> /opt/zfs/${cn}/net.info
+echo "Service Subnet : $SNID" >> /opt/zfs/${cn}/net.info
+echo "Pod Subnet : $PNID" >> /opt/zfs/${cn}/net.info
+
+echo "TKGW : $TKGW" >> /opt/zfs/${cn}/net.info
+if [ "$GWIF" == "" ]; then
+   x=$(route -n | grep -e "^0.0.0.0")
+   GWIF=${x##* }
+fi
+echo "Gateway Interface : $GWIF" >> /opt/zfs/${cn}/net.info
+echo "Gateway IP : $GWIP" >> /opt/zfs/${cn}/net.info
+echo "" >> /opt/zfs/${cn}/net.info
+kubectl get node -A -o custom-columns=NODE_NAME:.metadata.name,POD_CIDR:.spec.podCIDR >> /opt/zfs/${cn}/net.info
+

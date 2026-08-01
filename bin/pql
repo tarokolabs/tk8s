@@ -1,0 +1,9 @@
+#!/bin/bash
+
+[ "$#" == "0" ] && echo "psql <Query String>" && exit 1
+
+pqlip=$(sudo ipvsadm -Ln | grep 9090 | tr -s ' ' | cut -d ' ' -f2)
+[ "$pqlip" == "" ] && echo "pls run kiv first" && exit 1
+
+curl -s -G --data-urlencode query="$1" http://${pqlip}/api/v1/query
+echo ""

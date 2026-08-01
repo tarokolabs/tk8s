@@ -1,0 +1,13 @@
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: ${STU}-rbind
+  namespace: ${STU} 
+subjects:
+- kind: User
+  name: ${STU}
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role #this must be Role or ClusterRole
+  name: ${STU}-role 
+  apiGroup: rbac.authorization.k8s.io

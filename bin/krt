@@ -1,0 +1,27 @@
+#!/bin/bash
+
+[ "$1" == "" ] && echo "krt cluster" && exit 1
+
+[ ! -d /opt/zfs/${1} ] && echo "$1 not exist" && exit 1
+
+sudo podman ps -a | grep " $1" | grep 'Exited ' &>/dev/null
+[ "$?" == "0" ] && echo "$1 already Exited" && exit 1
+
+[ ! -f ~/tk/conf/${1}.conf ] && echo "~/tk/conf/${1}.conf not found" && exit 1
+source ~/tk/conf/${1}.conf
+
+for x in tkadm:taroko dtadm:dt
+do
+  lb=${x%%:*}
+  ns=${x##*:}
+
+  pn=$(kubectl get pod -l app=${lb} -o jsonpath="{.items[0].metadata.name}" -n $ns 2>/dev/null)
+  if [ "$pn" != "" ]; then
+     kubectl exec $pn -n $ns -- cp -p /opt/zfs/${lb}bak/etc/passwd /etc/passwd
+     kubectl exec $pn -n $ns -- cp -p /opt/zfs/${lb}bak/etc/group /etc/group
+     kubectl exec $pn -n $ns -- cp -p /opt/zfs/${lb}bak/etc/shadow /etc/shadow
+     [ "$?" == "0" ] && echo "$lb /etc restore ok"
+     kubectl exec $pn -n $ns -- bash -c "unzip -o /opt/zfs/${lb}bak/${lb}.zip -d / &>/dev/null"
+     [ "$?" == "0" ] && echo "$lb /home restore ok"
+  fi  
+done

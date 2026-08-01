@@ -1,0 +1,287 @@
+#!/bin/bash
+
+if [ "$1" == "" ]; then
+   echo "kto <cluster name> [version]"
+   echo    
+   echo '[Cluster Name & Netwrok ID List]
+tk8s  -> 172.22.0.0/21
+tkbp  -> 172.22.8.0/21 
+tkdt  -> 172.22.16.0/21
+tkops -> 172.22.32.0/21
+tkdev -> 172.22.48.0/21
+tkha  -> 172.22.64.0/21'
+   echo
+   echo '[K8S Version List]
+1.31.14
+1.32.11
+1.33.12 
+1.34.8 
+1.35.5
+1.36.1'
+   echo
+   exit 1
+fi
+
+[ -d /opt/zfs/$1 ] && echo "$1 cluster exist" && exit 1
+
+export cn=${1}
+export HDIR=~
+[ "${2}" != "" ] && export KVER=${2}
+
+[ ! -f ~/tk/conf/${cn}.conf ] && echo "~/tk/conf/${cn}.conf not found" && exit 1
+source ~/tk/conf/${cn}.conf
+
+ans=$(echo "${KVER%.*} < 1.30" | bc)
+[ "$ans" == "1" ] && echo "Version ${KVER} not support" && exit 1 
+
+sw=$(swapon --show)
+[ "$sw" != "" ] && echo "pls turn off swapfile(/etc/fstab)" && exit 1
+
+read -p "Are you sure ? " yn
+[ "$yn" != "YES" ] && exit 1
+
+# install cni
+sudo rm -r ~/cni &>/dev/null
+mkdir -p ~/cni
+curl -sL "$(curl -sL https://api.github.com/repos/containernetworking/plugins/releases/latest | \
+jq -r '.assets[].browser_download_url' | grep 'linux-amd64.*.tgz$')" -o ~/cni-plugins.tgz &>/dev/null
+tar xf ~/cni-plugins.tgz -C ~/cni; rm ~/cni-plugins.tgz
+echo "[cni version]" && ~/cni/bridge --version && echo
+
+which kubectl &>/dev/null
+if [ "$?" != "0" ]; then
+   curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" &>/dev/null
+   chmod +x kubectl; sudo mv kubectl /usr/local/bin/
+   echo "kubectl ok"
+fi
+
+which cilium &>/dev/null
+if [ "$?" != "0" ]; then
+   curl -LO https://github.com/cilium/cilium-cli/releases/latest/download/cilium-linux-amd64.tar.gz &>/dev/null
+   sudo tar xzvfC cilium-linux-amd64.tar.gz /usr/local/bin
+   rm cilium-linux-amd64.tar.gz
+fi
+
+which kubeletctl &>/dev/null
+if [ "$?" != "0" ]; then
+   curl -LO https://github.com/cyberark/kubeletctl/releases/download/v1.13/kubeletctl_linux_amd64 &>/dev/null
+   chmod a+x ./kubeletctl_linux_amd64 && sudo mv ./kubeletctl_linux_amd64 /tmp/kubeletctl
+fi
+
+k=$(ps aux | grep -v "kto $1" | grep 'kto ' | grep -v grep)
+[ "$k" != "" ] && echo "pls wait '${k##*tk/bin/}' complete created" && exit 1
+
+if [ "$TKIND" == "K8S" ]; then
+
+   echo "[${cn}:${KVER} Cluster Infrastructure]"          
+   source ~/tk/bin/kcn ${cn} ${KVER}
+
+   # for Alpine Linux (Host OS)
+   ls -al /proc/sys/net/bridge/bridge-nf-call-iptables &>/dev/null
+   [ "$?" != "0" ] && sudo modprobe br_netfilter 
+
+   for n in ${LCTN}
+   do
+     tn=$(echo $n | cut -d ":" -f 2)
+
+     ans=$(echo "${KVER%.*} > 1.29" | bc)
+     cat /etc/os-release | grep 'Alpine Linux' &>/dev/null
+     if [[ "$?" == "0" || "$ans" == "1" ]]; then
+        sudo podman exec -it ${tn} update-alternatives --set iptables /usr/sbin/iptables-nft &>/dev/null
+        [ "$?" == "0" ] && echo "iptables-nft set ok"
+     fi 
+
+     sudo podman exec -it ${tn} sysctl -w net.ipv4.ip_forward=1 &>/dev/null
+     sudo podman exec ${tn} cp /usr/share/zoneinfo/Asia/Taipei /etc/localtime
+     sudo podman cp /tmp/kubeletctl ${tn}:/usr/local/bin/ &>/dev/null
+ 
+     if [ "$PROXY" != "" ]; then
+        sudo podman exec -it ${tn} systemctl set-environment HTTP_PROXY=http://$PROXY:3128
+        sudo podman exec -it ${tn} systemctl set-environment HTTPS_PROXY=http://$PROXY:3128
+        sudo podman exec -it ${tn} systemctl set-environment NO_PROXY=localhost,127.0.0.1,10.0.0.0/8,.${cn}.k8s
+        sudo podman exec -it ${tn} systemctl daemon-reload
+        sudo podman exec -it ${tn} systemctl restart containerd.service
+     fi
+   done
+
+   echo ""
+   echo "[${cn}:${KVER} Cluster]"
+
+   # api server audit log
+   sudo mkdir -p /opt/zfs/${cn}/logs/apiserver; sudo chmod -R 777 /opt/zfs/${cn}/logs/
+   sudo cp ~/tk/bin/audit-policy.yaml /opt/zfs/${cn}/logs/apiserver/
+
+   # kube-vip
+   export DNSIP=${SNID%.*}.10 
+   if [ "$KUBEVIP" != "" ]; then
+      cat ~/tk/bin/init-config-vip.yaml | envsubst | sudo tee /opt/zfs/${cn}/init-config.yaml &>/dev/null
+      cat ~/tk/bin/kube-vip.yaml | envsubst > /tmp/kube-vip.yaml
+      sudo podman cp /tmp/kube-vip.yaml ${cn}-control-plane:/etc/kubernetes/manifests/ &>/dev/null
+   else
+      cat ~/tk/bin/init-config-${KVER%.*}.yaml | envsubst | sudo tee /opt/zfs/${cn}/init-config.yaml &>/dev/null
+   fi
+   sudo cp ~/tk/bin/containerd-config.yaml /opt/zfs/${cn}/containerd-config.yaml
+
+   # --skip-phases=addon/kube-proxy
+   sudo podman exec -it ${cn}-control-plane bash -c "kubeadm init --config=/opt/zfs/init-config.yaml --ignore-preflight-errors=SystemVerification" &>/tmp/kubeadm.out
+   if [ "$?" == "0" ]; then
+      echo "${cn}-control-plane ok"
+      sleep 30
+
+      mkdir -p ~/.kube 
+      sudo podman cp ${cn}-control-plane:/etc/kubernetes/admin.conf ~/.kube/config
+      sudo chown $(id -u):$(id -g) ~/.kube/config
+      sudo cp ~/.kube/config /opt/zfs/${cn}/
+      sudo chmod 755 /opt/zfs/${cn}/config
+
+      if [ "$KUBEVIP" != "" ]; then
+         nc -w 1 $KUBEVIP 6443 &>/dev/null
+         [ "$?" != "0" ] && sleep 150
+         kubectl get nodes &>/dev/null
+         [ "$?" != "0" ] && echo "kube-vip exited" && exit 1
+         echo "kube-vip ok" 
+      fi
+
+      CNI=""
+      if [ "$K8SCNI" == "canal" ]; then   
+         kubectl get configmap kube-proxy -n kube-system -o yaml 2>/dev/null | \
+         sed 's/maxPerCore: null/maxPerCore: 0/g' | kubectl apply -f - &>/dev/null
+         sleep 10
+         kubectl wait -n kube-system pod -l k8s-app=kube-proxy --for=condition=Ready --timeout=120s
+         if [ "$?" == "0" ]; then
+            # ans=$(echo "${KVER%.*} < 1.30" | bc)
+            #if [ "$ans" == "1" ]; then
+            #   #curl -sL https://raw.githubusercontent.com/projectcalico/calico/v3.28.3/manifests/canal.yaml | kubectl apply -f - &>/dev/null
+            #   kubectl apply -f ~/tk/wulin/yaml/canal.3.28.3.yaml &>/tmp/canal.3.28.3.out
+            #else
+               curl -sL https://raw.githubusercontent.com/projectcalico/calico/v3.31.5/manifests/canal.yaml | kubectl apply -f - &>/tmp/canal.3.31.3.out
+            #fi
+            sleep 10
+            kubectl wait -n kube-system pod -l k8s-app=canal --for=condition=Ready --timeout=360s
+            CNI="ok"
+         fi 
+      fi
+      if [ "$K8SCNI" == "cilium" ]; then 
+         kubectl delete daemonset -n kube-system kube-proxy &>/dev/null
+
+	 # If you prefer Cilium to use the CIDRs already assigned to nodes by the Kubernetes Controller Manager, 
+	 # use the kubernetes IPAM mode: 
+         cilium install --version 1.19.3 --set cgroup.autoMount.enabled=false \
+                --set cgroup.hostRoot=/sys/fs/cgroup \
+                --set securityContext.privileged=true \
+                --set ipam.mode=kubernetes \
+                --set k8s.requireIPv4PodCIDR=true \
+                --set ipam.operator.clusterPoolIPv4MaskSize=24 &>/tmp/cilium1.19.3.out
+
+         cilium status --wait &>/tmp/cilium.status
+         CNI="ok"
+      fi
+
+      if [ "$CNI" == "ok" ]; then      
+         echo "$K8SCNI ok"
+         join=$(sudo podman exec -it "${cn}"-control-plane bash -c 'kubeadm token create --print-join-command' | tr -d '\r')
+         ignore='--ignore-preflight-errors=SystemVerification'
+         sudo podman ps > /tmp/${cn}-ctn.list
+
+         for nn in ${cn}-master1 ${cn}-worker1 ${cn}-worker2 ${cn}-worker3
+         do
+            cat /tmp/${cn}-ctn.list | grep ${nn} &>/dev/null
+            if [ "$?" == "0" ]; then
+               sudo podman exec -it ${nn} bash -c "$join $ignore" &>/tmp/${nn}.out
+               [ "$?" == "0" ] && echo "${nn} join ok" && kubectl label nodes ${nn} app=taroko &>/dev/null
+            fi
+         done
+
+         #kubectl label node ${cn}-worker1 node-role.kubernetes.io/taroko-worker= &>/dev/null
+         #kubectl label node ${cn}-worker2 node-role.kubernetes.io/taroko-gateway= &>/dev/null
+         kubectl taint node ${cn}-control-plane node-role.kubernetes.io/control-plane:NoSchedule- &>/dev/null
+
+         # patch coredns
+         kubectl patch deployment coredns -n kube-system --patch-file tk/bin/coredns.yaml &>/dev/null
+         [ "$?" == "0" ] && echo "coredns patch ok"
+
+         echo ""
+         echo "[${cn}:${KVER} Cluster Addon]"
+         # install gVisor & crun
+         ${HDIR}/tk/bin/deploy-rc.sh &>/dev/null
+         echo "gVisor & crun ok"
+
+         # install Metrics Server
+         [ -f /tmp/metrics.yaml ] && rm /tmp/metrics.yaml
+         curl -sL https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml \
+         | sed 's|15s|15s\n        - --kubelet-insecure-tls|g' > /tmp/metrics.yaml
+         kubectl apply -f /tmp/metrics.yaml &>/tmp/metrics.out
+         sleep 15
+         kubectl wait -n kube-system pod -l k8s-app=metrics-server --for=condition=Ready --timeout=360s
+
+         # install Local Path Provisioner
+         #kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.35/deploy/local-path-storage.yaml &>/dev/null
+         kubectl apply -f ~/tk/bin/local-path-storage.0.0.35.yaml &>/tmp/local-path-storage.0.0.35.out
+         [ "$?" == "0" ] && echo "Local Path Provisioner (/opt/zfs/storage) ok"
+
+         # install tkadm
+         kubectl create ns taroko &>/dev/null
+         sudo mkdir -p /opt/zfs/${cn}/{tkadm,users}
+         sudo chmod 777 -R /opt/zfs/${cn}
+         sudo cp -R ~/tk/wulin/wk/tkadm/k8suser /opt/zfs/${cn}/
+         cp ~/tk/wulin/bin/system.sh /opt/zfs/${cn}/tkadm/system.sh
+         cp ~/tk/wulin/bin/ash.init /opt/zfs/${cn}/tkadm/ash.init
+         echo ${cn} > /opt/zfs/${cn}/tkadm/cn.txt
+
+         cat ${HDIR}/tk/wulin/wk/tkadm/tkadm-dkreg.yaml | sed "s|k1|${cn}|g" | sed "s|10.98.0.10|${SNID%.*}.10|g" >/opt/zfs/${cn}/tkadm/tkadm.yaml 
+         kubectl apply -f /opt/zfs/${cn}/tkadm/tkadm.yaml &>/tmp/tkadm.out
+         sleep 60
+         kubectl wait -n taroko pod -l app=tkadm --for=condition=Ready --timeout=360s
+
+         ${HDIR}/tk/bin/kgw ${cn}
+         ${HDIR}/tk/bin/kns ${cn}
+
+         ver=$(sudo podman exec ${cn}-worker1 containerd -v | cut -d' ' -f3)
+         export CVER=${ver%%.*}
+
+         for n in ${LCTN}
+         do
+            tn=$(echo $n | cut -d ":" -f 2)
+            sudo podman cp $HDIR/tk/bin/containerd-config-${CVER}.yaml ${tn}:containerd-config.yaml
+            if [ "$CVER" == "v2" ]; then
+               sudo podman exec -it ${tn} mkdir -p /etc/containerd/certs.d/dkreg.taroko:5000
+               sudo podman cp $HDIR/tk/bin/containerd-hosts ${tn}:/etc/containerd/certs.d/dkreg.taroko:5000/hosts.toml
+            fi
+            sudo podman exec -it ${tn} bash -c "cat containerd-config.yaml >> /etc/containerd/config.toml"
+            sudo podman exec ${tn} systemctl restart containerd &>/dev/null
+            [ "$?" == "0"  ] && echo "${tn} systemctl restart containerd ok"
+
+            cat $HDIR/tk/wulin/bin/node.sh | envsubst '${SRVIP}'  > /opt/zfs/${cn}/node.sh
+            chmod +x /opt/zfs/${cn}/node.sh
+            sudo podman exec -it ${tn} /opt/zfs/node.sh
+         done
+
+         # create dkreg secret (default namespace)
+         kubectl create secret docker-registry dkreg --docker-server=dkreg.taroko:5000 --docker-username=bigred --docker-password=bigred -n default &>/dev/null
+         [ "$?" == "0" ] && echo "dkreg secret ok"
+         kubectl patch serviceaccount default -n default -p '{"imagePullSecrets": [{"name": "dkreg"}]}' &>/dev/null
+
+         # install prometheus & kube-state-metrics
+	 #if [ "$PROM" == "true" ]; then
+         #   sudo mkdir -p /opt/zfs/${cn}/prometheus/; sudo chmod 777 -R /opt/zfs/${cn}/prometheus/
+         #   kubectl kustomize ~/tk/wulin/wk/prometheus/ | envsubst | kubectl apply -f - &>/dev/null
+         #   [ "$?" == "0" ] && echo "Prometheus ok"
+         #   kubectl apply -k tk/wulin/wk/kube-state-metrics/ &>/dev/null
+         #   [ "$?" == "0" ] && echo "kube-state-metrics ok"       
+         #fi
+
+         rm .ssh/{known_hosts,known_hosts.old} &>/dev/null
+      
+         echo -e "\n${cn}: take office"
+      else
+         echo -e "\n${cn}: pls set K8SCNI variable"
+      fi
+   fi
+fi
+if [ "$TKIND" == "DIP" ]; then
+
+   echo "[${cn} Cluster Infrastructure]"
+   source ${HDIR}/tk/bin/kcn ${cn}
+
+   echo -e "\n${cn}: take office"
+fi
