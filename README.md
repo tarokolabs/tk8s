@@ -11,12 +11,13 @@
 | 元件 | 說明 |
 |---|---|
 | Kubernetes | 以 `kubeadm` 建置，節點為 privileged podman 容器 |
+| Container runtime | **CRI-O**（版本對齊 K8s minor；可切換 containerd）。節點 image `taroko.crio` 於首次使用時本地自動建置 |
 | CNI | **cilium**（預設 1.20.0，kube-proxy replacement 模式；可切換 canal） |
 | 負載平衡 | cilium LB-IPAM + L2 announcement——LoadBalancer IP 原生提供（節點網段 .200–.219） |
 | 儲存 | local-path-provisioner |
 | Gateway API | Envoy Gateway（GatewayClass `eg`；envoy 以 DaemonSet 部署，`externalTrafficPolicy: Local` 保留來源 IP；CRD 採 experimental channel，含 TCPRoute/UDPRoute） |
 | 管理主機 | tkadm，內含 kubectl / k9s / krew / task / skopeo / buildah，以及一個私有 container registry |
-| 容器 runtime 擴充 | gVisor、crun |
+| RuntimeClass | CRI-O 路徑：`crun`（套件原生）。containerd 路徑（`K8SCRI=containerd`）：另有 `gvisor`——gVisor 官方僅支援 containerd，不在 CRI-O 路徑提供；CRI-O 上的沙箱容器規劃採 Kata Containers |
 | 資源監控 | metrics-server（`kubectl top` 可用） |
 
 **不包含** Prometheus / Grafana 等監控工具、資料庫、物件儲存與應用工作負載——這些在 [wulin](https://github.com/tarokolabs/wulin)。MetalLB 與 ingress-nginx 也移列教材選配（LoadBalancer 與南北向入口已由 cilium LB-IPAM 與 Envoy Gateway 原生涵蓋）。
