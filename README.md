@@ -11,15 +11,15 @@
 | 元件 | 說明 |
 |---|---|
 | Kubernetes | 以 `kubeadm` 建置，節點為 privileged podman 容器 |
-| CNI | canal（可切換為 cilium） |
-| 負載平衡 | MetalLB |
+| CNI | **cilium**（預設 1.20.0，kube-proxy replacement 模式；可切換 canal） |
+| 負載平衡 | cilium LB-IPAM + L2 announcement——LoadBalancer IP 原生提供（節點網段 .200–.219） |
 | 儲存 | local-path-provisioner |
-| Gateway / Ingress | — |
+| Gateway API | Envoy Gateway（GatewayClass `eg`；envoy 以 DaemonSet 部署，`externalTrafficPolicy: Local` 保留來源 IP；CRD 採 experimental channel，含 TCPRoute/UDPRoute） |
 | 管理主機 | tkadm，內含 kubectl / k9s / krew / task / skopeo / buildah，以及一個私有 container registry |
 | 容器 runtime 擴充 | gVisor、crun |
 | 資源監控 | metrics-server（`kubectl top` 可用） |
 
-**不包含** Prometheus / Grafana 等監控工具、資料庫、物件儲存與應用工作負載——這些在 [wulin](https://github.com/tarokolabs/wulin)。
+**不包含** Prometheus / Grafana 等監控工具、資料庫、物件儲存與應用工作負載——這些在 [wulin](https://github.com/tarokolabs/wulin)。MetalLB 與 ingress-nginx 也移列教材選配（LoadBalancer 與南北向入口已由 cilium LB-IPAM 與 Envoy Gateway 原生涵蓋）。
 
 ## 架構
 
@@ -66,7 +66,7 @@ kto <叢集名稱> [K8s 版本]
 
 | 名稱 | 節點數 | 網段 | 預設 K8s 版本 |
 |---|---|---|---|
-| `tk8s` | 3 | `172.22.0.0/24` | 1.35.0 |
+| `tk8s` | 3 | `172.22.0.0/24` | 1.35.5 |
 | `tkbp` | 3 | `172.22.8.0/24` | 1.35.5 |
 | `tkdt` | 5 | `172.22.16.0/24` | 1.35.5 |
 | `tklh` | 3 | `172.22.16.0/24` | 1.35.5 |
