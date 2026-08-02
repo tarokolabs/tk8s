@@ -1,5 +1,5 @@
 ARG VER=00.00
-FROM quay.io/cloudwalker/alp.base
+FROM ghcr.io/tarokolabs/tk8s/toolbox:v2026.8.0
 
 # 管理帳號與私有 registry（dkreg）的認證。預設為教學帳密，正式環境以
 # build-arg 覆寫：
@@ -53,7 +53,7 @@ RUN apk update && apk upgrade && mkdir -p /lib/modules && mkdir -p /opt/www && \
     echo 'bigred:100000:65535' > /etc/subuid && echo 'bigred:100000:65535' > /etc/subgid && \
     echo 'rbean:200000:65535' >> /etc/subuid && echo 'rbean:200000:65535' >> /etc/subgid && \
     echo 'gbean:300000:65535' >> /etc/subuid && echo 'gbean:300000:65535' >> /etc/subgid && \
-    echo -e 'Welcome to Taroko K8S Console v25.12 (task,kubectl,mc,s3fs,regctl)\n' > /etc/motd && \
+    echo -e 'Welcome to Taroko K8S Console (task,kubectl,rclone,s3fs,regctl)\n' > /etc/motd && \
     rm /sbin/reboot && rm /usr/bin/killall
  
     # install task

@@ -1,21 +1,20 @@
 ARG VER=0.0
 FROM alpine:${VER}
-COPY mc ash.rc /usr/bin/
+COPY ash.rc /usr/bin/
 
 RUN apk update && apk upgrade && apk add --no-cache nano sudo wget curl python3 py3-pip mysql-client git \ 
     openssh-client-default nfs-utils go sshpass tree bash shadow procps bind-tools util-linux coreutils \
     binutils findutils grep tzdata libcap jq yq zip unzip fuse shellcheck iptables iperf3 stress-ng \
-    postgresql-client && \
+    postgresql-client s3fs-fuse mailcap rclone && \
 
     touch /usr/bin/ash.init /usr/bin/ash.service /usr/bin/ash.start && \
     passwd -dl root && \
 
     cp /usr/share/zoneinfo/Asia/Taipei /etc/localtime && \
 
-    # install s3fs-fuse
-    apk add s3fs-fuse --no-cache --repository http://dl-3.alpinelinux.org/alpine/edge/community/ --allow-untrusted && \
-    apk add mailcap --update-cache --repository http://dl-3.alpinelinux.org/alpine/edge/main/ --allow-untrusted && \
-    echo 'user_allow_other' >> /etc/fuse.conf 
+    # s3fs-fuse 與 mailcap 由 3.22 標準倉庫提供
+    # （原自 edge 安裝的作法已失效：edge 的 s3fs-fuse 需要新版 libfuse3）
+    echo 'user_allow_other' >> /etc/fuse.conf
     
     # install JuiceFS Client
     # curl -sSL https://d.juicefs.com/install | sh -

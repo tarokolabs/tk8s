@@ -55,3 +55,8 @@ wulin/ci-*/
 .DS_Store
 *.swp
 *~
+
+# 建置素材二進位不進版控（於建置時自官方來源下載）
+wulin/images/base/mc
+wulin/images/base/kube-linter
+wulin/images/base/rclone
