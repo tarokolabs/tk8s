@@ -260,7 +260,7 @@ if [ "$TKIND" == "K8S" ]; then
             helm template eg-crds oci://docker.io/envoyproxy/gateway-crds-helm --version ${EG_VER} \
                  --set crds.gatewayAPI.enabled=true \
                  --set crds.gatewayAPI.channel=${GWAPI_CHANNEL} \
-                 --set crds.envoyGateway.enabled=true 2>/tmp/eg-crds.err | kubectl apply --server-side -f - &>/tmp/eg-crds.out
+                 --set crds.envoyGateway.enabled=true 2>/dev/null | grep -vE "^(Pulled|Digest):" | kubectl apply --server-side -f - &>/tmp/eg-crds.out
             [ "$?" == "0" ] && echo "Gateway API CRD (${GWAPI_CHANNEL}) ok"
 
             helm install eg oci://docker.io/envoyproxy/gateway-helm --version ${EG_VER} \
