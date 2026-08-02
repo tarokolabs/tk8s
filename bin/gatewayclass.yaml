@@ -1,7 +1,13 @@
 # 平台預設的 GatewayClass，由 Envoy Gateway 實作
+# parametersRef 指向 bin/envoyproxy.yaml 的 EnvoyProxy（以 DaemonSet 部署 envoy）
 apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
 metadata:
   name: eg
 spec:
   controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: default
+    namespace: envoy-gateway-system

@@ -1,0 +1,19 @@
+# 平台預設的 EnvoyProxy 設定，由 GatewayClass eg 的 parametersRef 引用
+#
+# 以 DaemonSet 部署 envoy（Envoy Gateway 預設為 Deployment）：
+#   在 cilium 的 L2 announcement 下，持有 ARP lease 的節點與 envoy pod 所在
+#   節點不必然相同。若 envoy 是單一 Deployment，externalTrafficPolicy=Local
+#   會讓「持有 lease 但沒有本地 envoy」的節點丟棄外部流量——症狀是叢集內通、
+#   叢集外不通。
+#   改用 DaemonSet 讓每個節點都有本地 envoy，任一節點持有 lease 都有本地後端，
+#   因此可保留 externalTrafficPolicy=Local（來源 IP 不遺失）。
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: default
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyDaemonSet: {}

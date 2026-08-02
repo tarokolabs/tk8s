@@ -269,8 +269,10 @@ if [ "$TKIND" == "K8S" ]; then
                  --set kubernetesClusterDomain=${cn}.k8s &>/tmp/envoy-gateway.out
             kubectl wait -n envoy-gateway-system deployment/envoy-gateway --for=condition=Available --timeout=300s &>/dev/null
             if [ "$?" == "0" ]; then
+               # EnvoyProxy 需先於 GatewayClass 存在（GatewayClass 以 parametersRef 引用它）
+               kubectl apply -f ${HDIR}/tk/bin/envoyproxy.yaml &>/dev/null
                kubectl apply -f ${HDIR}/tk/bin/gatewayclass.yaml &>/dev/null
-               [ "$?" == "0" ] && echo "Envoy Gateway ${EG_VER} ok (GatewayClass: eg, domain: ${cn}.k8s)"
+               [ "$?" == "0" ] && echo "Envoy Gateway ${EG_VER} ok (GatewayClass: eg, DaemonSet, domain: ${cn}.k8s)"
             else
                echo "Envoy Gateway ${EG_VER} not ready (see /tmp/envoy-gateway.out)"
             fi
