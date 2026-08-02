@@ -83,10 +83,9 @@ kto <叢集名稱> [K8s 版本]
 
 ## 支援的 K8s 版本
 
-`bin/init-config-*.yaml` 提供各版本的 kubeadm 設定範本。實際可用範圍為 **1.31 – 1.35**。
+`bin/init-config-*.yaml` 提供各版本的 kubeadm 設定範本。支援範圍為 **1.31 – 1.36**（kubeadm 設定 API 皆為 `v1beta4`）。
 
-- 1.29 與 1.30 的範本雖然存在，但 `kto` 的版本檢查會擋掉 `< 1.30`
-- **1.36 尚未支援。** `kto` 的說明列出了 1.36.1，但對應的設定範本不存在，指定該版本會失敗。進度見 [#4](https://github.com/tarokolabs/tk8s/issues/4)
+CRI-O 的節點 image 依 K8s minor 版本於首次使用時自動建置，不需等待任何預建 image。
 
 ## 舊版
 
