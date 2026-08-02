@@ -1,0 +1,9 @@
+# CRI-O 路徑的 RuntimeClass。
+# crun 由 cri-o 套件原生提供（亦為其預設 runtime）。
+# gVisor 官方僅支援 containerd（K8SCRI=containerd 可用）；
+# CRI-O 上的沙箱容器官方路線是 Kata Containers——見 MicroVM 支援的規劃。
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: crun
+handler: crun

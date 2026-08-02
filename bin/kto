@@ -131,6 +131,12 @@ if [ "$TKIND" == "K8S" ]; then
    fi
    sudo cp ~/tk/bin/containerd-config.yaml /opt/zfs/${cn}/containerd-config.yaml
 
+   # CRI-O：init-config 的 criSocket 從 containerd 換成 crio
+   if [ "$K8SCRI" == "crio" ]; then
+      sudo sed -i 's#unix:///run/containerd/containerd.sock#unix:///var/run/crio/crio.sock#' /opt/zfs/${cn}/init-config.yaml
+      grep -q "crio.sock" /opt/zfs/${cn}/init-config.yaml && echo "criSocket -> crio ok"
+   fi
+
    # --skip-phases=addon/kube-proxy
    sudo podman exec -it ${cn}-control-plane bash -c "kubeadm init --config=/opt/zfs/init-config.yaml --ignore-preflight-errors=SystemVerification" &>/tmp/kubeadm.out
    if [ "$?" == "0" ]; then
@@ -225,13 +231,19 @@ if [ "$TKIND" == "K8S" ]; then
 
          echo ""
          echo "[${cn}:${KVER} Cluster Addon]"
-         # install gVisor & crun
-         ${HDIR}/tk/bin/deploy-rc.sh &>/dev/null
-         echo "gVisor & crun ok"
-
-         # 註冊對應的 RuntimeClass，讓 runtimeClassName: gvisor/crun 開箱可用
-         kubectl apply -f ${HDIR}/tk/bin/runtimeclass.yaml &>/dev/null
-         [ "$?" == "0" ] && echo "RuntimeClass gvisor & crun ok"
+         # RuntimeClass 依 runtime 分流：
+         # - crio：crun 由 cri-o 套件原生提供。gVisor 官方僅支援 containerd，
+         #   不在 crio 路徑硬掛；沙箱容器的官方路線是 Kata（另案規劃）
+         # - containerd：deploy-rc.sh 安裝 gVisor（官方 shim 掛法）與 crun
+         if [ "$K8SCRI" == "crio" ]; then
+            kubectl apply -f ${HDIR}/tk/bin/runtimeclass-crio.yaml &>/dev/null
+            [ "$?" == "0" ] && echo "RuntimeClass crun ok (gVisor: containerd only, see README)"
+         else
+            ${HDIR}/tk/bin/deploy-rc.sh &>/dev/null
+            echo "gVisor & crun ok"
+            kubectl apply -f ${HDIR}/tk/bin/runtimeclass-containerd.yaml &>/dev/null
+            [ "$?" == "0" ] && echo "RuntimeClass gvisor & crun ok"
+         fi
 
          # install Metrics Server
          [ -f /tmp/metrics.yaml ] && rm /tmp/metrics.yaml
@@ -295,20 +307,29 @@ if [ "$TKIND" == "K8S" ]; then
          ${HDIR}/tk/bin/kgw ${cn}
          ${HDIR}/tk/bin/kns ${cn}
 
-         ver=$(sudo podman exec ${cn}-worker1 containerd -v | cut -d' ' -f3)
-         export CVER=${ver%%.*}
+         if [ "$K8SCRI" != "crio" ]; then
+            ver=$(sudo podman exec ${cn}-worker1 containerd -v | cut -d' ' -f3)
+            export CVER=${ver%%.*}
+         fi
 
          for n in ${LCTN}
          do
             tn=$(echo $n | cut -d ":" -f 2)
-            sudo podman cp $HDIR/tk/bin/containerd-config-${CVER}.yaml ${tn}:containerd-config.yaml
-            if [ "$CVER" == "v2" ]; then
-               sudo podman exec -it ${tn} mkdir -p /etc/containerd/certs.d/dkreg.taroko:5000
-               sudo podman cp $HDIR/tk/bin/containerd-hosts ${tn}:/etc/containerd/certs.d/dkreg.taroko:5000/hosts.toml
+
+            if [ "$K8SCRI" == "crio" ]; then
+               # crio 不需要任何執行期設定：dkreg insecure registry、cgroup、
+               # CNI 路徑全都烤在 image 的 crio.conf.d/10-taroko.conf 裡
+               :
+            else
+               sudo podman cp $HDIR/tk/bin/containerd-config-${CVER}.yaml ${tn}:containerd-config.yaml
+               if [ "$CVER" == "v2" ]; then
+                  sudo podman exec -it ${tn} mkdir -p /etc/containerd/certs.d/dkreg.taroko:5000
+                  sudo podman cp $HDIR/tk/bin/containerd-hosts ${tn}:/etc/containerd/certs.d/dkreg.taroko:5000/hosts.toml
+               fi
+               sudo podman exec -it ${tn} bash -c "cat containerd-config.yaml >> /etc/containerd/config.toml"
+               sudo podman exec ${tn} systemctl restart containerd &>/dev/null
+               [ "$?" == "0"  ] && echo "${tn} systemctl restart containerd ok"
             fi
-            sudo podman exec -it ${tn} bash -c "cat containerd-config.yaml >> /etc/containerd/config.toml"
-            sudo podman exec ${tn} systemctl restart containerd &>/dev/null
-            [ "$?" == "0"  ] && echo "${tn} systemctl restart containerd ok"
 
             cat $HDIR/tk/wulin/bin/node.sh | envsubst '${SRVIP}'  > /opt/zfs/${cn}/node.sh
             chmod +x /opt/zfs/${cn}/node.sh
