@@ -70,6 +70,8 @@ if [ "$USER" == "bigred" ]; then
    sudo chmod u+s /usr/bin/newuidmap
    sudo chmod u+s /usr/bin/newgidmap
 
-   export PATH=/home/bigred/wulin/wk/dt/bin/:/home/bigred/wulin/wk/dip/bin/:$PATH
+   # 教材（wulin repo）掛載存在時才加入 PATH；未掛載時課程指令不可用但不報錯
+   [ -d /home/bigred/wulin/wk/dt/bin ]  && export PATH=/home/bigred/wulin/wk/dt/bin/:$PATH
+   [ -d /home/bigred/wulin/wk/dip/bin ] && export PATH=/home/bigred/wulin/wk/dip/bin/:$PATH
 fi
 
