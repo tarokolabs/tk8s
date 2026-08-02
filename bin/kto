@@ -231,13 +231,19 @@ if [ "$TKIND" == "K8S" ]; then
 
          echo ""
          echo "[${cn}:${KVER} Cluster Addon]"
-         # install gVisor & crun
-         ${HDIR}/tk/bin/deploy-rc.sh &>/dev/null
-         echo "gVisor & crun ok"
-
-         # 註冊對應的 RuntimeClass，讓 runtimeClassName: gvisor/crun 開箱可用
-         kubectl apply -f ${HDIR}/tk/bin/runtimeclass.yaml &>/dev/null
-         [ "$?" == "0" ] && echo "RuntimeClass gvisor & crun ok"
+         # RuntimeClass 依 runtime 分流：
+         # - crio：crun 由 cri-o 套件原生提供。gVisor 官方僅支援 containerd，
+         #   不在 crio 路徑硬掛；沙箱容器的官方路線是 Kata（另案規劃）
+         # - containerd：deploy-rc.sh 安裝 gVisor（官方 shim 掛法）與 crun
+         if [ "$K8SCRI" == "crio" ]; then
+            kubectl apply -f ${HDIR}/tk/bin/runtimeclass-crio.yaml &>/dev/null
+            [ "$?" == "0" ] && echo "RuntimeClass crun ok (gVisor: containerd only, see README)"
+         else
+            ${HDIR}/tk/bin/deploy-rc.sh &>/dev/null
+            echo "gVisor & crun ok"
+            kubectl apply -f ${HDIR}/tk/bin/runtimeclass-containerd.yaml &>/dev/null
+            [ "$?" == "0" ] && echo "RuntimeClass gvisor & crun ok"
+         fi
 
          # install Metrics Server
          [ -f /tmp/metrics.yaml ] && rm /tmp/metrics.yaml
@@ -311,23 +317,9 @@ if [ "$TKIND" == "K8S" ]; then
             tn=$(echo $n | cut -d ":" -f 2)
 
             if [ "$K8SCRI" == "crio" ]; then
-               # dkreg 的 insecure registry 已烤在 image 的 10-taroko.conf；
-               # 這裡只補 gVisor 的 runtime handler（runsc 二進位由 deploy-rc.sh 裝好）。
-               # monitor_path 不可省：crio 對每個 runtime 各自解析 conmon 位置，
-               # 缺了會在 $PATH 找不到 conmon 而整個拒絕啟動（不是只壞 runsc）
-               cat > /tmp/20-runsc.conf <<'RUNSC'
-[crio.runtime.runtimes.runsc]
-runtime_path = "/usr/local/bin/runsc"
-runtime_root = "/run/runsc"
-monitor_path = "/usr/libexec/crio/conmon"
-RUNSC
-               sudo podman cp /tmp/20-runsc.conf ${tn}:/etc/crio/crio.conf.d/20-runsc.conf
-               sudo podman exec ${tn} systemctl restart crio &>/dev/null
-               if [ "$(sudo podman exec ${tn} systemctl is-active crio)" == "active" ]; then
-                  echo "${tn} systemctl restart crio ok"
-               else
-                  echo "${tn} crio FAILED to restart -- node will go NotReady, check: podman exec ${tn} journalctl -u crio -n 20"
-               fi
+               # crio 不需要任何執行期設定：dkreg insecure registry、cgroup、
+               # CNI 路徑全都烤在 image 的 crio.conf.d/10-taroko.conf 裡
+               :
             else
                sudo podman cp $HDIR/tk/bin/containerd-config-${CVER}.yaml ${tn}:containerd-config.yaml
                if [ "$CVER" == "v2" ]; then
