@@ -1,0 +1,19 @@
+# cilium 的 LoadBalancer IP 池與 L2 對外公告
+# LBNET 由 kto 以 envsubst 帶入（節點網段前三組，例如 172.22.0）
+# 池範圍 .200-.219 避開節點 IP（LCTN 慣例用低位）與閘道（.254）
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: default-pool
+spec:
+  blocks:
+  - start: ${LBNET}.200
+    stop: ${LBNET}.219
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: default-l2
+spec:
+  loadBalancerIPs: true
+  externalIPs: true

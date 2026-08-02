@@ -161,19 +161,33 @@ if [ "$TKIND" == "K8S" ]; then
             CNI="ok"
          fi 
       fi
-      if [ "$K8SCNI" == "cilium" ]; then 
+      if [ "$K8SCNI" == "cilium" ]; then
          kubectl delete daemonset -n kube-system kube-proxy &>/dev/null
 
-	 # If you prefer Cilium to use the CIDRs already assigned to nodes by the Kubernetes Controller Manager, 
-	 # use the kubernetes IPAM mode: 
-         cilium install --version 1.19.3 --set cgroup.autoMount.enabled=false \
+	 # If you prefer Cilium to use the CIDRs already assigned to nodes by the Kubernetes Controller Manager,
+	 # use the kubernetes IPAM mode:
+         # kube-proxy 已刪除，kubeProxyReplacement 為必要，並需明確指向 apiserver（SRVIP 來自 conf）
+         # l2announcements 讓 LoadBalancer IP 可從叢集外（主機側）到達
+         export CILIUM_VER=${CILIUM_VER:-1.20.0}
+         cilium install --version ${CILIUM_VER} --set cgroup.autoMount.enabled=false \
                 --set cgroup.hostRoot=/sys/fs/cgroup \
                 --set securityContext.privileged=true \
                 --set ipam.mode=kubernetes \
                 --set k8s.requireIPv4PodCIDR=true \
-                --set ipam.operator.clusterPoolIPv4MaskSize=24 &>/tmp/cilium1.19.3.out
+                --set ipam.operator.clusterPoolIPv4MaskSize=24 \
+                --set kubeProxyReplacement=true \
+                --set k8sServiceHost=${SRVIP} \
+                --set k8sServicePort=6443 \
+                --set l2announcements.enabled=true &>/tmp/cilium${CILIUM_VER}.out
 
          cilium status --wait &>/tmp/cilium.status
+         [ "$?" == "0" ] && echo "cilium ${CILIUM_VER} ok"
+
+         # LoadBalancer IP 池與 L2 對外公告（取節點網段 .200-.219，避開節點 IP 與閘道）
+         export LBNET=${NID%.*}
+         cat ${HDIR}/tk/bin/cilium-lb.yaml | envsubst '${LBNET}' | kubectl apply -f - &>/tmp/cilium-lb.out
+         [ "$?" == "0" ] && echo "cilium LB-IPAM (${LBNET}.200-219) ok"
+
          CNI="ok"
       fi
 
@@ -222,6 +236,20 @@ if [ "$TKIND" == "K8S" ]; then
          #kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.35/deploy/local-path-storage.yaml &>/dev/null
          kubectl apply -f ~/tk/bin/local-path-storage.0.0.35.yaml &>/tmp/local-path-storage.0.0.35.out
          [ "$?" == "0" ] && echo "Local Path Provisioner (/opt/zfs/storage) ok"
+
+         # install Envoy Gateway（Gateway API 實作；LoadBalancer IP 由 cilium LB-IPAM 提供，
+         # 故僅在 cilium 路徑安裝。install.yaml 自帶 Gateway API CRD）
+         if [ "$K8SCNI" == "cilium" ]; then
+            export EG_VER=${EG_VER:-v1.8.3}
+            kubectl apply --server-side -f https://github.com/envoyproxy/gateway/releases/download/${EG_VER}/install.yaml &>/tmp/envoy-gateway.out
+            kubectl wait -n envoy-gateway-system deployment/envoy-gateway --for=condition=Available --timeout=300s &>/dev/null
+            if [ "$?" == "0" ]; then
+               kubectl apply -f ${HDIR}/tk/bin/gatewayclass.yaml &>/dev/null
+               [ "$?" == "0" ] && echo "Envoy Gateway ${EG_VER} ok (GatewayClass: eg)"
+            else
+               echo "Envoy Gateway ${EG_VER} not ready (see /tmp/envoy-gateway.out)"
+            fi
+         fi
 
          # install tkadm
          kubectl create ns taroko &>/dev/null
