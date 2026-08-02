@@ -10,6 +10,15 @@ export HDIR=~
 source ~/tk/conf/${cn}.conf
 ([ "$LCTN" == "" ] || [ "$TKIND" == "" ] || [ "$NTP" == "" ]) && echo "~/tk/conf/${cn}.conf error" && exit 1
 
+# 教材（wulin repo）的掛載來源，掛進每個節點的 /opt/wulin
+# 未設定 WULIN_DIR 時預設 ~/wulin；目錄不存在則建立空目錄並提示
+export WULIN_DIR="${WULIN_DIR:-$HOME/wulin}"
+if [ ! -d "$WULIN_DIR" ]; then
+   echo "WULIN_DIR ($WULIN_DIR) not found: labs unavailable"
+   echo "  git clone https://github.com/tarokolabs/wulin.git $WULIN_DIR"
+   mkdir -p "$WULIN_DIR"
+fi
+
 # install cni
 if [ ! -d ~/cni ]; then
    mkdir -p ~/cni
@@ -57,7 +66,7 @@ case "$NTP" in
          --volume /lib/modules:/lib/modules:ro \
          --volume ${controlVolume}:/var:suid,exec,dev,rbind \
          --volume /opt/zfs/${cn}:/opt/zfs \
-         --volume ${HDIR}/tk/wulin:/opt/wulin \
+         --volume ${WULIN_DIR}:/opt/wulin \
          --cgroupns=private \
          $IMG bash &>/tmp/${ctn}.out
          [ "$?" != "0" ] && echo "${ctn} container created error" && exit 1
@@ -90,7 +99,7 @@ case "$NTP" in
          --volume /lib/modules:/lib/modules:ro \
          --volume ${controlVolume}:/var:suid,exec,dev,rbind \
          --volume /opt/zfs/${cn}:/opt/zfs \
-         --volume ${HDIR}/tk/wulin:/opt/wulin \
+         --volume ${WULIN_DIR}:/opt/wulin \
          --cgroupns=private \
          $IMG bash &>/dev/null
          [ "$?" == "0" ] && echo -n "${ctn} container created"

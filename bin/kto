@@ -206,6 +206,10 @@ if [ "$TKIND" == "K8S" ]; then
          ${HDIR}/tk/bin/deploy-rc.sh &>/dev/null
          echo "gVisor & crun ok"
 
+         # 註冊對應的 RuntimeClass，讓 runtimeClassName: gvisor/crun 開箱可用
+         kubectl apply -f ${HDIR}/tk/bin/runtimeclass.yaml &>/dev/null
+         [ "$?" == "0" ] && echo "RuntimeClass gvisor & crun ok"
+
          # install Metrics Server
          [ -f /tmp/metrics.yaml ] && rm /tmp/metrics.yaml
          curl -sL https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml \
