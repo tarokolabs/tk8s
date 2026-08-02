@@ -19,6 +19,22 @@ if [ ! -d "$WULIN_DIR" ]; then
    mkdir -p "$WULIN_DIR"
 fi
 
+# CRI-O 節點 image：本地不存在就自動建置
+# 基底 kindest/node 可公開拉取，全新環境不依賴任何私有 registry
+if [ "${IMG%%:*}" == "localhost/taroko.crio" ]; then
+   sudo podman image exists ${IMG} &>/dev/null
+   if [ "$?" != "0" ]; then
+      echo "building ${IMG} (first build for this K8s version, takes a few minutes)"
+      sudo podman build --build-arg VER=${KVER} --force-rm -t ${IMG} ~/tk/wulin/images/taroko.crio &>/tmp/taroko.crio-build.out
+      [ "$?" != "0" ] && echo "${IMG} build failed (see /tmp/taroko.crio-build.out)" && exit 1
+      echo "${IMG} build ok"
+   fi
+fi
+
+# 共用唯讀 image store：主機上有才掛（見 wulin/images/taroko.crio/storage.conf）
+SHARED_STORE=""
+[ -d /opt/zfs/images/base ] && SHARED_STORE="--volume /opt/zfs/images/base:/var/lib/shared:ro"
+
 # install cni
 if [ ! -d ~/cni ]; then
    mkdir -p ~/cni
@@ -67,6 +83,7 @@ case "$NTP" in
          --volume ${controlVolume}:/var:suid,exec,dev,rbind \
          --volume /opt/zfs/${cn}:/opt/zfs \
          --volume ${WULIN_DIR}:/opt/wulin \
+         ${SHARED_STORE} \
          --cgroupns=private \
          $IMG bash &>/tmp/${ctn}.out
          [ "$?" != "0" ] && echo "${ctn} container created error" && exit 1
@@ -100,6 +117,7 @@ case "$NTP" in
          --volume ${controlVolume}:/var:suid,exec,dev,rbind \
          --volume /opt/zfs/${cn}:/opt/zfs \
          --volume ${WULIN_DIR}:/opt/wulin \
+         ${SHARED_STORE} \
          --cgroupns=private \
          $IMG bash &>/dev/null
          [ "$?" == "0" ] && echo -n "${ctn} container created"

@@ -131,6 +131,12 @@ if [ "$TKIND" == "K8S" ]; then
    fi
    sudo cp ~/tk/bin/containerd-config.yaml /opt/zfs/${cn}/containerd-config.yaml
 
+   # CRI-O：init-config 的 criSocket 從 containerd 換成 crio
+   if [ "$K8SCRI" == "crio" ]; then
+      sudo sed -i 's#unix:///run/containerd/containerd.sock#unix:///var/run/crio/crio.sock#' /opt/zfs/${cn}/init-config.yaml
+      grep -q "crio.sock" /opt/zfs/${cn}/init-config.yaml && echo "criSocket -> crio ok"
+   fi
+
    # --skip-phases=addon/kube-proxy
    sudo podman exec -it ${cn}-control-plane bash -c "kubeadm init --config=/opt/zfs/init-config.yaml --ignore-preflight-errors=SystemVerification" &>/tmp/kubeadm.out
    if [ "$?" == "0" ]; then
@@ -295,20 +301,31 @@ if [ "$TKIND" == "K8S" ]; then
          ${HDIR}/tk/bin/kgw ${cn}
          ${HDIR}/tk/bin/kns ${cn}
 
-         ver=$(sudo podman exec ${cn}-worker1 containerd -v | cut -d' ' -f3)
-         export CVER=${ver%%.*}
+         if [ "$K8SCRI" != "crio" ]; then
+            ver=$(sudo podman exec ${cn}-worker1 containerd -v | cut -d' ' -f3)
+            export CVER=${ver%%.*}
+         fi
 
          for n in ${LCTN}
          do
             tn=$(echo $n | cut -d ":" -f 2)
-            sudo podman cp $HDIR/tk/bin/containerd-config-${CVER}.yaml ${tn}:containerd-config.yaml
-            if [ "$CVER" == "v2" ]; then
-               sudo podman exec -it ${tn} mkdir -p /etc/containerd/certs.d/dkreg.taroko:5000
-               sudo podman cp $HDIR/tk/bin/containerd-hosts ${tn}:/etc/containerd/certs.d/dkreg.taroko:5000/hosts.toml
+
+            if [ "$K8SCRI" == "crio" ]; then
+               # dkreg 的 insecure registry 已烤在 image 的 10-taroko.conf；
+               # 這裡只補 gVisor 的 runtime handler（runsc 二進位由 deploy-rc.sh 裝好）
+               sudo podman exec ${tn} bash -c "printf '[crio.runtime.runtimes.runsc]\nruntime_path = \"/usr/local/bin/runsc\"\n' > /etc/crio/crio.conf.d/20-runsc.conf"
+               sudo podman exec ${tn} systemctl restart crio &>/dev/null
+               [ "$?" == "0" ] && echo "${tn} systemctl restart crio ok"
+            else
+               sudo podman cp $HDIR/tk/bin/containerd-config-${CVER}.yaml ${tn}:containerd-config.yaml
+               if [ "$CVER" == "v2" ]; then
+                  sudo podman exec -it ${tn} mkdir -p /etc/containerd/certs.d/dkreg.taroko:5000
+                  sudo podman cp $HDIR/tk/bin/containerd-hosts ${tn}:/etc/containerd/certs.d/dkreg.taroko:5000/hosts.toml
+               fi
+               sudo podman exec -it ${tn} bash -c "cat containerd-config.yaml >> /etc/containerd/config.toml"
+               sudo podman exec ${tn} systemctl restart containerd &>/dev/null
+               [ "$?" == "0"  ] && echo "${tn} systemctl restart containerd ok"
             fi
-            sudo podman exec -it ${tn} bash -c "cat containerd-config.yaml >> /etc/containerd/config.toml"
-            sudo podman exec ${tn} systemctl restart containerd &>/dev/null
-            [ "$?" == "0"  ] && echo "${tn} systemctl restart containerd ok"
 
             cat $HDIR/tk/wulin/bin/node.sh | envsubst '${SRVIP}'  > /opt/zfs/${cn}/node.sh
             chmod +x /opt/zfs/${cn}/node.sh
