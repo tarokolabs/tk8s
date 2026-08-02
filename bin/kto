@@ -3,13 +3,16 @@
 if [ "$1" == "" ]; then
    echo "kto <cluster name> [version]"
    echo    
-   echo '[Cluster Name & Netwrok ID List]
-tk8s  -> 172.22.0.0/21
-tkbp  -> 172.22.8.0/21 
-tkdt  -> 172.22.16.0/21
-tkops -> 172.22.32.0/21
-tkdev -> 172.22.48.0/21
-tkha  -> 172.22.64.0/21'
+   echo '[Cluster Name & Network ID List]
+tk8s  -> 172.22.0.0/24
+tkbp  -> 172.22.8.0/24
+tkdt  -> 172.22.16.0/24  (與 tklh 同網段，不可同時存在)
+tklh  -> 172.22.16.0/24
+tkops -> 172.22.24.0/24
+tkdev -> 172.22.32.0/24
+tkha  -> 172.22.64.0/24
+tdcs1 -> 172.22.160.0/24 (與 lkh5 同網段，不可同時存在)
+lkh5  -> 172.22.160.0/24'
    echo
    echo '[K8S Version List]
 1.31.14
