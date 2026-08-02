@@ -101,7 +101,7 @@ spec:
      hostname: tkadm
      containers:
      - name: tkadm
-       image: quay.io/cloudwalker/alp.tkadm
+       image: ghcr.io/tarokolabs/tk8s/admin:v2026.8.0
 #       imagePullPolicy: Always
        imagePullPolicy: IfNotPresent
        tty: true
@@ -146,7 +146,7 @@ spec:
              fieldPath: status.hostIP
        securityContext:
          privileged: true
-     - image: quay.io/cloudwalker/registry:3
+     - image: docker.io/library/registry:3
        imagePullPolicy: IfNotPresent
        name: dkreg
        ports:

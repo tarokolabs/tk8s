@@ -11,7 +11,7 @@
 | 元件 | 說明 |
 |---|---|
 | Kubernetes | 以 `kubeadm` 建置，節點為 privileged podman 容器 |
-| Container runtime | **CRI-O**（版本對齊 K8s minor；可切換 containerd）。節點 image `taroko.crio` 於首次使用時本地自動建置 |
+| Container runtime | **CRI-O**（版本對齊 K8s minor；可切換 containerd）。節點 image 自 GHCR 拉取，拉不到時本地自動建置 |
 | CNI | **cilium**（預設 1.20.0，kube-proxy replacement 模式；可切換 canal） |
 | 負載平衡 | cilium LB-IPAM + L2 announcement——LoadBalancer IP 原生提供（節點網段 .200–.219） |
 | 儲存 | local-path-provisioner |
@@ -26,7 +26,7 @@
 
 不是 kind。`bin/kcn` 直接用 podman 建立一個 bridge 網路，再為每個節點建立一個 privileged 容器（固定 IP、限定 CPU 與記憶體）；`bin/kto` 接著在 control-plane 容器內執行 `kubeadm init`，其餘節點以 `kubeadm join` 加入。
 
-節點 image 為 `quay.io/cloudwalker/taroko:v<K8s 版本>`。
+節點 image 為 `ghcr.io/tarokolabs/tk8s/node/<runtime>:v<K8s 版本>`（`crio` 或 `containerd`，依 conf 的 `K8SCRI` 自動對應）。拉取不到時（離線、或該版本未發佈），`kcn` 會以 repo 內的同名配方本地建置。
 
 ## 需求
 
@@ -85,7 +85,7 @@ kto <叢集名稱> [K8s 版本]
 
 `bin/init-config-*.yaml` 提供各版本的 kubeadm 設定範本。支援範圍為 **1.31 – 1.36**（kubeadm 設定 API 皆為 `v1beta4`）。
 
-CRI-O 的節點 image 依 K8s minor 版本於首次使用時自動建置，不需等待任何預建 image。
+節點 image 依 K8s 版本自 `ghcr.io/tarokolabs/tk8s/node/<runtime>` 拉取；未發佈的版本會於首次使用時以 repo 內配方本地建置，不依賴任何私有 registry。
 
 ## 舊版
 

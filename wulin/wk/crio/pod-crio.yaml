@@ -6,7 +6,7 @@ spec:
   runtimeClassName: crioclass
   containers:
   - name: mybase
-    image: quay.io/cloudwalker/alp.base
+    image: ghcr.io/tarokolabs/tk8s/toolbox:v2026.8.0
     imagePullPolicy: IfNotPresent
   nodeSelector:
     kubernetes.io/hostname : c30-control-plane

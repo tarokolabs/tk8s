@@ -6,6 +6,6 @@ spec:
   runtimeClassName: gvisor
   containers:
   - name: base
-    image: quay.io/cloudwalker/alp.base
+    image: ghcr.io/tarokolabs/tk8s/toolbox:v2026.8.0
   nodeSelector:
     kubernetes.io/hostname : c30-control-plane

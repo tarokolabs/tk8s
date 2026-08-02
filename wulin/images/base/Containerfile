@@ -1,12 +1,17 @@
 ARG VER=0.0
 FROM alpine:${VER}
-COPY mc ash.rc /usr/bin/
+COPY ash.rc /usr/bin/
+
+# minio client：建置時自官方釘版下載（原 COPY 的二進位不再進版控）
+ARG MC_RELEASE=RELEASE.2025-08-13T08-35-41Z
+ADD https://dl.min.io/client/mc/release/linux-amd64/archive/mc.${MC_RELEASE} /usr/bin/mc
 
 RUN apk update && apk upgrade && apk add --no-cache nano sudo wget curl python3 py3-pip mysql-client git \ 
     openssh-client-default nfs-utils go sshpass tree bash shadow procps bind-tools util-linux coreutils \
     binutils findutils grep tzdata libcap jq yq zip unzip fuse shellcheck iptables iperf3 stress-ng \
     postgresql-client && \
 
+    chmod +x /usr/bin/mc && \
     touch /usr/bin/ash.init /usr/bin/ash.service /usr/bin/ash.start && \
     passwd -dl root && \
 

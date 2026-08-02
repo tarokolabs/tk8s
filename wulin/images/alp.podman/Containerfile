@@ -1,4 +1,4 @@
-FROM quay.io/cloudwalker/alp.base
+FROM ghcr.io/tarokolabs/tk8s/toolbox:v2026.8.0
 
 # containers.conf  - The container engine (podman, buildah) configuration file specifies
 # default configuration options and command-line flags for container engines.

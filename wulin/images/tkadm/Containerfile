@@ -1,5 +1,5 @@
 ARG VER=00.00
-FROM quay.io/cloudwalker/alp.base
+FROM ghcr.io/tarokolabs/tk8s/toolbox:v2026.8.0
 
 # 管理帳號與私有 registry（dkreg）的認證。預設為教學帳密，正式環境以
 # build-arg 覆寫：

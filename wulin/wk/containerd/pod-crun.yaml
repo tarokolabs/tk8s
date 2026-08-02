@@ -6,6 +6,6 @@ spec:
   runtimeClassName: crun
   containers:
   - name: nginx
-    image: quay.io/cloudwalker/nginx
+    image: docker.io/library/nginx
   nodeSelector:
     kubernetes.io/hostname : c31-control-plane

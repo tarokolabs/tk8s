@@ -1,5 +1,5 @@
 ARG VER=0.0
-FROM quay.io/cloudwalker/alp.base
+FROM ghcr.io/tarokolabs/tk8s/toolbox:v2026.8.0
 RUN apk update && apk upgrade && \
     apk add --no-cache openssh-server tzdata && \
     # 設定時區
