@@ -62,6 +62,15 @@ if [ "$?" != "0" ]; then
    rm cilium-linux-amd64.tar.gz
 fi
 
+which helm &>/dev/null
+if [ "$?" != "0" ]; then
+   export HELM_VER=${HELM_VER:-v4.2.3}
+   curl -sL https://get.helm.sh/helm-${HELM_VER}-linux-amd64.tar.gz -o /tmp/helm.tgz &>/dev/null
+   sudo tar xzf /tmp/helm.tgz -C /usr/local/bin --strip-components=1 linux-amd64/helm
+   rm /tmp/helm.tgz
+   [ -x /usr/local/bin/helm ] && echo "helm ${HELM_VER} ok"
+fi
+
 which kubeletctl &>/dev/null
 if [ "$?" != "0" ]; then
    curl -LO https://github.com/cyberark/kubeletctl/releases/download/v1.13/kubeletctl_linux_amd64 &>/dev/null
@@ -238,14 +247,30 @@ if [ "$TKIND" == "K8S" ]; then
          [ "$?" == "0" ] && echo "Local Path Provisioner (/opt/zfs/storage) ok"
 
          # install Envoy Gateway（Gateway API 實作；LoadBalancer IP 由 cilium LB-IPAM 提供，
-         # 故僅在 cilium 路徑安裝。install.yaml 自帶 Gateway API CRD）
+         # 故僅在 cilium 路徑安裝）
+         # - CRD 由專用的 gateway-crds-helm 管理，channel 可選（預設 experimental，
+         #   含 TCPRoute/UDPRoute/TLSRoute）
+         # - 本叢集的 DNS 網域是 ${cn}.k8s 而非 cluster.local，必須以
+         #   kubernetesClusterDomain 告知 EG，否則 envoy 的 xDS bootstrap 會寫死
+         #   cluster.local 導致 proxy 永遠起不來
          if [ "$K8SCNI" == "cilium" ]; then
             export EG_VER=${EG_VER:-v1.8.3}
-            kubectl apply --server-side -f https://github.com/envoyproxy/gateway/releases/download/${EG_VER}/install.yaml &>/tmp/envoy-gateway.out
+            export GWAPI_CHANNEL=${GWAPI_CHANNEL:-experimental}
+
+            helm template eg-crds oci://docker.io/envoyproxy/gateway-crds-helm --version ${EG_VER} \
+                 --set crds.gatewayAPI.enabled=true \
+                 --set crds.gatewayAPI.channel=${GWAPI_CHANNEL} \
+                 --set crds.envoyGateway.enabled=true 2>/tmp/eg-crds.err | kubectl apply --server-side -f - &>/tmp/eg-crds.out
+            [ "$?" == "0" ] && echo "Gateway API CRD (${GWAPI_CHANNEL}) ok"
+
+            helm install eg oci://docker.io/envoyproxy/gateway-helm --version ${EG_VER} \
+                 -n envoy-gateway-system --create-namespace \
+                 --set crds.enabled=false \
+                 --set kubernetesClusterDomain=${cn}.k8s &>/tmp/envoy-gateway.out
             kubectl wait -n envoy-gateway-system deployment/envoy-gateway --for=condition=Available --timeout=300s &>/dev/null
             if [ "$?" == "0" ]; then
                kubectl apply -f ${HDIR}/tk/bin/gatewayclass.yaml &>/dev/null
-               [ "$?" == "0" ] && echo "Envoy Gateway ${EG_VER} ok (GatewayClass: eg)"
+               [ "$?" == "0" ] && echo "Envoy Gateway ${EG_VER} ok (GatewayClass: eg, domain: ${cn}.k8s)"
             else
                echo "Envoy Gateway ${EG_VER} not ready (see /tmp/envoy-gateway.out)"
             fi
