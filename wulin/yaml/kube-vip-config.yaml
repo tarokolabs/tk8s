@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: kube-vip
-  namespace: kube-system
-data:
-  range-global: 172.22.0.150-172.22.0.180
