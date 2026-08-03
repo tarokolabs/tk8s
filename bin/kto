@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 
 if [ "$1" == "" ]; then
    echo "kto <cluster name> [version]"
@@ -25,14 +26,13 @@ lkh5  -> 172.22.160.0/24'
    exit 1
 fi
 
-[ -d /opt/zfs/$1 ] && echo "$1 cluster exist" && exit 1
+[ -d ${CLUSTERS_DIR}/$1 ] && echo "$1 cluster exist" && exit 1
 
 export cn=${1}
-export HDIR=~
 [ "${2}" != "" ] && export KVER=${2}
 
-[ ! -f ~/tk/conf/${cn}.conf ] && echo "~/tk/conf/${cn}.conf not found" && exit 1
-source ~/tk/conf/${cn}.conf
+[ ! -f ${TK_HOME}/conf/${cn}.conf ] && echo "${TK_HOME}/conf/${cn}.conf not found" && exit 1
+source ${TK_HOME}/conf/${cn}.conf
 
 ans=$(echo "${KVER%.*} < 1.30" | bc)
 [ "$ans" == "1" ] && echo "Version ${KVER} not support" && exit 1 
@@ -44,12 +44,12 @@ read -p "Are you sure ? " yn
 [ "$yn" != "YES" ] && exit 1
 
 # install cni
-sudo rm -r ~/cni &>/dev/null
-mkdir -p ~/cni
+sudo rm -r ${CNI_DIR} &>/dev/null
+sudo mkdir -p ${CNI_DIR} && sudo chown $(id -un) ${CNI_DIR}
 curl -sL "$(curl -sL https://api.github.com/repos/containernetworking/plugins/releases/latest | \
-jq -r '.assets[].browser_download_url' | grep 'linux-amd64.*.tgz$')" -o ~/cni-plugins.tgz &>/dev/null
-tar xf ~/cni-plugins.tgz -C ~/cni; rm ~/cni-plugins.tgz
-echo "[cni version]" && ~/cni/bridge --version && echo
+jq -r '.assets[].browser_download_url' | grep 'linux-amd64.*.tgz$')" -o /tmp/cni-plugins.tgz &>/dev/null
+tar xf /tmp/cni-plugins.tgz -C ${CNI_DIR}; rm /tmp/cni-plugins.tgz
+echo "[cni version]" && ${CNI_DIR}/bridge --version && echo
 
 which kubectl &>/dev/null
 if [ "$?" != "0" ]; then
@@ -81,12 +81,12 @@ if [ "$?" != "0" ]; then
 fi
 
 k=$(ps aux | grep -v "kto $1" | grep 'kto ' | grep -v grep)
-[ "$k" != "" ] && echo "pls wait '${k##*tk/bin/}' complete created" && exit 1
+[ "$k" != "" ] && echo "pls wait another kto run to complete" && exit 1
 
 if [ "$TKIND" == "K8S" ]; then
 
    echo "[${cn}:${KVER} Cluster Infrastructure]"          
-   source ~/tk/bin/kcn ${cn} ${KVER}
+   source ${TK_HOME}/bin/kcn ${cn} ${KVER}
 
    # for Alpine Linux (Host OS)
    ls -al /proc/sys/net/bridge/bridge-nf-call-iptables &>/dev/null
@@ -120,28 +120,28 @@ if [ "$TKIND" == "K8S" ]; then
    echo "[${cn}:${KVER} Cluster]"
 
    # api server audit log
-   sudo mkdir -p /opt/zfs/${cn}/logs/apiserver; sudo chmod -R 777 /opt/zfs/${cn}/logs/
-   sudo cp ~/tk/bin/audit-policy.yaml /opt/zfs/${cn}/logs/apiserver/
+   sudo mkdir -p ${CLUSTERS_DIR}/${cn}/logs/apiserver; sudo chmod -R 777 ${CLUSTERS_DIR}/${cn}/logs/
+   sudo cp ${TK_HOME}/manifests/audit-policy.yaml ${CLUSTERS_DIR}/${cn}/logs/apiserver/
 
    # kube-vip
    export DNSIP=${SNID%.*}.10 
    if [ "$KUBEVIP" != "" ]; then
-      cat ~/tk/bin/init-config-vip.yaml | envsubst | sudo tee /opt/zfs/${cn}/init-config.yaml &>/dev/null
-      cat ~/tk/bin/kube-vip.yaml | envsubst > /tmp/kube-vip.yaml
+      cat ${TK_HOME}/templates/kubeadm/init-config-vip.yaml | envsubst | sudo tee ${CLUSTERS_DIR}/${cn}/init-config.yaml &>/dev/null
+      cat ${TK_HOME}/manifests/kube-vip.yaml | envsubst > /tmp/kube-vip.yaml
       sudo podman cp /tmp/kube-vip.yaml ${cn}-control-plane:/etc/kubernetes/manifests/ &>/dev/null
    else
-      cat ~/tk/bin/init-config-${KVER%.*}.yaml | envsubst | sudo tee /opt/zfs/${cn}/init-config.yaml &>/dev/null
+      cat ${TK_HOME}/templates/kubeadm/init-config-${KVER%.*}.yaml | envsubst | sudo tee ${CLUSTERS_DIR}/${cn}/init-config.yaml &>/dev/null
    fi
-   sudo cp ~/tk/bin/containerd-config.yaml /opt/zfs/${cn}/containerd-config.yaml
+   sudo cp ${TK_HOME}/templates/containerd/containerd-config.yaml ${CLUSTERS_DIR}/${cn}/containerd-config.yaml
 
    # CRI-O：init-config 的 criSocket 從 containerd 換成 crio
    if [ "$K8SCRI" == "crio" ]; then
-      sudo sed -i 's#unix:///run/containerd/containerd.sock#unix:///var/run/crio/crio.sock#' /opt/zfs/${cn}/init-config.yaml
-      grep -q "crio.sock" /opt/zfs/${cn}/init-config.yaml && echo "criSocket -> crio ok"
+      sudo sed -i 's#unix:///run/containerd/containerd.sock#unix:///var/run/crio/crio.sock#' ${CLUSTERS_DIR}/${cn}/init-config.yaml
+      grep -q "crio.sock" ${CLUSTERS_DIR}/${cn}/init-config.yaml && echo "criSocket -> crio ok"
    fi
 
    # --skip-phases=addon/kube-proxy
-   sudo podman exec -it ${cn}-control-plane bash -c "kubeadm init --config=/opt/zfs/init-config.yaml --ignore-preflight-errors=SystemVerification" &>/tmp/kubeadm.out
+   sudo podman exec -it ${cn}-control-plane bash -c "kubeadm init --config=${NODE_TAROKO_DIR}/init-config.yaml --ignore-preflight-errors=SystemVerification" &>/tmp/kubeadm.out
    if [ "$?" == "0" ]; then
       echo "${cn}-control-plane ok"
       sleep 30
@@ -149,8 +149,8 @@ if [ "$TKIND" == "K8S" ]; then
       mkdir -p ~/.kube 
       sudo podman cp ${cn}-control-plane:/etc/kubernetes/admin.conf ~/.kube/config
       sudo chown $(id -u):$(id -g) ~/.kube/config
-      sudo cp ~/.kube/config /opt/zfs/${cn}/
-      sudo chmod 755 /opt/zfs/${cn}/config
+      sudo cp ~/.kube/config ${CLUSTERS_DIR}/${cn}/
+      sudo chmod 755 ${CLUSTERS_DIR}/${cn}/config
 
       if [ "$KUBEVIP" != "" ]; then
          nc -w 1 $KUBEVIP 6443 &>/dev/null
@@ -170,7 +170,7 @@ if [ "$TKIND" == "K8S" ]; then
             # ans=$(echo "${KVER%.*} < 1.30" | bc)
             #if [ "$ans" == "1" ]; then
             #   #curl -sL https://raw.githubusercontent.com/projectcalico/calico/v3.28.3/manifests/canal.yaml | kubectl apply -f - &>/dev/null
-            #   kubectl apply -f ~/tk/wulin/yaml/canal.3.28.3.yaml &>/tmp/canal.3.28.3.out
+            #   kubectl apply -f ${TK_HOME}/wulin/yaml/canal.3.28.3.yaml &>/tmp/canal.3.28.3.out
             #else
                curl -sL https://raw.githubusercontent.com/projectcalico/calico/v3.31.5/manifests/canal.yaml | kubectl apply -f - &>/tmp/canal.3.31.3.out
             #fi
@@ -203,7 +203,7 @@ if [ "$TKIND" == "K8S" ]; then
 
          # LoadBalancer IP 池與 L2 對外公告（取節點網段 .200-.219，避開節點 IP 與閘道）
          export LBNET=${NID%.*}
-         cat ${HDIR}/tk/bin/cilium-lb.yaml | envsubst '${LBNET}' | kubectl apply -f - &>/tmp/cilium-lb.out
+         cat ${TK_HOME}/manifests/cilium-lb.yaml | envsubst '${LBNET}' | kubectl apply -f - &>/tmp/cilium-lb.out
          [ "$?" == "0" ] && echo "cilium LB-IPAM (${LBNET}.200-219) ok"
 
          CNI="ok"
@@ -229,7 +229,7 @@ if [ "$TKIND" == "K8S" ]; then
          kubectl taint node ${cn}-control-plane node-role.kubernetes.io/control-plane:NoSchedule- &>/dev/null
 
          # patch coredns
-         kubectl patch deployment coredns -n kube-system --patch-file tk/bin/coredns.yaml &>/dev/null
+         kubectl patch deployment coredns -n kube-system --patch-file ${TK_HOME}/manifests/coredns.yaml &>/dev/null
          [ "$?" == "0" ] && echo "coredns patch ok"
 
          echo ""
@@ -239,12 +239,12 @@ if [ "$TKIND" == "K8S" ]; then
          #   不在 crio 路徑硬掛；沙箱容器的官方路線是 Kata（另案規劃）
          # - containerd：deploy-rc.sh 安裝 gVisor（官方 shim 掛法）與 crun
          if [ "$K8SCRI" == "crio" ]; then
-            kubectl apply -f ${HDIR}/tk/bin/runtimeclass-crio.yaml &>/dev/null
+            kubectl apply -f ${TK_HOME}/manifests/runtimeclass-crio.yaml &>/dev/null
             [ "$?" == "0" ] && echo "RuntimeClass crun ok (gVisor: containerd only, see README)"
          else
-            ${HDIR}/tk/bin/deploy-rc.sh &>/dev/null
+            ${TK_HOME}/bin/deploy-rc.sh &>/dev/null
             echo "gVisor & crun ok"
-            kubectl apply -f ${HDIR}/tk/bin/runtimeclass-containerd.yaml &>/dev/null
+            kubectl apply -f ${TK_HOME}/manifests/runtimeclass-containerd.yaml &>/dev/null
             [ "$?" == "0" ] && echo "RuntimeClass gvisor & crun ok"
          fi
 
@@ -258,8 +258,8 @@ if [ "$TKIND" == "K8S" ]; then
 
          # install Local Path Provisioner
          #kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.35/deploy/local-path-storage.yaml &>/dev/null
-         kubectl apply -f ~/tk/bin/local-path-storage.0.0.35.yaml &>/tmp/local-path-storage.0.0.35.out
-         [ "$?" == "0" ] && echo "Local Path Provisioner (/opt/zfs/storage) ok"
+         kubectl apply -f ${TK_HOME}/manifests/local-path-storage.0.0.35.yaml &>/tmp/local-path-storage.0.0.35.out
+         [ "$?" == "0" ] && echo "Local Path Provisioner (${NODE_TAROKO_DIR}/storage) ok"
 
          # install Envoy Gateway（Gateway API 實作；LoadBalancer IP 由 cilium LB-IPAM 提供，
          # 故僅在 cilium 路徑安裝）
@@ -285,8 +285,8 @@ if [ "$TKIND" == "K8S" ]; then
             kubectl wait -n envoy-gateway-system deployment/envoy-gateway --for=condition=Available --timeout=300s &>/dev/null
             if [ "$?" == "0" ]; then
                # EnvoyProxy 需先於 GatewayClass 存在（GatewayClass 以 parametersRef 引用它）
-               kubectl apply -f ${HDIR}/tk/bin/envoyproxy.yaml &>/dev/null
-               kubectl apply -f ${HDIR}/tk/bin/gatewayclass.yaml &>/dev/null
+               kubectl apply -f ${TK_HOME}/manifests/envoyproxy.yaml &>/dev/null
+               kubectl apply -f ${TK_HOME}/manifests/gatewayclass.yaml &>/dev/null
                [ "$?" == "0" ] && echo "Envoy Gateway ${EG_VER} ok (GatewayClass: eg, DaemonSet, domain: ${cn}.k8s)"
             else
                echo "Envoy Gateway ${EG_VER} not ready (see /tmp/envoy-gateway.out)"
@@ -294,19 +294,19 @@ if [ "$TKIND" == "K8S" ]; then
          fi
 
          # 管理主機（tkadm）與教學 registry（dkreg）屬教材範疇（wulin repo）——
-         # 平台不內建，WULIN_DIR 有對應 manifest 才部署（kcn 已將 WULIN_DIR 掛進節點）
-         export WULIN_DIR="${WULIN_DIR:-$HOME/wulin}"
+         # 平台不內建，WULIN_DIR 有對應 manifest 才部署（kcn 已將 WULIN_DIR 掛進節點；
+         # 預設 ${TAROKO_HOME}/wulin，見 lib/env.sh）
          if [ -f ${WULIN_DIR}/wk/tkadm/tkadm-dkreg.yaml ]; then
             kubectl create ns taroko &>/dev/null
-            sudo mkdir -p /opt/zfs/${cn}/{tkadm,users}
-            sudo chmod 777 -R /opt/zfs/${cn}
-            sudo cp -R ${WULIN_DIR}/wk/tkadm/k8suser /opt/zfs/${cn}/
-            cp ${WULIN_DIR}/bin/system.sh /opt/zfs/${cn}/tkadm/system.sh
-            cp ${WULIN_DIR}/bin/ash.init /opt/zfs/${cn}/tkadm/ash.init
-            echo ${cn} > /opt/zfs/${cn}/tkadm/cn.txt
+            sudo mkdir -p ${CLUSTERS_DIR}/${cn}/{tkadm,users}
+            sudo chmod 777 -R ${CLUSTERS_DIR}/${cn}
+            sudo cp -R ${WULIN_DIR}/wk/tkadm/k8suser ${CLUSTERS_DIR}/${cn}/
+            cp ${WULIN_DIR}/bin/system.sh ${CLUSTERS_DIR}/${cn}/tkadm/system.sh
+            cp ${WULIN_DIR}/bin/ash.init ${CLUSTERS_DIR}/${cn}/tkadm/ash.init
+            echo ${cn} > ${CLUSTERS_DIR}/${cn}/tkadm/cn.txt
 
-            cat ${WULIN_DIR}/wk/tkadm/tkadm-dkreg.yaml | sed "s|k1|${cn}|g" | sed "s|10.98.0.10|${SNID%.*}.10|g" >/opt/zfs/${cn}/tkadm/tkadm.yaml
-            kubectl apply -f /opt/zfs/${cn}/tkadm/tkadm.yaml &>/tmp/tkadm.out
+            cat ${WULIN_DIR}/wk/tkadm/tkadm-dkreg.yaml | sed "s|k1|${cn}|g" | sed "s|10.98.0.10|${SNID%.*}.10|g" >${CLUSTERS_DIR}/${cn}/tkadm/tkadm.yaml
+            kubectl apply -f ${CLUSTERS_DIR}/${cn}/tkadm/tkadm.yaml &>/tmp/tkadm.out
             sleep 60
             kubectl wait -n taroko pod -l app=tkadm --for=condition=Ready --timeout=360s
 
@@ -319,8 +319,8 @@ if [ "$TKIND" == "K8S" ]; then
             echo "  git clone https://github.com/tarokolabs/wulin.git ${WULIN_DIR}"
          fi
 
-         ${HDIR}/tk/bin/kgw ${cn}
-         ${HDIR}/tk/bin/kns ${cn}
+         ${TK_HOME}/bin/kgw ${cn}
+         ${TK_HOME}/bin/kns ${cn}
 
          if [ "$K8SCRI" != "crio" ]; then
             ver=$(sudo podman exec ${cn}-worker1 containerd -v | cut -d' ' -f3)
@@ -336,31 +336,31 @@ if [ "$TKIND" == "K8S" ]; then
                # CNI 路徑全都烤在 image 的 crio.conf.d/10-taroko.conf 裡
                :
             else
-               sudo podman cp $HDIR/tk/bin/containerd-config-${CVER}.yaml ${tn}:containerd-config.yaml
+               sudo podman cp ${TK_HOME}/templates/containerd/containerd-config-${CVER}.yaml ${tn}:containerd-config.yaml
                if [ "$CVER" == "v2" ]; then
                   sudo podman exec -it ${tn} mkdir -p /etc/containerd/certs.d/dkreg.taroko:5000
-                  sudo podman cp $HDIR/tk/bin/containerd-hosts ${tn}:/etc/containerd/certs.d/dkreg.taroko:5000/hosts.toml
+                  sudo podman cp ${TK_HOME}/templates/containerd/hosts ${tn}:/etc/containerd/certs.d/dkreg.taroko:5000/hosts.toml
                fi
                sudo podman exec -it ${tn} bash -c "cat containerd-config.yaml >> /etc/containerd/config.toml"
                sudo podman exec ${tn} systemctl restart containerd &>/dev/null
                [ "$?" == "0"  ] && echo "${tn} systemctl restart containerd ok"
             fi
 
-            cat $HDIR/tk/bin/node.sh | envsubst '${SRVIP}'  > /opt/zfs/${cn}/node.sh
-            chmod +x /opt/zfs/${cn}/node.sh
-            sudo podman exec -it ${tn} /opt/zfs/node.sh
+            cat ${TK_HOME}/scripts/node.sh | envsubst '${SRVIP}'  > ${CLUSTERS_DIR}/${cn}/node.sh
+            chmod +x ${CLUSTERS_DIR}/${cn}/node.sh
+            sudo podman exec -it ${tn} ${NODE_TAROKO_DIR}/node.sh
          done
 
          # install prometheus & kube-state-metrics
 	 #if [ "$PROM" == "true" ]; then
-         #   sudo mkdir -p /opt/zfs/${cn}/prometheus/; sudo chmod 777 -R /opt/zfs/${cn}/prometheus/
-         #   kubectl kustomize ~/tk/wulin/wk/prometheus/ | envsubst | kubectl apply -f - &>/dev/null
+         #   sudo mkdir -p ${CLUSTERS_DIR}/${cn}/prometheus/; sudo chmod 777 -R ${CLUSTERS_DIR}/${cn}/prometheus/
+         #   kubectl kustomize ${TK_HOME}/wulin/wk/prometheus/ | envsubst | kubectl apply -f - &>/dev/null
          #   [ "$?" == "0" ] && echo "Prometheus ok"
          #   kubectl apply -k tk/wulin/wk/kube-state-metrics/ &>/dev/null
          #   [ "$?" == "0" ] && echo "kube-state-metrics ok"       
          #fi
 
-         rm .ssh/{known_hosts,known_hosts.old} &>/dev/null
+         rm ~/.ssh/{known_hosts,known_hosts.old} &>/dev/null
       
          echo -e "\n${cn}: take office"
       else
@@ -371,7 +371,7 @@ fi
 if [ "$TKIND" == "DIP" ]; then
 
    echo "[${cn} Cluster Infrastructure]"
-   source ${HDIR}/tk/bin/kcn ${cn}
+   source ${TK_HOME}/bin/kcn ${cn}
 
    echo -e "\n${cn}: take office"
 fi

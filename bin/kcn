@@ -1,26 +1,26 @@
-#!/bin/bash
+#!/usr/bin/env bash
+source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 [ "$1" == "" ] && echo "kcn <cluster>" && exit 1
 
 export cn=${1}
-export HDIR=~
 [ "${2}" != "" ] && export KVER=${2}
 
-[ ! -f ~/tk/conf/${cn}.conf ] && echo "~/tk/conf/${cn}.conf not found" && exit 1
+[ ! -f ${TK_HOME}/conf/${cn}.conf ] && echo "${TK_HOME}/conf/${cn}.conf not found" && exit 1
 
-source ~/tk/conf/${cn}.conf
-([ "$LCTN" == "" ] || [ "$TKIND" == "" ] || [ "$NTP" == "" ]) && echo "~/tk/conf/${cn}.conf error" && exit 1
+source ${TK_HOME}/conf/${cn}.conf
+([ "$LCTN" == "" ] || [ "$TKIND" == "" ] || [ "$NTP" == "" ]) && echo "${TK_HOME}/conf/${cn}.conf error" && exit 1
 
-# 教材（wulin repo）的掛載來源，掛進每個節點的 /opt/wulin
-# 未設定 WULIN_DIR 時預設 ~/wulin；目錄不存在則建立空目錄並提示
-export WULIN_DIR="${WULIN_DIR:-$HOME/wulin}"
+# 教材（wulin repo）的掛載來源，掛進每個節點的 ${NODE_TAROKO_DIR}/wulin
+# 位置由 WULIN_DIR 指定（預設 ${TAROKO_HOME}/wulin，見 lib/env.sh）
 if [ ! -d "$WULIN_DIR" ]; then
    echo "WULIN_DIR ($WULIN_DIR) not found: labs unavailable"
    echo "  git clone https://github.com/tarokolabs/wulin.git $WULIN_DIR"
-   mkdir -p "$WULIN_DIR"
+   sudo mkdir -p "$WULIN_DIR" && sudo chown $(id -un) "$WULIN_DIR"
 fi
 
 # 節點 image：本地沒有先嘗試 GHCR 拉取，拉不到（離線或該版本未發佈）
-# 就以同名配方本地建置（node/crio → images/taroko.crio；node/containerd → images/taroko）
+# 就以同名配方本地建置——GHCR 名稱與 images/ 底下的配方路徑恆等對映
+# （ghcr.io/tarokolabs/tk8s/node/crio ↔ images/node/crio），新變體零改動
 # 基底 kindest/node 可公開拉取，全新環境不依賴任何私有 registry
 if [[ "${IMG}" == ghcr.io/tarokolabs/tk8s/node/* || "${IMG%%:*}" == "localhost/taroko.crio" ]]; then
    if ! sudo podman image exists ${IMG} &>/dev/null; then
@@ -28,8 +28,8 @@ if [[ "${IMG}" == ghcr.io/tarokolabs/tk8s/node/* || "${IMG%%:*}" == "localhost/t
          echo "${IMG} pulled"
       else
          case "${IMG}" in
-            */node/containerd:*) BDIR=~/tk/wulin/images/taroko ;;
-            *)                   BDIR=~/tk/wulin/images/taroko.crio ;;
+            ghcr.io/tarokolabs/tk8s/*) rel="${IMG#ghcr.io/tarokolabs/tk8s/}"; BDIR=${TK_HOME}/images/${rel%%:*} ;;
+            *)                         BDIR=${TK_HOME}/images/node/crio ;;
          esac
          echo "building ${IMG} (not available remotely; first build takes a few minutes)"
          sudo podman build --build-arg VER=${KVER} --force-rm -t ${IMG} ${BDIR} &>/tmp/node-img-build.out
@@ -39,20 +39,20 @@ if [[ "${IMG}" == ghcr.io/tarokolabs/tk8s/node/* || "${IMG%%:*}" == "localhost/t
    fi
 fi
 
-# 共用唯讀 image store：主機上有才掛（見 wulin/images/taroko.crio/storage.conf）
+# 共用唯讀 image store：主機上有才掛（見 images/node/crio/storage.conf）
 SHARED_STORE=""
-[ -d /opt/zfs/images/base ] && SHARED_STORE="--volume /opt/zfs/images/base:/var/lib/shared:ro"
+[ -d ${TAROKO_HOME}/images/base ] && SHARED_STORE="--volume ${TAROKO_HOME}/images/base:/var/lib/shared:ro"
 
 # install cni
-if [ ! -d ~/cni ]; then
-   mkdir -p ~/cni
+if [ ! -d ${CNI_DIR} ]; then
+   sudo mkdir -p ${CNI_DIR} && sudo chown $(id -un) ${CNI_DIR}
    curl -sL "$(curl -sL https://api.github.com/repos/containernetworking/plugins/releases/latest | \
-   jq -r '.assets[].browser_download_url' | grep 'linux-amd64.*.tgz$')" -o ~/cni-plugins.tgz &>/dev/null
-   tar xf ~/cni-plugins.tgz -C ~/cni; rm ~/cni-plugins.tgz
+   jq -r '.assets[].browser_download_url' | grep 'linux-amd64.*.tgz$')" -o /tmp/cni-plugins.tgz &>/dev/null
+   tar xf /tmp/cni-plugins.tgz -C ${CNI_DIR}; rm /tmp/cni-plugins.tgz
 fi
 
-sudo rm -r /opt/zfs/"$cn" &>/dev/null
-sudo mkdir -p /opt/zfs/"$cn"/tkimg; sudo chmod -R 777 /opt/zfs/"$cn"
+sudo rm -r "${CLUSTERS_DIR}/${cn}" &>/dev/null
+sudo mkdir -p "${CLUSTERS_DIR}/${cn}"/tkimg; sudo chmod -R 777 "${CLUSTERS_DIR}/${cn}"
 
 case "$NTP" in
   "Internal")
@@ -86,11 +86,11 @@ case "$NTP" in
          --ip ${cip} \
          --dns 8.8.8.8 --dns 168.95.1.1 \
          --env TZ=Asia/Taipei \
-         --volume ${HDIR}/cni:/opt/cni/bin \
+         --volume ${CNI_DIR}:/opt/cni/bin \
          --volume /lib/modules:/lib/modules:ro \
          --volume ${controlVolume}:/var:suid,exec,dev,rbind \
-         --volume /opt/zfs/${cn}:/opt/zfs \
-         --volume ${WULIN_DIR}:/opt/wulin \
+         --volume ${CLUSTERS_DIR}/${cn}:${NODE_TAROKO_DIR} \
+         --volume ${WULIN_DIR}:${NODE_TAROKO_DIR}/wulin \
          ${SHARED_STORE} \
          --cgroupns=private \
          $IMG bash &>/tmp/${ctn}.out
@@ -120,11 +120,11 @@ case "$NTP" in
          --memory ${cm} \
          --privileged \
          --net none \
-         --volume ${HDIR}/cni:/opt/cni/bin \
+         --volume ${CNI_DIR}:/opt/cni/bin \
          --volume /lib/modules:/lib/modules:ro \
          --volume ${controlVolume}:/var:suid,exec,dev,rbind \
-         --volume /opt/zfs/${cn}:/opt/zfs \
-         --volume ${WULIN_DIR}:/opt/wulin \
+         --volume ${CLUSTERS_DIR}/${cn}:${NODE_TAROKO_DIR} \
+         --volume ${WULIN_DIR}:${NODE_TAROKO_DIR}/wulin \
          ${SHARED_STORE} \
          --cgroupns=private \
          $IMG bash &>/dev/null

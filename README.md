@@ -16,7 +16,7 @@
 | 負載平衡 | cilium LB-IPAM + L2 announcement——LoadBalancer IP 原生提供（節點網段 .200–.219） |
 | 儲存 | local-path-provisioner |
 | Gateway API | Envoy Gateway（GatewayClass `eg`；envoy 以 DaemonSet 部署，`externalTrafficPolicy: Local` 保留來源 IP；CRD 採 experimental channel，含 TCPRoute/UDPRoute） |
-| 管理主機（選配） | 偵測到教材 repo（`WULIN_DIR`，預設 `~/wulin`）時自動部署 wulin 的管理主機與私有 registry；無教材時建裸叢集 |
+| 管理主機（選配） | 偵測到教材 repo（`WULIN_DIR`，預設 `/opt/taroko/wulin`）時自動部署 wulin 的管理主機與私有 registry；無教材時建裸叢集 |
 | RuntimeClass | CRI-O 路徑：`crun`（套件原生）。containerd 路徑（`K8SCRI=containerd`）：另有 `gvisor`——gVisor 官方僅支援 containerd，不在 CRI-O 路徑提供；CRI-O 上的沙箱容器規劃採 Kata Containers |
 | 資源監控 | metrics-server（`kubectl top` 可用） |
 
@@ -37,7 +37,7 @@
 | OS | Linux（x86_64）。原生支援 Alpine 與一般發行版 |
 | 容器引擎 | **podman**（腳本以 `sudo podman` 呼叫） |
 | **swap** | **必須關閉。** `kto` 偵測到 swap 會直接中止 |
-| 儲存路徑 | `/opt/zfs/` 需存在且可寫入 |
+| 儲存路徑 | `/opt/taroko/`（自動建立；`TAROKO_HOME` 可覆寫）——叢集狀態、PVC 儲存與工具下載都在這 |
 | 權限 | 需要 `sudo` |
 | 網路 | 需連外——會下載 CNI plugins、kubectl、cilium CLI、canal manifest、metrics-server |
 | 其他指令 | `jq` `bc` `envsubst`（gettext）`nc` `curl` `tar` |
@@ -45,15 +45,25 @@
 
 ## 安裝位置
 
-**必須放在 `~/tk/`。**
-
-CLI 指令內部使用硬寫路徑（`~/tk/conf/…`、`~/tk/bin/…`、`~/tk/wulin/…`），放在其他位置不會運作。讓安裝位置可設定是待辦事項。
+**放哪裡都可以。** CLI 依自身位置自我定位，不要求特定安裝路徑（要顯式指定時設 `TK_HOME`）：
 
 ```bash
 git clone https://github.com/tarokolabs/tk8s.git ~/tk
 ```
 
-再把 `~/tk/bin` 加入 PATH，並套用 shell 環境設定（`bin/profile.append` 供 Alpine 使用，`bin/us-profile` 供 Ubuntu 使用）。
+把 `<clone 位置>/bin` 加入 PATH，並套用 shell 環境設定（`profiles/profile.append` 供 Alpine 使用，`profiles/us-profile` 供 Ubuntu 使用；clone 到非 `~/tk` 時調整其中的 `TK_HOME`）。
+
+### 主機側狀態
+
+叢集執行期的狀態與資料收斂在 `/opt/taroko/`（FHS 的 `/opt/<vendor>`；`TAROKO_HOME` 可覆寫）：
+
+| 路徑 | 內容 |
+|---|---|
+| `clusters/<叢集名>/` | 叢集狀態、PVC 資料（local-path 儲存根）、管理主機素材 |
+| `cni/` | 主機側 CNI plugin |
+| `wulin/` | 教材 repo 的預設位置（`WULIN_DIR` 可覆寫） |
+
+節點容器內看到的是同一個語彙：主機的 `clusters/<叢集名>` 掛載為節點內的 `/opt/taroko`，教材掛載為 `/opt/taroko/wulin`。
 
 ## 使用
 

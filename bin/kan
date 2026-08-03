@@ -1,12 +1,13 @@
-#!/bin/bash
+#!/usr/bin/env bash
+source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 [ "$1" == "" ] && echo "kan <cluster>" && exit 1
 
 export cn=${1}
 
-[ ! -f ~/tk/conf/${cn}.conf ] && echo "~/tk/conf/${cn}.conf not found" && exit 1
+[ ! -f ${TK_HOME}/conf/${cn}.conf ] && echo "${TK_HOME}/conf/${cn}.conf not found" && exit 1
 
-source ~/tk/conf/${cn}.conf
-([ "$ECTN" == "" ] || [ "$TKIND" == "" ] || [ "$NTP" == "" ]) && echo "~/tk/conf/${cn}.conf error" && exi
+source ${TK_HOME}/conf/${cn}.conf
+([ "$ECTN" == "" ] || [ "$TKIND" == "" ] || [ "$NTP" == "" ]) && echo "${TK_HOME}/conf/${cn}.conf error" && exi
 
 [ "$NTP" != "External" ] && echo "Network Type error" && exit 1
 
@@ -36,7 +37,7 @@ do
 
    #sshpass -p bigred ssh -o StrictHostKeyChecking=no bigred@${nip} 'mkdir -p /home/bigred/cni' &>/dev/null
    #sshpass -p bigred ssh -o StrictHostKeyChecking=no bigred@${nip} 'mkdir -p /home/bigred/wulin' &>/dev/null
-   sshpass -p bigred ssh -o StrictHostKeyChecking=no -o "SendEnv cn" bigred@${nip} "sudo mkdir -p /opt/zfs/${cn}" &>/dev/null
+   sshpass -p bigred ssh -o StrictHostKeyChecking=no -o "SendEnv cn" bigred@${nip} "sudo mkdir -p ${CLUSTERS_DIR}/${cn}" &>/dev/null
 
    sshpass -p bigred scp -rp /home/bigred/cni/* bigred@${nip}:/home/bigred/cni/
    sshpass -p bigred scp -rp /home/bigred/tk/wulin/* bigred@${nip}:/home/bigred/wulin/

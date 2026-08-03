@@ -1,34 +1,35 @@
-#!/bin/bash
+#!/usr/bin/env bash
+source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 
 [ "$1" == "" ] && echo "kco cluster" && exit 1
 
-[ ! -d /opt/zfs/${1} ] && echo "$1 not exist" && exit 1
+[ ! -d ${CLUSTERS_DIR}/${1} ] && echo "$1 not exist" && exit 1
 
 sudo podman ps -a | grep " $1" | grep 'Exited ' &>/dev/null 
 [ "$?" == "0" ] && echo "$1 already Exited" && exit 1
 
-[ ! -f ~/tk/conf/${1}.conf ] && echo "~/tk/conf/${1}.conf not found" && exit 1
-source ~/tk/conf/${1}.conf
+[ ! -f ${TK_HOME}/conf/${1}.conf ] && echo "${TK_HOME}/conf/${1}.conf not found" && exit 1
+source ${TK_HOME}/conf/${1}.conf
 
 read -p "Are you sure ? " yn
 [ "$yn" != "YES" ] && exit 1
 
 if [ "$TKIND" == "K8S" ]; then
-   ~/tk/bin/kns ${1}
+   ${TK_HOME}/bin/kns ${1}
    [ "$?" != "0" ] && exit 1
 
    if [ "$KUBEVIP" != "" ]; then
       cpip=$(sudo podman inspect ${1}-control-plane --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
-      cp .kube/config /opt/zfs/$1/config.100
+      cp .kube/config ${CLUSTERS_DIR}/$1/config.100
       sed -i "s|${KUBEVIP}|$cpip|g" .kube/config
-      cp .kube/config /opt/zfs/$1/config.cp1
+      cp .kube/config ${CLUSTERS_DIR}/$1/config.cp1
 
       cpip=$(sudo podman inspect ${1}-control-plane1 --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
-      cp /opt/zfs/$1/config.100 .kube/config
+      cp ${CLUSTERS_DIR}/$1/config.100 .kube/config
       sed -i "s|${KUBEVIP}|$cpip|g" .kube/config
-      cp .kube/config /opt/zfs/$1/config.cp2
+      cp .kube/config ${CLUSTERS_DIR}/$1/config.cp2
    else
-      [ ! -f /opt/zfs/$1/config ] && mv ~/.kube/config /opt/zfs/$1/
+      [ ! -f ${CLUSTERS_DIR}/$1/config ] && mv ~/.kube/config ${CLUSTERS_DIR}/$1/
    fi
    echo > ~/.kube/config
 fi

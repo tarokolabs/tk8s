@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 
 [ "$IP" == "" ] && echo "pls set IP variable" && exit 1
 which ipvsadm &>/dev/null

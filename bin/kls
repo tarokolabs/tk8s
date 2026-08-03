@@ -1,9 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 kn=$(sudo podman ps -a --format "{{.Names}} {{.Status}}" | cut -d ' ' -f 1,2 | tr '-' ' ' | grep -v 'plane' | cut -d ' ' -f1,3 | uniq | tr ' ' ':')
 if [ "$kn" == "" ]; then
    echo "no clusters" && echo
 
-   bl=$(ls -d /opt/zfs/*bak* 2>/dev/null)
+   bl=$(ls -d ${CLUSTERS_DIR}/*bak* 2>/dev/null)
    if [ "$bl" != "" ]; then
       echo "backup cluster"
       echo "--------------------------------------"
@@ -15,10 +16,10 @@ fi
 for n in $kn
 do
   cn=$(echo $n | cut -d ':' -f 1)
-  source ~/tk/conf/${cn}.conf &>/dev/null
+  source ${TK_HOME}/conf/${cn}.conf &>/dev/null
   [ "$?" != "0" ] && continue
 
-  KVER=$(cat /opt/zfs/${cn}/init-config.yaml | grep 'kubernetesVersion: ' | cut -d' ' -f2)
+  KVER=$(cat ${CLUSTERS_DIR}/${cn}/init-config.yaml | grep 'kubernetesVersion: ' | cut -d' ' -f2)
 
   if [ "$1" != "" ]; then
      echo $n | grep "${1}:" &>/dev/null
@@ -27,7 +28,7 @@ do
          if [ "$NTP" == "Internal" ]; then
             echo "---------------------------------------------------------"
             cn=$(echo $n | cut -d ':' -f 1)
-            [ -f /opt/zfs/${cn}/net.info ] && cat /opt/zfs/${cn}/net.info
+            [ -f ${CLUSTERS_DIR}/${cn}/net.info ] && cat ${CLUSTERS_DIR}/${cn}/net.info
          fi
          if [ "$NTP" == "External" ]; then
             echo "---------------------------------------------------------"
@@ -51,7 +52,7 @@ do
 done
 
 echo ""
-bl=$(ls -d /opt/zfs/*bak* 2>/dev/null)
+bl=$(ls -d ${CLUSTERS_DIR}/*bak* 2>/dev/null)
 if [ "$bl" != "" ]; then
    echo "backup cluster"
    echo "--------------------------------------"

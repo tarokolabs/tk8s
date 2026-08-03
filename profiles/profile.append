@@ -1,0 +1,40 @@
+# Alpine 的啟動系統是 openrc, 登入前會執行 /etc/local.d/rc.local.start, 登入後會執行 /etc/profile
+gw=$(route -n | grep -e "^0.0.0.0 ")
+export GWIF=${gw##* }
+ips=$(ifconfig $GWIF | grep 'inet ')
+export IP=$(echo $ips | cut -d' ' -f2 | cut -d':' -f2)
+export NETID=${IP%.*}
+export GW=$(route -n | grep -e '^0.0.0.0' | tr -s \ - | cut -d ' ' -f2)
+# 平台 clone 位置（預設 ~/tk，放別處就改這行或先 export TK_HOME）
+export TK_HOME="${TK_HOME:-$HOME/tk}"
+export PATH="$HOME/bin:$TK_HOME/bin:$HOME/kind/bin:$PATH"
+# source /home/bigred/bin/myk3s
+clear && sleep 2
+
+source /etc/os-release
+echo "$PRETTY_NAME"
+[ "$IP" != "" ] && echo "IP : $IP"
+echo ""
+
+export NOW="--force --grace-period 0"
+export KUBE_EDITOR="nano"
+export TZ=Asia/Taipei
+export PS1='[$(grep "  cluster" ~/.kube/config 2>/dev/null | cut -d ":" -f 2 |tr -d " ")]\u@\h:\w$ '
+export KCN=$(grep "  cluster" /home/bigred/.kube/config 2>/dev/null | cut -d ":" -f 2 |tr -d " ")
+
+alias ksc='source $TK_HOME/bin/ksc'
+alias ping='ping -c 4 '
+alias pingdup='sudo arping -D -I eth0 -c 2 '
+alias dir='ls -alh '
+alias poweroff='sudo poweroff; sleep 5'
+alias reboot='sudo reboot; sleep 5'
+alias kg='kubectl get'
+alias ka='kubectl apply'
+alias kd='kubectl delete'
+alias kc='kubectl create'
+alias ks='kubectl get pods -n kube-system'
+alias docker='sudo podman'
+alias pc='sudo podman system prune -a -f; sudo podman volume rm -a -f'
+alias vms='sudo /usr/bin/vmware-toolbox-cmd disk shrink /'
+
+export KIND_EXPERIMENTAL_PROVIDER='podman kind create cluster'

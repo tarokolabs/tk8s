@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 
 r=$(cat /etc/hosts | grep -e "^172.22" | tr ' ' '.' | cut -d '.' -f 3,5)
 [ "$r" == "" ] && echo "no route to delete" && exit 1

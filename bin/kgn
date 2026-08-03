@@ -1,10 +1,11 @@
-#!/bin/bash
+#!/usr/bin/env bash
+source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 
 [ "$1"  == "" ] && echo "kgn cluster" && exit 1
 
-[ ! -f ~/tk/conf/$1.conf ] && echo "~/tk/conf/$1.conf not found" && exit 1 
+[ ! -f ${TK_HOME}/conf/$1.conf ] && echo "${TK_HOME}/conf/$1.conf not found" && exit 1 
 
-source ~/tk/conf/$1.conf
+source ${TK_HOME}/conf/$1.conf
 
 sudo podman ps -a | grep $1 &>/dev/null
 if [ "$?" != "0" ]; then
@@ -35,7 +36,7 @@ if [ "$yn" == "YES" ]; then
       done
    fi
 
-   sudo rm -r /opt/zfs/$1 &>/dev/null
+   sudo rm -r ${CLUSTERS_DIR}/$1 &>/dev/null
    rm ~/.kube/config &>/dev/null && touch ~/.kube/config
    sudo sed -i "/${1}/d" /etc/hosts &>/dev/null
 

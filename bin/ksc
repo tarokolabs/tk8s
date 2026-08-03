@@ -1,9 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 
 [ "$1" == "" ] && exit 1
 
-[ ! -f ~/tk/conf/${1}.conf ] && echo "~/tk/conf/${1}.conf not found" && exit 1
-source ~/tk/conf/${1}.conf
+[ ! -f ${TK_HOME}/conf/${1}.conf ] && echo "${TK_HOME}/conf/${1}.conf not found" && exit 1
+source ${TK_HOME}/conf/${1}.conf
 
 if [ "$TKIND" == "K8S" ]; then
    cl=$(sudo podman ps -a | grep -o -e "${1}-[a-z]*[-]*[a-z]*[1-9]*" | tr '\n' ' ')
