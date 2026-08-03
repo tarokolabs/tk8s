@@ -2,7 +2,7 @@
 # 建置並推送 tk8s 平台 image 至 GHCR（ghcr.io/tarokolabs/tk8s/*）
 #
 # 用法：
-#   build-images.sh tools [CalVer]        # toolbox、admin、sshd、podman、bind（預設 v2026.8.0）
+#   build-images.sh tools [CalVer]        # toolbox、admin（預設 v2026.8.0）
 #   build-images.sh node <K8s版本>...     # 每個版本建 node/crio 與 node/containerd
 #
 # 推送前需先登入：podman login ghcr.io
@@ -31,9 +31,6 @@ tools)
    CALVER="${2:-v2026.8.0}"
    build_push "toolbox:${CALVER}" wulin/images/base --build-arg=VER=${ALPINE_VER}
    build_push "admin:${CALVER}"   wulin/images/tkadm
-   build_push "sshd:${CALVER}"    wulin/images/sshd
-   build_push "podman:${CALVER}"  wulin/images/alp.podman
-   build_push "bind:${CALVER}"    wulin/images/bind
    ;;
 node)
    shift
