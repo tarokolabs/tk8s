@@ -1,42 +1,8 @@
 #!/usr/bin/env bash
-source "$(dirname "$(realpath "$0")")/../lib/env.sh"
-
-[ "$1" == "" ] && echo "kgw cluster" && exit 1
-
-[ ! -f ${TK_HOME}/conf/$1.conf ] && echo "${TK_HOME}/conf/$1.conf not exist" && exit 1
-source ${TK_HOME}/conf/$1.conf
-
-[ "$TKIND" != "K8S" ] && echo "$1 not K8S cluster" && exit 1
-[ ! -d ${CLUSTERS_DIR}/$1 ] && echo "$1 cluster not found" && exit 1
-
-if [ "$GWIF" == "" ]; then
-   x=$(route -n | grep -e "^0.0.0.0")
-   GWIF=${x##* }
+# 相容 shim：等同 tkctl net gateway-create（實作見 libexec/tkctl/net/gateway-create）
+# 被 source 時（舊 profile 的 alias）不可 exec——會把互動 shell 整個換掉
+if (return 0 2>/dev/null); then
+   "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/tkctl" net gateway-create "$@"
 else
-   ls /sys/class/net/ | grep "${GWIF}" &>/dev/null
-   [ "$?" != "0" ] && echo "${GWIF} not found" && exit 1
-fi
-
-ping -c 1 "$GWIP" &>/dev/null
-[ "$?" == "0" ] && echo "$GWIP exist" && exit 1
-
-sudo podman ps -a | grep " $1-worker2" | grep 'Exited ' &>/dev/null
-[ "$?" == "0" ] && echo "$1-worker2 Exited" && exit 1
-
-if [ "$TKGW" == "true" ]; then
-   echo "Macvlan Device: $GWIF"
-   cif=${1}gw
-   sudo podman exec -it ${1}-worker2 bash -c "ip a show tkgw" &>/dev/null
-   if [ "$?" != "0" ]; then
-      ctpid=$(sudo podman inspect ${1}-worker2 --format "{{.State.Pid}}")
-      sudo ip link add ${cif} link ${GWIF} type macvlan mode bridge
-      sudo ip link set ${cif} netns $ctpid
-      sudo podman exec -it ${1}-worker2 bash -c "ip link set dev ${cif} name tkgw"
-      sudo podman exec -it ${1}-worker2 bash -c "ip link set dev tkgw up"
-      sudo podman exec -it ${1}-worker2 bash -c "ip addr add ${GWIP} dev tkgw"
-
-      echo "$1-worker2 Gateway created (${GWIP})"
-   else
-      echo "$1-worker2 Gateway existd (${GWIP})"
-   fi
+   exec "$(dirname "$(realpath "$0")")/tkctl" net gateway-create "$@"
 fi

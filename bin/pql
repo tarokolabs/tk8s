@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-source "$(dirname "$(realpath "$0")")/../lib/env.sh"
-
-[ "$#" == "0" ] && echo "psql <Query String>" && exit 1
-
-pqlip=$(sudo ipvsadm -Ln | grep 9090 | tr -s ' ' | cut -d ' ' -f2)
-[ "$pqlip" == "" ] && echo "pls run kiv first" && exit 1
-
-curl -s -G --data-urlencode query="$1" http://${pqlip}/api/v1/query
-echo ""
+# 相容 shim：等同 tkctl tool psql（實作見 libexec/tkctl/tool/psql）
+# 被 source 時（舊 profile 的 alias）不可 exec——會把互動 shell 整個換掉
+if (return 0 2>/dev/null); then
+   "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/tkctl" tool psql "$@"
+else
+   exec "$(dirname "$(realpath "$0")")/tkctl" tool psql "$@"
+fi

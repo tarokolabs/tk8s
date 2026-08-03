@@ -1,28 +1,8 @@
 #!/usr/bin/env bash
-source "$(dirname "$(realpath "$0")")/../lib/env.sh"
-
-[ "$1" == "" ] && echo "krt cluster" && exit 1
-
-[ ! -d ${CLUSTERS_DIR}/${1} ] && echo "$1 not exist" && exit 1
-
-sudo podman ps -a | grep " $1" | grep 'Exited ' &>/dev/null
-[ "$?" == "0" ] && echo "$1 already Exited" && exit 1
-
-[ ! -f ${TK_HOME}/conf/${1}.conf ] && echo "${TK_HOME}/conf/${1}.conf not found" && exit 1
-source ${TK_HOME}/conf/${1}.conf
-
-for x in tkadm:taroko dtadm:dt
-do
-  lb=${x%%:*}
-  ns=${x##*:}
-
-  pn=$(kubectl get pod -l app=${lb} -o jsonpath="{.items[0].metadata.name}" -n $ns 2>/dev/null)
-  if [ "$pn" != "" ]; then
-     kubectl exec $pn -n $ns -- cp -p ${NODE_TAROKO_DIR}/${lb}bak/etc/passwd /etc/passwd
-     kubectl exec $pn -n $ns -- cp -p ${NODE_TAROKO_DIR}/${lb}bak/etc/group /etc/group
-     kubectl exec $pn -n $ns -- cp -p ${NODE_TAROKO_DIR}/${lb}bak/etc/shadow /etc/shadow
-     [ "$?" == "0" ] && echo "$lb /etc restore ok"
-     kubectl exec $pn -n $ns -- bash -c "unzip -o ${NODE_TAROKO_DIR}/${lb}bak/${lb}.zip -d / &>/dev/null"
-     [ "$?" == "0" ] && echo "$lb /home restore ok"
-  fi  
-done
+# 相容 shim：等同 tkctl lab restore（實作見 libexec/tkctl/lab/restore）
+# 被 source 時（舊 profile 的 alias）不可 exec——會把互動 shell 整個換掉
+if (return 0 2>/dev/null); then
+   "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/tkctl" lab restore "$@"
+else
+   exec "$(dirname "$(realpath "$0")")/tkctl" lab restore "$@"
+fi

@@ -1,60 +1,8 @@
 #!/usr/bin/env bash
-source "$(dirname "$(realpath "$0")")/../lib/env.sh"
-kn=$(sudo podman ps -a --format "{{.Names}} {{.Status}}" | cut -d ' ' -f 1,2 | tr '-' ' ' | grep -v 'plane' | cut -d ' ' -f1,3 | uniq | tr ' ' ':')
-if [ "$kn" == "" ]; then
-   echo "no clusters" && echo
-
-   bl=$(ls -d ${CLUSTERS_DIR}/*bak* 2>/dev/null)
-   if [ "$bl" != "" ]; then
-      echo "backup cluster"
-      echo "--------------------------------------"
-      echo -e "$bl\n"
-   fi
-   exit 1
-fi
-
-for n in $kn
-do
-  cn=$(echo $n | cut -d ':' -f 1)
-  source ${TK_HOME}/conf/${cn}.conf &>/dev/null
-  [ "$?" != "0" ] && continue
-
-  KVER=$(cat ${CLUSTERS_DIR}/${cn}/init-config.yaml | grep 'kubernetesVersion: ' | cut -d' ' -f2)
-
-  if [ "$1" != "" ]; then
-     echo $n | grep "${1}:" &>/dev/null
-     if  [ "$?" == "0" ]; then
-         echo "$n ($NTP:$KVER)"
-         if [ "$NTP" == "Internal" ]; then
-            echo "---------------------------------------------------------"
-            cn=$(echo $n | cut -d ':' -f 1)
-            [ -f ${CLUSTERS_DIR}/${cn}/net.info ] && cat ${CLUSTERS_DIR}/${cn}/net.info
-         fi
-         if [ "$NTP" == "External" ]; then
-            echo "---------------------------------------------------------"
-            for x in $ECTN
-            do
-              echo "$x" | tr ':' ' '
-            done
-         fi
-         echo ""
-     fi
-  else
-     echo "$n ($NTP:$KVER)" 
-
-     echo "$n" | grep 'Up' &>/dev/null
-     if [  "$?" == "0"  ]; then
-        echo "---------------------------------------"
-        kubectl get pods -A | tr -s ' ' | cut -d ' ' -f 1-5 | column -t
-        echo ""
-     fi
-  fi
-done
-
-echo ""
-bl=$(ls -d ${CLUSTERS_DIR}/*bak* 2>/dev/null)
-if [ "$bl" != "" ]; then
-   echo "backup cluster"
-   echo "--------------------------------------"
-   echo -e "$bl\n"
+# 相容 shim：等同 tkctl cluster list（實作見 libexec/tkctl/cluster/list）
+# 被 source 時（舊 profile 的 alias）不可 exec——會把互動 shell 整個換掉
+if (return 0 2>/dev/null); then
+   "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/tkctl" cluster list "$@"
+else
+   exec "$(dirname "$(realpath "$0")")/tkctl" cluster list "$@"
 fi

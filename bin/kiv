@@ -1,39 +1,8 @@
 #!/usr/bin/env bash
-source "$(dirname "$(realpath "$0")")/../lib/env.sh"
-
-[ "$IP" == "" ] && echo "pls set IP variable" && exit 1
-which ipvsadm &>/dev/null
-[ "$?" != "0" ] && echo "pls install ipvsadm" && exit 1
-
-ipvs1="taroko:tkadm:22100:32200"
-ipvs2="taroko:xtkadm:3389:30089"
-ipvs3="prom:dep-prometheus:9090:30090"
-ipvs4="prom:alertmanager:3093:30093"
-ipvs5="prom:grafana:3000:30030"
-
-for iv in $ipvs1 $ipvs2 $ipvs3 $ipvs4 $ipvs5
-do
-   ns=$(echo ${iv} | cut -d ':' -f1)
-   npod=$(echo ${iv} | cut -d ':' -f2)
-   hport=$(echo ${iv} | cut -d ':' -f3)
-   nport=$(echo ${iv} | cut -d ':' -f4)
-   # echo $ns,$npod,$hport,$nport; continue
-
-   x=$(kubectl get pods -n "$ns" 2>/dev/null | grep "$npod" | cut -d ' ' -f1)
-   if [ "$x" != "" ]; then
-      sudo ipvsadm -Ln | grep $IP:$hport &>/dev/null
-      [ "$?" == "0" ] && sudo ipvsadm -D -t $IP:$hport
-
-      sudo ipvsadm -A -t $IP:$hport -s rr
-      for n in $x
-      do
-        nip=$(kubectl exec $n -n $ns -- printenv HOST_IP)
-        sudo ipvsadm -a -t $IP:$hport -r $nip:$nport -m
-      done
-   else
-      sudo ipvsadm -Ln | grep $IP:$hport &>/dev/null
-      [ "$?" == "0" ] && sudo ipvsadm -D -t $IP:$hport
-   fi
-done
-
-sudo ipvsadm -Ln
+# 相容 shim：等同 tkctl net expose（實作見 libexec/tkctl/net/expose）
+# 被 source 時（舊 profile 的 alias）不可 exec——會把互動 shell 整個換掉
+if (return 0 2>/dev/null); then
+   "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/tkctl" net expose "$@"
+else
+   exec "$(dirname "$(realpath "$0")")/tkctl" net expose "$@"
+fi

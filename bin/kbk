@@ -1,31 +1,8 @@
 #!/usr/bin/env bash
-source "$(dirname "$(realpath "$0")")/../lib/env.sh"
-
-[ "$1" == "" ] && echo "kbk cluster" && exit 1
-
-[ ! -d ${CLUSTERS_DIR}/${1} ] && echo "$1 not exist" && exit 1
-
-sudo podman ps -a | grep " $1" | grep 'Exited ' &>/dev/null
-[ "$?" == "0" ] && echo "$1 already Exited" && exit 1
-
-[ ! -f ${TK_HOME}/conf/${1}.conf ] && echo "${TK_HOME}/conf/${1}.conf not found" && exit 1
-source ${TK_HOME}/conf/${1}.conf
-
-cn=$1
-
-for x in tkadm:taroko dtadm:dt
-do
-  lb=${x%%:*}
-  ns=${x##*:}
-  pn=$(kubectl get pod -l app=${lb} -o jsonpath="{.items[0].metadata.name}" -n $ns 2>/dev/null)
- 
-  if [ "$pn" != "" ]; then
-     kubectl exec $pn -n $ns -- mkdir -p ${NODE_TAROKO_DIR}/${lb}bak/etc
-
-     kubectl exec $pn -n $ns -- sudo cp -p /etc/passwd /etc/group /etc/shadow ${NODE_TAROKO_DIR}/${lb}bak/etc/
-     [ "$?" == "0" ] && echo "${NODE_TAROKO_DIR}/${lb}bak/etc/ ok"
-
-     kubectl exec $pn -n $ns -- bash -c "cd /;zip -rp ${NODE_TAROKO_DIR}/${lb}bak/${lb}.zip home/ -x home/bigred/wulin\* &>/dev/null"
-     [ "$?" == "0" ] && echo "${NODE_TAROKO_DIR}/${lb}bak/${lb}.zip ok"
-  fi
-done
+# 相容 shim：等同 tkctl lab backup（實作見 libexec/tkctl/lab/backup）
+# 被 source 時（舊 profile 的 alias）不可 exec——會把互動 shell 整個換掉
+if (return 0 2>/dev/null); then
+   "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/tkctl" lab backup "$@"
+else
+   exec "$(dirname "$(realpath "$0")")/tkctl" lab backup "$@"
+fi

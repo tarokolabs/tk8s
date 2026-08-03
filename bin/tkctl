@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# tkctl——Taroko 平台的統一命令入口（git 式 dispatcher）
+#
+# 用法：tkctl <名詞> <動詞> [參數...]
+# 子命令是 libexec/tkctl/<名詞>/<動詞> 底下的可讀 shell 腳本——
+# 想知道平台實際做了什麼，直接打開對應檔案就看得到。
+# 舊短命令（kto、kcn、kls…）以 bin/ 下的相容 shim 全數保留。
+source "$(dirname "$(realpath "$0")")/../lib/env.sh"
+
+LX="${TK_HOME}/libexec/tkctl"
+
+usage() {
+   echo "tkctl <名詞> <動詞> [參數...]"
+   echo
+   for n in "${LX}"/*/; do
+      noun=$(basename "$n")
+      verbs=$(ls "$n" | tr '\n' ' ')
+      printf "  %-9s %s\n" "$noun" "$verbs"
+   done
+   echo
+   echo "例：tkctl cluster create tk8s 1.35.5（等同舊命令 kto tk8s 1.35.5）"
+}
+
+case "$1" in
+""|help|-h|--help)
+   usage; exit 0 ;;
+esac
+
+noun="$1"; verb="$2"
+if [ ! -x "${LX}/${noun}/${verb}" ]; then
+   echo "tkctl: 沒有 ${noun} ${verb} 這個子命令"
+   echo
+   usage
+   exit 1
+fi
+shift 2
+exec "${LX}/${noun}/${verb}" "$@"

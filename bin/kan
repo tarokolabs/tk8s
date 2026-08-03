@@ -1,48 +1,8 @@
 #!/usr/bin/env bash
-source "$(dirname "$(realpath "$0")")/../lib/env.sh"
-[ "$1" == "" ] && echo "kan <cluster>" && exit 1
-
-export cn=${1}
-
-[ ! -f ${TK_HOME}/conf/${cn}.conf ] && echo "${TK_HOME}/conf/${cn}.conf not found" && exit 1
-
-source ${TK_HOME}/conf/${cn}.conf
-([ "$ECTN" == "" ] || [ "$TKIND" == "" ] || [ "$NTP" == "" ]) && echo "${TK_HOME}/conf/${cn}.conf error" && exi
-
-[ "$NTP" != "External" ] && echo "Network Type error" && exit 1
-
-which sshpass &>/dev/null
-[ "$?" != "0" ] && echo "pls install sshpass" && exit 1
-
-rm .ssh/known_hosts &>/dev/null
-
-read -p "Are you sure ? " yn
-[ "$yn" != "YES" ] && exit 1
-
-for c in $ECTN
-do
-   export cnn=$(echo $c | cut -d':' -f1)
-   export cif=$(echo $c | cut -d':' -f2)
-   export nip=$(echo $c | cut -d':' -f3)
-   export cip=$(echo $c | cut -d':' -f4)
-   export ctn=$(echo $c | cut -d':' -f5)
-   export cm=$(echo $c | cut -d':' -f6)
-   export cc=$(echo $c | cut -d':' -f7)
-
-   nc -w 1 $nip 22 &>/dev/null
-   [ "$?" != "0" ] && echo "Node ($nip) not existed" && continue
-
-   ping -c 1 $cip &>/dev/null
-   [ "$?" == "0" ] && echo "Container ($cip) existed" && continue
-
-   #sshpass -p bigred ssh -o StrictHostKeyChecking=no bigred@${nip} 'mkdir -p /home/bigred/cni' &>/dev/null
-   #sshpass -p bigred ssh -o StrictHostKeyChecking=no bigred@${nip} 'mkdir -p /home/bigred/wulin' &>/dev/null
-   sshpass -p bigred ssh -o StrictHostKeyChecking=no -o "SendEnv cn" bigred@${nip} "sudo mkdir -p ${CLUSTERS_DIR}/${cn}" &>/dev/null
-
-   sshpass -p bigred scp -rp /home/bigred/cni/* bigred@${nip}:/home/bigred/cni/
-   sshpass -p bigred scp -rp /home/bigred/tk/wulin/* bigred@${nip}:/home/bigred/wulin/
-
-   # echo $cnn,$cif,$nip,$cip,$ctn,$cm,$cc
-
-   cat tk/bin/kan.temp | envsubst > /tmp/${ctn}.prun
-done
+# 相容 shim：等同 tkctl node add（實作見 libexec/tkctl/node/add）
+# 被 source 時（舊 profile 的 alias）不可 exec——會把互動 shell 整個換掉
+if (return 0 2>/dev/null); then
+   "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/tkctl" node add "$@"
+else
+   exec "$(dirname "$(realpath "$0")")/tkctl" node add "$@"
+fi

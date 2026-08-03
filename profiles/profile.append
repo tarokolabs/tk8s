@@ -22,7 +22,6 @@ export TZ=Asia/Taipei
 export PS1='[$(grep "  cluster" ~/.kube/config 2>/dev/null | cut -d ":" -f 2 |tr -d " ")]\u@\h:\w$ '
 export KCN=$(grep "  cluster" /home/bigred/.kube/config 2>/dev/null | cut -d ":" -f 2 |tr -d " ")
 
-alias ksc='source $TK_HOME/bin/ksc'
 alias ping='ping -c 4 '
 alias pingdup='sudo arping -D -I eth0 -c 2 '
 alias dir='ls -alh '

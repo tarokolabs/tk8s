@@ -1,44 +1,8 @@
 #!/usr/bin/env bash
-source "$(dirname "$(realpath "$0")")/../lib/env.sh"
-
-[ "$1"  == "" ] && echo "kgn cluster" && exit 1
-
-[ ! -f ${TK_HOME}/conf/$1.conf ] && echo "${TK_HOME}/conf/$1.conf not found" && exit 1 
-
-source ${TK_HOME}/conf/$1.conf
-
-sudo podman ps -a | grep $1 &>/dev/null
-if [ "$?" != "0" ]; then
-   sudo podman network ls | grep $1 &>/dev/null
-   [ "$?" == "0" ] && sudo podman network rm $1 &>/dev/null 
-   echo "$1 not exist" && exit 1
-fi
-
-read -p "Are you sure ? " yn
-if [ "$yn" == "YES" ]; then
-   if [ "$NTP" == "Internal" ]; then
-      for n in $LCTN; do
-        cname=$(echo $n | cut -d ':' -f2)
-        sudo podman rm -f ${cname} &>/dev/null
-        [ "$?" == "0" ] && echo "${cname} container removed ok"
-        sudo podman volume rm -f ${cname}-volume &>/tmp/${cname}-kgn.out
-        [ "$?" == "0" ] && echo "${cname}-volume removed ok"
-        sudo podman rmi localhost/${cname}:v${KVER} &>/dev/null
-        [ "$?" == "0" ] && echo "${cname} image removed ok"
-      done
-      sudo podman network rm $1 &>/dev/null
-   fi
-
-   if [ "$NTP" == "External" ]; then
-      for n in $LCTN; do
-        cname=$(echo $n | cut -d ':' -f 5)
-        sudo podman rm -f ${cname} &>/dev/null
-      done
-   fi
-
-   sudo rm -r ${CLUSTERS_DIR}/$1 &>/dev/null
-   rm ~/.kube/config &>/dev/null && touch ~/.kube/config
-   sudo sed -i "/${1}/d" /etc/hosts &>/dev/null
-
-   echo "$1 cluster removed"
+# 相容 shim：等同 tkctl cluster delete（實作見 libexec/tkctl/cluster/delete）
+# 被 source 時（舊 profile 的 alias）不可 exec——會把互動 shell 整個換掉
+if (return 0 2>/dev/null); then
+   "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/tkctl" cluster delete "$@"
+else
+   exec "$(dirname "$(realpath "$0")")/tkctl" cluster delete "$@"
 fi

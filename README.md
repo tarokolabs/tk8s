@@ -67,11 +67,21 @@ git clone https://github.com/tarokolabs/tk8s.git ~/tk
 
 ## 使用
 
+統一入口是 `tkctl`（git 式 dispatcher，子命令是可讀的 shell 腳本——想知道平台實際做了什麼，直接打開 `libexec/tkctl/` 對應檔案）：
+
 ```bash
-kto <叢集名稱> [K8s 版本]
+tkctl cluster create <叢集名稱> [K8s 版本]   # 建叢集
+tkctl cluster list                           # 列出叢集
+tkctl help                                   # 全部子命令
 ```
 
-不帶參數執行會列出可用的叢集名稱與版本。
+**既有短命令全數保留**（`kto`、`kls`、`ksc`…），是等價的相容 shim——教材與肌肉記憶不受影響：
+
+```bash
+kto <叢集名稱> [K8s 版本]    # 等同 tkctl cluster create
+```
+
+不帶參數執行會列出可用的叢集名稱與版本。設定檔（`conf/*.conf`）載入時會驗證必要欄位與格式，缺漏會具名報錯。
 
 ## 環境定義
 

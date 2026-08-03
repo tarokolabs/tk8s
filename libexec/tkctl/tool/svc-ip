@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+source "$(dirname "$(realpath "$0")")/../../../lib/env.sh"
+
+[ "$1" == "" ] && echo "getnpip [svc name]" && exit 1
+ns="default"
+[ "$2" != "" ] && ns="$2"
+
+svclabel=$(kubectl get svc -o wide -n $ns | grep -e "$1.*NodePort " | tr -s ' ' | cut -d ' ' -f 7)
+[ "$svclabel" == "" ] && echo "$1 not nodeport type" && exit 1
+
+pn=$(kubectl get pods --selector=$svclabel -n $ns | tail -n+2 | cut -d ' ' -f1)
+
+for n in $pn
+do 
+ echo -n "$n: "
+ kubectl exec $n -n $ns -- sh -c 'echo $NODE_IP'
+done

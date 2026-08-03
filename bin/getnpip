@@ -1,17 +1,8 @@
 #!/usr/bin/env bash
-source "$(dirname "$(realpath "$0")")/../lib/env.sh"
-
-[ "$1" == "" ] && echo "getnpip [svc name]" && exit 1
-ns="default"
-[ "$2" != "" ] && ns="$2"
-
-svclabel=$(kubectl get svc -o wide -n $ns | grep -e "$1.*NodePort " | tr -s ' ' | cut -d ' ' -f 7)
-[ "$svclabel" == "" ] && echo "$1 not nodeport type" && exit 1
-
-pn=$(kubectl get pods --selector=$svclabel -n $ns | tail -n+2 | cut -d ' ' -f1)
-
-for n in $pn
-do 
- echo -n "$n: "
- kubectl exec $n -n $ns -- sh -c 'echo $NODE_IP'
-done
+# 相容 shim：等同 tkctl tool svc-ip（實作見 libexec/tkctl/tool/svc-ip）
+# 被 source 時（舊 profile 的 alias）不可 exec——會把互動 shell 整個換掉
+if (return 0 2>/dev/null); then
+   "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/tkctl" tool svc-ip "$@"
+else
+   exec "$(dirname "$(realpath "$0")")/tkctl" tool svc-ip "$@"
+fi

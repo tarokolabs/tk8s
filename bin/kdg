@@ -1,28 +1,8 @@
 #!/usr/bin/env bash
-source "$(dirname "$(realpath "$0")")/../lib/env.sh"
-
-[ "$1" == "" ] && echo "kdg cluster" && exit 1
-
-[ ! -f ${TK_HOME}/conf/$1.conf ] && echo '${TK_HOME}/conf/$1.conf not exist' && exit 1
-source ${TK_HOME}/conf/$1.conf
-
-[ "$TKIND" != "K8S" ] && echo "$1 not K8S cluster" && exit 1
-[ ! -d ${CLUSTERS_DIR}/$1 ] && echo "$1 cluster not found" && exit 1
-
-sudo podman ps -a | grep " $1-worker2" | grep 'Exited ' &>/dev/null
-[ "$?" == "0" ] && echo "$1-worker2 Exited" && exit 1
-
-if [ "$TKGW" == "true" ]; then
-   read -p "Are you sure ? " yn
-   [ "$yn" != "YES" ] && exit 1
-
-   # cif=${1}gw
-   sudo podman exec -it ${1}-worker2 bash -c "ip a show tkgw" &>/dev/null
-   if [ "$?" == "0" ]; then
-      sudo podman exec -it ${1}-worker2 bash -c "ip link set dev tkgw down"
-      sudo podman exec -it ${1}-worker2 bash -c "ip link delete tkgw"
-      echo "$1-worker2 Gateway removed (tkgw:${GWIP})"
-   else
-      echo "$1-worker2 Gateway not found (tkgw:${GWIP})"
-   fi
+# 相容 shim：等同 tkctl net gateway-delete（實作見 libexec/tkctl/net/gateway-delete）
+# 被 source 時（舊 profile 的 alias）不可 exec——會把互動 shell 整個換掉
+if (return 0 2>/dev/null); then
+   "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/tkctl" net gateway-delete "$@"
+else
+   exec "$(dirname "$(realpath "$0")")/tkctl" net gateway-delete "$@"
 fi
