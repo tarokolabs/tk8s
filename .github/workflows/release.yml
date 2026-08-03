@@ -1,0 +1,80 @@
+# 發佈流程（#13）：推上 v* tag 即觸發
+#   1. 建置節點 image 矩陣（tag = K8s 版本）推送 GHCR——平台只發佈節點 image，
+#      叢集內 image（toolbox/admin 等）屬教材，由 wulin repo 發佈
+#   2. 彙整 digest，生成 Release notes（image 對照表即相容性契約）
+#   3. 建立 GitHub Release（安裝用的 source archive 由 GitHub 自動附上）
+# 首次設定：node/crio 與 node/containerd 兩個 package 的
+# Manage Actions access 需把本 repo 加為 Write，GITHUB_TOKEN 才推得動。
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        k8s: ["1.34.3", "1.34.8", "1.35.5", "1.36.1"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: 登入 GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: 建置並推送節點 image（兩個 runtime 變體）
+        run: TK="$GITHUB_WORKSPACE" SUDO="" DIGEST_DIR="$GITHUB_WORKSPACE/digests" bin/build-images.sh node "${{ matrix.k8s }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-node-${{ matrix.k8s }}
+          path: digests/
+
+  release:
+    needs: [node]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          merge-multiple: true
+          path: digests
+      - name: 生成 Release notes
+        run: |
+          CILIUM=$(grep -oE 'CILIUM_VER:-[0-9.]+' bin/kto | head -1 | cut -d- -f2)
+          EG=$(grep -oE 'EG_VER:-v[0-9.]+' bin/kto | head -1 | cut -d- -f2)
+          {
+            echo "## 安裝"
+            echo
+            echo '```bash'
+            echo "git clone --branch $GITHUB_REF_NAME https://github.com/tarokolabs/tk8s.git ~/tk"
+            echo '```'
+            echo
+            echo "需求與使用方式見 [README](https://github.com/tarokolabs/tk8s/blob/$GITHUB_REF_NAME/README.md)。"
+            echo
+            echo "## 本版 image 對照表"
+            echo
+            echo "以下節點 image 由本 tag 的配方於 CI 建置（tag 對應 K8s 版本；以 digest 引用可完全固定內容）。叢集內 image（toolbox、admin 等）屬教材範疇，由 [wulin](https://github.com/tarokolabs/wulin) 發佈。"
+            echo
+            echo "| image | digest |"
+            echo "|---|---|"
+            sort digests/*.digest | awk '{printf "| `%s` | `%s` |\n", $1, $2}'
+            echo
+            echo "## 平台元件"
+            echo
+            echo "| 元件 | 版本 |"
+            echo "|---|---|"
+            echo "| Kubernetes（kubeadm）| 1.31–1.36（節點 image 提供 1.34.3 / 1.34.8 / 1.35.5 / 1.36.1）|"
+            echo "| Container runtime | CRI-O（對齊 K8s minor）；可切換 containerd |"
+            echo "| CNI | cilium ${CILIUM}（kube-proxy replacement + LB-IPAM/L2）|"
+            echo "| Gateway API | Envoy Gateway ${EG}（DaemonSet、experimental channel CRD）|"
+            echo "| 儲存 | local-path-provisioner |"
+          } > /tmp/notes.md
+          cat /tmp/notes.md
+      - name: 建立 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "tk8s $GITHUB_REF_NAME" --notes-file /tmp/notes.md

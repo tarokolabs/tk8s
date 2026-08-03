@@ -1,0 +1,31 @@
+# 臨時補建節點 image（不發 Release）：K8s 出新 patch 版而平台無需發版時，
+# 手動觸發建置指定版本的 node/crio 與 node/containerd。
+# 前提：docker.io/kindest/node 已發佈對應版本 tag。
+name: node-images
+
+on:
+  workflow_dispatch:
+    inputs:
+      k8s_versions:
+        description: "K8s 版本（空白分隔，例：1.36.2 1.35.6）"
+        required: true
+        type: string
+
+permissions:
+  packages: write
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    env:
+      K8S_VERSIONS: ${{ inputs.k8s_versions }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 驗證輸入格式
+        run: |
+          echo "$K8S_VERSIONS" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+( [0-9]+\.[0-9]+\.[0-9]+)*$' \
+            || { echo "版本格式錯誤：$K8S_VERSIONS"; exit 1; }
+      - name: 登入 GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: 建置並推送節點 image
+        run: TK="$GITHUB_WORKSPACE" SUDO="" bin/build-images.sh node $K8S_VERSIONS
