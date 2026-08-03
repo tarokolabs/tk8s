@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        k8s: ["1.34.3", "1.34.8", "1.35.5", "1.36.1"]
+        k8s: ["1.35.5", "1.36.1"]
     steps:
       - uses: actions/checkout@v4
       - name: 登入 GHCR

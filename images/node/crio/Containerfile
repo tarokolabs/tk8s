@@ -11,7 +11,7 @@ ARG CRIO_REPO=https://download.opensuse.org/repositories/isv:/cri-o
 
 # 與 taroko image 相同的除錯工具（gpg 是加 CRI-O repo 用的）
 RUN apt-get update && apt-get upgrade -y
-RUN apt-get install -y nano net-tools curl wget iputils-ping ipvsadm jq gpg
+RUN apt-get install -y nano net-tools curl wget iputils-ping jq gpg
 RUN rm /kind/manifests/*.yaml
 
 # CRI-O 的 minor 版本必須對齊 K8s minor：VER=1.35.5 -> v1.35

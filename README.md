@@ -26,7 +26,7 @@
 
 ## 架構
 
-不是 kind。`bin/kcn` 直接用 podman 建立一個 bridge 網路，再為每個節點建立一個 privileged 容器（固定 IP、限定 CPU 與記憶體）；`bin/kto` 接著在 control-plane 容器內執行 `kubeadm init`，其餘節點以 `kubeadm join` 加入。
+`tkctl cluster create` 以 podman 建立一個 bridge 網路，再為每個節點建立一個 privileged 容器（固定 IP、限定 CPU 與記憶體），接著在 control-plane 容器內執行 `kubeadm init`，其餘節點以 `kubeadm join` 加入——與實體機上的 kubeadm 流程一致，這正是教學價值所在。
 
 節點 image 為 `ghcr.io/tarokolabs/tk8s/node/<runtime>:v<K8s 版本>`（`crio` 或 `containerd`，依 conf 的 `K8SCRI` 自動對應）。拉取不到時（離線、或該版本未發佈），`kcn` 會以 repo 內的同名配方本地建置。
 
@@ -67,6 +67,8 @@ git clone https://github.com/tarokolabs/tk8s.git ~/tk
 
 ## 使用
 
+完整的命令手冊（含新舊命令對照、設定檔說明）見 **[docs/commands.md](docs/commands.md)**。
+
 統一入口是 `tkctl`（git 式 dispatcher，子命令是可讀的 shell 腳本——想知道平台實際做了什麼，直接打開 `libexec/tkctl/` 對應檔案）：
 
 ```bash
@@ -93,11 +95,11 @@ kto <叢集名稱> [K8s 版本]    # 等同 tkctl cluster create
 | `tkbp` | 3 | `172.22.8.0/24` | 1.35.5 |
 | `tkdt` | 5 | `172.22.16.0/24` | 1.35.5 |
 | `tklh` | 3 | `172.22.16.0/24` | 1.35.5 |
-| `tkops` | 3 | `172.22.24.0/24` | 1.34.3 |
-| `tkdev` | 3 | `172.22.32.0/24` | 1.34.3 |
-| `tkha` | 5 | `172.22.64.0/24` | 1.34.8 |
-| `tdcs1` | 5 | `172.22.160.0/24` | 1.34.8 |
-| `lkh5` | 5 | `172.22.160.0/24` | 1.34.8 |
+| `tkops` | 3 | `172.22.24.0/24` | 1.35.5 |
+| `tkdev` | 3 | `172.22.32.0/24` | 1.35.5 |
+| `tkha` | 5 | `172.22.64.0/24` | 1.35.5 |
+| `tdcs1` | 5 | `172.22.160.0/24` | 1.35.5 |
+| `lkh5` | 5 | `172.22.160.0/24` | 1.35.5 |
 
 要新增環境，複製一份 `.conf` 改網段與節點清單即可。
 
@@ -105,7 +107,7 @@ kto <叢集名稱> [K8s 版本]    # 等同 tkctl cluster create
 
 ## 支援的 K8s 版本
 
-`bin/init-config-*.yaml` 提供各版本的 kubeadm 設定範本。支援範圍為 **1.31 – 1.36**（kubeadm 設定 API 皆為 `v1beta4`）。
+支援政策：**最新與次新的 K8s minor**——目前為 **1.36.x 與 1.35.x**。這兩個版本系列隨每次發佈重建節點 image、經完整驗證。更舊的版本（`templates/kubeadm/` 仍保有 1.31 起的範本）可自行指定，節點 image 會以本地配方建置，但不在主要支援範圍。
 
 節點 image 依 K8s 版本自 `ghcr.io/tarokolabs/tk8s/node/<runtime>` 拉取；未發佈的版本會於首次使用時以 repo 內配方本地建置，不依賴任何私有 registry。
 
