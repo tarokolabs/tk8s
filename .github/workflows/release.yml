@@ -44,8 +44,8 @@ jobs:
           path: digests
       - name: 生成 Release notes
         run: |
-          CILIUM=$(grep -oE 'CILIUM_VER:-[0-9.]+' bin/kto | head -1 | cut -d- -f2)
-          EG=$(grep -oE 'EG_VER:-v[0-9.]+' bin/kto | head -1 | cut -d- -f2)
+          CILIUM=$(grep -oE 'CILIUM_VER:-[0-9.]+' libexec/tkctl/cluster/create | head -1 | cut -d- -f2)
+          EG=$(grep -oE 'EG_VER:-v[0-9.]+' libexec/tkctl/cluster/create | head -1 | cut -d- -f2)
           {
             echo "## 安裝"
             echo
@@ -67,7 +67,7 @@ jobs:
             echo
             echo "| 元件 | 版本 |"
             echo "|---|---|"
-            echo "| Kubernetes（kubeadm）| 1.31–1.36（節點 image 提供 1.34.3 / 1.34.8 / 1.35.5 / 1.36.1）|"
+            echo "| Kubernetes（kubeadm）| 主要支援最新與次新 minor——本版節點 image：1.35.5、1.36.1（更舊版本可本地建置）|"
             echo "| Container runtime | CRI-O（對齊 K8s minor）；可切換 containerd |"
             echo "| CNI | cilium ${CILIUM}（kube-proxy replacement + LB-IPAM/L2）|"
             echo "| Gateway API | Envoy Gateway ${EG}（DaemonSet、experimental channel CRD）|"
