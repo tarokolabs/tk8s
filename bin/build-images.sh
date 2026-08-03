@@ -30,8 +30,10 @@ build_push() {  # <name:tag> <context 目錄> [額外 build 參數...]
    ${SUDO} podman push --digestfile "${log}.digest" "${ref}" &>/dev/null
    [ "$?" != "0" ] && echo "  push failed（先 podman login ghcr.io）" && exit 1
    echo "  pushed ${ref}  $(cat ${log}.digest)"
-   [ -n "${DIGEST_DIR}" ] && mkdir -p "${DIGEST_DIR}" && \
+   if [ -n "${DIGEST_DIR}" ]; then
+      mkdir -p "${DIGEST_DIR}"
       echo "${ref}  $(cat ${log}.digest)" > "${DIGEST_DIR}/${safe}.digest"
+   fi
 }
 
 case "$1" in
