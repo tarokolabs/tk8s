@@ -109,4 +109,4 @@ git log --all -- '技術文件'
 
 ## 授權
 
-GPL-2.0，見 [LICENSE](LICENSE)。
+本專案採 **GPL-2.0-or-later**（GNU GPL v2，或依你的選擇任何更新版本），見 [LICENSE](LICENSE)。
