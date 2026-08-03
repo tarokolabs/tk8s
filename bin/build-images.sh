@@ -2,8 +2,8 @@
 # 建置並推送 tk8s 平台 image 至 GHCR（ghcr.io/tarokolabs/tk8s/*）
 #
 # 用法：
-#   build-images.sh tools [CalVer]        # toolbox、admin（預設 v2026.8.0）
 #   build-images.sh node <K8s版本>...     # 每個版本建 node/crio 與 node/containerd
+# （toolbox/admin 等叢集內 image 屬教材範疇，見 wulin repo 的 bin/build-images.sh）
 #
 # 推送前需先登入：podman login ghcr.io
 # 命名規則見 https://github.com/tarokolabs/tk8s/issues/20
@@ -12,7 +12,6 @@ REG="ghcr.io/tarokolabs/tk8s"
 LABELS="--label=org.opencontainers.image.source=https://github.com/tarokolabs/tk8s \
         --label=org.opencontainers.image.licenses=GPL-2.0"
 TK=~/tk
-ALPINE_VER="3.22.1"
 
 build_push() {  # <name:tag> <context 目錄> [額外 build 參數...]
    local ref="${REG}/${1}" dir="${TK}/${2}" log="/tmp/build-$(echo ${1} | tr '/:' '--').out"
@@ -27,11 +26,6 @@ build_push() {  # <name:tag> <context 目錄> [額外 build 參數...]
 }
 
 case "$1" in
-tools)
-   CALVER="${2:-v2026.8.0}"
-   build_push "toolbox:${CALVER}" wulin/images/base --build-arg=VER=${ALPINE_VER}
-   build_push "admin:${CALVER}"   wulin/images/tkadm
-   ;;
 node)
    shift
    [ "$1" == "" ] && echo "build-images.sh node <K8s版本>..." && exit 1
@@ -41,7 +35,7 @@ node)
    done
    ;;
 *)
-   echo "build-images.sh tools [CalVer] | node <K8s版本>..."
+   echo "build-images.sh node <K8s版本>..."
    exit 1
    ;;
 esac

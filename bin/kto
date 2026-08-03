@@ -293,19 +293,31 @@ if [ "$TKIND" == "K8S" ]; then
             fi
          fi
 
-         # install tkadm
-         kubectl create ns taroko &>/dev/null
-         sudo mkdir -p /opt/zfs/${cn}/{tkadm,users}
-         sudo chmod 777 -R /opt/zfs/${cn}
-         sudo cp -R ~/tk/wulin/wk/tkadm/k8suser /opt/zfs/${cn}/
-         cp ~/tk/wulin/bin/system.sh /opt/zfs/${cn}/tkadm/system.sh
-         cp ~/tk/wulin/bin/ash.init /opt/zfs/${cn}/tkadm/ash.init
-         echo ${cn} > /opt/zfs/${cn}/tkadm/cn.txt
+         # 管理主機（tkadm）與教學 registry（dkreg）屬教材範疇（wulin repo）——
+         # 平台不內建，WULIN_DIR 有對應 manifest 才部署（kcn 已將 WULIN_DIR 掛進節點）
+         export WULIN_DIR="${WULIN_DIR:-$HOME/wulin}"
+         if [ -f ${WULIN_DIR}/wk/tkadm/tkadm-dkreg.yaml ]; then
+            kubectl create ns taroko &>/dev/null
+            sudo mkdir -p /opt/zfs/${cn}/{tkadm,users}
+            sudo chmod 777 -R /opt/zfs/${cn}
+            sudo cp -R ${WULIN_DIR}/wk/tkadm/k8suser /opt/zfs/${cn}/
+            cp ${WULIN_DIR}/bin/system.sh /opt/zfs/${cn}/tkadm/system.sh
+            cp ${WULIN_DIR}/bin/ash.init /opt/zfs/${cn}/tkadm/ash.init
+            echo ${cn} > /opt/zfs/${cn}/tkadm/cn.txt
 
-         cat ${HDIR}/tk/wulin/wk/tkadm/tkadm-dkreg.yaml | sed "s|k1|${cn}|g" | sed "s|10.98.0.10|${SNID%.*}.10|g" >/opt/zfs/${cn}/tkadm/tkadm.yaml 
-         kubectl apply -f /opt/zfs/${cn}/tkadm/tkadm.yaml &>/tmp/tkadm.out
-         sleep 60
-         kubectl wait -n taroko pod -l app=tkadm --for=condition=Ready --timeout=360s
+            cat ${WULIN_DIR}/wk/tkadm/tkadm-dkreg.yaml | sed "s|k1|${cn}|g" | sed "s|10.98.0.10|${SNID%.*}.10|g" >/opt/zfs/${cn}/tkadm/tkadm.yaml
+            kubectl apply -f /opt/zfs/${cn}/tkadm/tkadm.yaml &>/tmp/tkadm.out
+            sleep 60
+            kubectl wait -n taroko pod -l app=tkadm --for=condition=Ready --timeout=360s
+
+            # dkreg 認證 secret（default namespace）
+            kubectl create secret docker-registry dkreg --docker-server=dkreg.taroko:5000 --docker-username=bigred --docker-password=bigred -n default &>/dev/null
+            [ "$?" == "0" ] && echo "dkreg secret ok"
+            kubectl patch serviceaccount default -n default -p '{"imagePullSecrets": [{"name": "dkreg"}]}' &>/dev/null
+         else
+            echo "wulin not found (${WULIN_DIR}): admin console (tkadm) & dkreg skipped"
+            echo "  git clone https://github.com/tarokolabs/wulin.git ${WULIN_DIR}"
+         fi
 
          ${HDIR}/tk/bin/kgw ${cn}
          ${HDIR}/tk/bin/kns ${cn}
@@ -334,15 +346,10 @@ if [ "$TKIND" == "K8S" ]; then
                [ "$?" == "0"  ] && echo "${tn} systemctl restart containerd ok"
             fi
 
-            cat $HDIR/tk/wulin/bin/node.sh | envsubst '${SRVIP}'  > /opt/zfs/${cn}/node.sh
+            cat $HDIR/tk/bin/node.sh | envsubst '${SRVIP}'  > /opt/zfs/${cn}/node.sh
             chmod +x /opt/zfs/${cn}/node.sh
             sudo podman exec -it ${tn} /opt/zfs/node.sh
          done
-
-         # create dkreg secret (default namespace)
-         kubectl create secret docker-registry dkreg --docker-server=dkreg.taroko:5000 --docker-username=bigred --docker-password=bigred -n default &>/dev/null
-         [ "$?" == "0" ] && echo "dkreg secret ok"
-         kubectl patch serviceaccount default -n default -p '{"imagePullSecrets": [{"name": "dkreg"}]}' &>/dev/null
 
          # install prometheus & kube-state-metrics
 	 #if [ "$PROM" == "true" ]; then
