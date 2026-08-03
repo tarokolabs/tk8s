@@ -6,7 +6,7 @@
 # （toolbox/admin 等叢集內 image 屬教材範疇，見 wulin repo 的 bin/build-images.sh）
 #
 # 環境變數：
-#   TK        repo 根目錄（預設 ~/tk；CI 設為 checkout 路徑）
+#   TK        repo 根目錄（預設依腳本位置自我定位）
 #   SUDO      前綴指令（預設 sudo；rootless podman 環境設為空字串）
 #   DIGEST_DIR 若設定，將各 image 的 digest 寫入該目錄（供 CI 彙整 release notes）
 #
@@ -16,7 +16,7 @@
 REG="ghcr.io/tarokolabs/tk8s"
 LABELS="--label=org.opencontainers.image.source=https://github.com/tarokolabs/tk8s \
         --label=org.opencontainers.image.licenses=GPL-2.0-or-later"
-TK="${TK:-$HOME/tk}"
+TK="${TK:-$(cd "$(dirname "$(realpath "$0")")/.." && pwd)}"
 SUDO="${SUDO-sudo}"
 
 build_push() {  # <name:tag> <context 目錄> [額外 build 參數...]
@@ -41,8 +41,8 @@ node)
    shift
    [ "$1" == "" ] && echo "build-images.sh node <K8s版本>..." && exit 1
    for v in "$@"; do
-      build_push "node/containerd:v${v}" wulin/images/taroko      --build-arg=VER=${v}
-      build_push "node/crio:v${v}"       wulin/images/taroko.crio --build-arg=VER=${v}
+      build_push "node/containerd:v${v}" images/node-containerd --build-arg=VER=${v}
+      build_push "node/crio:v${v}"       images/node-crio       --build-arg=VER=${v}
    done
    ;;
 *)

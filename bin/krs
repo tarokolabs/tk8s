@@ -1,4 +1,5 @@
 #!/bin/bash
+source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 [[ "$1" == "" || "$2" == "" ]] && echo "krs <cluster> <version>" && exit 1
 
 cd ~
@@ -12,21 +13,21 @@ sudo podman network ls | grep $1 &>/dev/null
 export cn=${1}
 export KVER=${2}
 
-[ ! -d /opt/zfs/${cn}-bak-${KVER}/ ] && echo "/opt/zfs/${cn}-bak-${KVER}/ not found" && exit 1
+[ ! -d ${CLUSTERS_DIR}/${cn}-bak-${KVER}/ ] && echo "${CLUSTERS_DIR}/${cn}-bak-${KVER}/ not found" && exit 1
 
-[ ! -f ~/tk/conf/${cn}.conf ] && echo "~/tk/conf/${cn}.conf not found" && exit 1
-source ~/tk/conf/${cn}.conf
+[ ! -f ${TK_HOME}/conf/${cn}.conf ] && echo "${TK_HOME}/conf/${cn}.conf not found" && exit 1
+source ${TK_HOME}/conf/${cn}.conf
 
 read -p "Are you sure ? " yn
 [ "$yn" != "YES" ] && exit 1
 
 # install cni
-if [ ! -d ~/cni ]; then
-   mkdir -p ~/cni
+if [ ! -d ${CNI_DIR} ]; then
+   mkdir -p ${CNI_DIR}
    curl -sL "$(curl -sL https://api.github.com/repos/containernetworking/plugins/releases/latest | \
-   jq -r '.assets[].browser_download_url' | grep 'linux-amd64.*.tgz$')" -o ~/cni-plugins.tgz &>/dev/null
-   tar xf ~/cni-plugins.tgz -C ~/cni; rm ~/cni-plugins.tgz
-   echo "~/cni ok"
+   jq -r '.assets[].browser_download_url' | grep 'linux-amd64.*.tgz$')" -o /tmp/cni-plugins.tgz &>/dev/null
+   tar xf /tmp/cni-plugins.tgz -C ${CNI_DIR}; rm /tmp/cni-plugins.tgz
+   echo "${CNI_DIR} ok"
 fi
 
 which kubectl &>/dev/null
@@ -43,15 +44,15 @@ do
 
   sudo podman images | grep ${ctn} &>/dev/null
   [ "$?" == "0" ] && sudo podman rmi "localhost/${ctn}:v${KVER}" &>/dev/null
-  sudo podman load < /opt/zfs/${cn}-bak-${KVER}/${ctn}-v${KVER}.tar &>/dev/null
+  sudo podman load < ${CLUSTERS_DIR}/${cn}-bak-${KVER}/${ctn}-v${KVER}.tar &>/dev/null
   [ "$?" == "0" ] && echo "localhost/${ctn}:v${KVER} image ok"
-  sudo tar xvf /opt/zfs/${cn}-bak-${KVER}/${ctn}-volume.tar -C / &>/dev/null
+  sudo tar xvf ${CLUSTERS_DIR}/${cn}-bak-${KVER}/${ctn}-volume.tar -C / &>/dev/null
   [ "$?" == "0" ] && echo "localhost/${ctn}:v${KVER} volume ok"
 done
 
-sudo tar xvf /opt/zfs/${cn}-bak-${KVER}/${cn}.tar -C / &>/dev/null
+sudo tar xvf ${CLUSTERS_DIR}/${cn}-bak-${KVER}/${cn}.tar -C / &>/dev/null
 [ ! -d ~/.kube ] && mkdir ~/.kube
-sudo cp /opt/zfs/${cn}/config ~/.kube/
+sudo cp ${CLUSTERS_DIR}/${cn}/config ~/.kube/
 sudo chown $(id -u):$(id -g) ~/.kube/config
 
 sudo podman network ls | grep "${ctn}" &>/dev/null
@@ -61,7 +62,7 @@ for c in ${LCTN}
 do
   ctn=$(echo $c | cut -d':' -f2)
 
-  /opt/zfs/${cn}-bak-${KVER}/${ctn}-v${KVER}.sh &>/dev/null
+  ${CLUSTERS_DIR}/${cn}-bak-${KVER}/${ctn}-v${KVER}.sh &>/dev/null
   [ "$?" == "0" ] && echo "${ctn} created ok"
   sleep 30
   ans=$(echo "${KVER%.*} > 1.29" | bc)
@@ -70,7 +71,7 @@ do
      sudo podman exec ${ctn} update-alternatives --set iptables /usr/sbin/iptables-nft &>/dev/null
      [ "$?" == "0" ] && echo "${ctn} iptables (nft) ok"
   fi
-  sudo podman exec ${ctn} cp /opt/zfs/hosts /etc/hosts
+  sudo podman exec ${ctn} cp ${NODE_TAROKO_DIR}/hosts /etc/hosts
   [ "$?" == "0" ] && echo "${ctn} /etc/hosts ok"
 done
 

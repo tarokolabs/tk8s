@@ -39,7 +39,7 @@ mode: nftables
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
 maxPods: 60
-# podLogsDir: /opt/zfs/logs
+# podLogsDir: /opt/taroko/logs
 containerLogMaxFiles: 3
 containerLogMaxSize: 1Mi
 shutdownGracePeriod: 60s

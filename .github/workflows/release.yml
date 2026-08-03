@@ -26,7 +26,7 @@ jobs:
       - name: 登入 GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
       - name: 建置並推送節點 image（兩個 runtime 變體）
-        run: TK="$GITHUB_WORKSPACE" SUDO="" DIGEST_DIR="$GITHUB_WORKSPACE/digests" bin/build-images.sh node "${{ matrix.k8s }}"
+        run: TK="$GITHUB_WORKSPACE" SUDO="" DIGEST_DIR="$GITHUB_WORKSPACE/digests" scripts/build-images.sh node "${{ matrix.k8s }}"
       - uses: actions/upload-artifact@v4
         with:
           name: digests-node-${{ matrix.k8s }}
@@ -50,7 +50,7 @@ jobs:
             echo "## 安裝"
             echo
             echo '```bash'
-            echo "git clone --branch $GITHUB_REF_NAME https://github.com/tarokolabs/tk8s.git ~/tk"
+            echo "git clone --branch $GITHUB_REF_NAME https://github.com/tarokolabs/tk8s.git tk8s"
             echo '```'
             echo
             echo "需求與使用方式見 [README](https://github.com/tarokolabs/tk8s/blob/$GITHUB_REF_NAME/README.md)。"

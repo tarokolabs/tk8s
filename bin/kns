@@ -1,8 +1,9 @@
 #!/bin/bash
+source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 
 [ "$1" == "" ] && echo "kns cluster" && exit 1
 
-[ ! -d /opt/zfs/$1 ] && echo "$1 not exist" && exit 1~
+[ ! -d ${CLUSTERS_DIR}/$1 ] && echo "$1 not exist" && exit 1~
 
 sudo podman ps -a | grep " $1-worker2 " | grep 'Exited ' &>/dev/null
 [ "$?" == "0" ] && echo "$1-worker2 Exited" && exit 1
@@ -10,7 +11,7 @@ sudo podman ps -a | grep " $1-worker2 " | grep 'Exited ' &>/dev/null
 kubectl get nodes 2>/tmp/$1-kns.out | grep "$1-worker2" &>/dev/null
 [ "$?" != "0" ] && echo "pls check /tmp/$1-kns.out" && exit 1
 
-[ ! -f ~/tk/conf/${1}.conf ] && echo "~/tk/conf/${1}.conf not found" && exit 1
+[ ! -f ${TK_HOME}/conf/${1}.conf ] && echo "${TK_HOME}/conf/${1}.conf not found" && exit 1
 
 pn=$(kubectl get pods -n taroko | grep tkadm | head -n 1 | cut -d ' ' -f1)
 cip=$(kubectl exec $pn -n taroko -- printenv 'HOST_IP')
@@ -20,10 +21,10 @@ cip=$(kubectl exec $pn -n taroko -- printenv 'HOST_IP')
 cat /etc/hosts | grep "$cip ${1}" &>/dev/null
 [ "$?" != "0" ] && echo "$cip ${1}" | sudo tee -a /etc/hosts &>/dev/null
 
-echo "127.0.0.1 localhost" | sudo tee /opt/zfs/$1/hosts &>/dev/null
+echo "127.0.0.1 localhost" | sudo tee ${CLUSTERS_DIR}/$1/hosts &>/dev/null
 
-sudo rm /opt/zfs/${1}/tkadd-dnat.sh &>/dev/null
-sudo mv /opt/zfs/${1}/tkdel-dnat.sh /opt/zfs/${1}/tkdel-dnat.sh.old &>/dev/null
+sudo rm ${CLUSTERS_DIR}/${1}/tkadd-dnat.sh &>/dev/null
+sudo mv ${CLUSTERS_DIR}/${1}/tkdel-dnat.sh ${CLUSTERS_DIR}/${1}/tkdel-dnat.sh.old &>/dev/null
 
 cn=${1}
 
@@ -44,16 +45,16 @@ do
           tp=$(echo $s | cut -d ':' -f 3)
    
           ip=$(echo $x | cut -d ':' -f2)
-          echo $ip $n.$ns | sudo tee -a /opt/zfs/$1/hosts &>/dev/null 
+          echo $ip $n.$ns | sudo tee -a ${CLUSTERS_DIR}/$1/hosts &>/dev/null 
           if [ "$d" != "none" ]; then
              echo "iptables -t nat -A PREROUTING -p tcp -i ${d} --dport $p -j DNAT --to-destination $ip:$tp" \
-             | sudo tee -a /opt/zfs/${cn}/tkadd-dnat.sh &>/dev/null
+             | sudo tee -a ${CLUSTERS_DIR}/${cn}/tkadd-dnat.sh &>/dev/null
   
              echo "iptables -t nat -D PREROUTING -p tcp -i ${d} --dport $p -j DNAT --to-destination $ip:$tp" \
-             | sudo tee -a /opt/zfs/${cn}/tkdel-dnat.sh &>/dev/null
+             | sudo tee -a ${CLUSTERS_DIR}/${cn}/tkdel-dnat.sh &>/dev/null
 
-             sudo chmod +x /opt/zfs/${cn}/tkadd-dnat.sh
-             sudo chmod +x /opt/zfs/${cn}/tkdel-dnat.sh
+             sudo chmod +x ${CLUSTERS_DIR}/${cn}/tkadd-dnat.sh
+             sudo chmod +x ${CLUSTERS_DIR}/${cn}/tkdel-dnat.sh
              echo "tkadd-dnat.sh tkdel-dnat.sh created"
           fi
        fi
@@ -61,17 +62,17 @@ do
   fi
 done
 
-source ~/tk/conf/${cn}.conf
+source ${TK_HOME}/conf/${cn}.conf
 
 if [ "$TKGW" == "true" ]; then
-   if [ -f /opt/zfs/${cn}/tkdel-dnat.sh.old ]; then
-      sudo podman exec ${cn}-worker2 bash -c '/opt/zfs/tkdel-dnat.sh.old' &>/dev/null
+   if [ -f ${CLUSTERS_DIR}/${cn}/tkdel-dnat.sh.old ]; then
+      sudo podman exec ${cn}-worker2 bash -c '${NODE_TAROKO_DIR}/tkdel-dnat.sh.old' &>/dev/null
    else
-      sudo podman exec ${cn}-worker2 bash -c '/opt/zfs/tkdel-dnat.sh' &>/dev/null
+      sudo podman exec ${cn}-worker2 bash -c '${NODE_TAROKO_DIR}/tkdel-dnat.sh' &>/dev/null
    fi
 
-   if [ -f /opt/zfs/${cn}/tkadd-dnat.sh ]; then
-      sudo podman exec ${cn}-worker2 bash -c '/opt/zfs/tkadd-dnat.sh' &>/dev/null
+   if [ -f ${CLUSTERS_DIR}/${cn}/tkadd-dnat.sh ]; then
+      sudo podman exec ${cn}-worker2 bash -c '${NODE_TAROKO_DIR}/tkadd-dnat.sh' &>/dev/null
       [ "$?" == "0" ] && echo "tkadd-dnat.sh ok"
    fi
 fi
@@ -79,26 +80,26 @@ fi
 for x in $LCTN
 do
    n=$(echo $x | cut -d ':' -f2)
-   sudo podman exec $n cp /opt/zfs/hosts /etc/hosts
+   sudo podman exec $n cp ${NODE_TAROKO_DIR}/hosts /etc/hosts
    [ "$?" == "0" ] && echo "$n /etc/hosts ok"
 done
 
-echo "[${cn} Infrastructure]" > /opt/zfs/${cn}/net.info
-echo "${cn}-control-plane : ${NID%.*}.1" >> /opt/zfs/${cn}/net.info
-echo "${cn}-worker1 : ${NID%.*}.2" >> /opt/zfs/${cn}/net.info
-echo "${cn}-worker2 : ${NID%.*}.3" >> /opt/zfs/${cn}/net.info
-echo "" >> /opt/zfs/${cn}/net.info
-echo "[${cn} Cluster Network]" >> /opt/zfs/${cn}/net.info
-echo "Service Subnet : $SNID" >> /opt/zfs/${cn}/net.info
-echo "Pod Subnet : $PNID" >> /opt/zfs/${cn}/net.info
+echo "[${cn} Infrastructure]" > ${CLUSTERS_DIR}/${cn}/net.info
+echo "${cn}-control-plane : ${NID%.*}.1" >> ${CLUSTERS_DIR}/${cn}/net.info
+echo "${cn}-worker1 : ${NID%.*}.2" >> ${CLUSTERS_DIR}/${cn}/net.info
+echo "${cn}-worker2 : ${NID%.*}.3" >> ${CLUSTERS_DIR}/${cn}/net.info
+echo "" >> ${CLUSTERS_DIR}/${cn}/net.info
+echo "[${cn} Cluster Network]" >> ${CLUSTERS_DIR}/${cn}/net.info
+echo "Service Subnet : $SNID" >> ${CLUSTERS_DIR}/${cn}/net.info
+echo "Pod Subnet : $PNID" >> ${CLUSTERS_DIR}/${cn}/net.info
 
-echo "TKGW : $TKGW" >> /opt/zfs/${cn}/net.info
+echo "TKGW : $TKGW" >> ${CLUSTERS_DIR}/${cn}/net.info
 if [ "$GWIF" == "" ]; then
    x=$(route -n | grep -e "^0.0.0.0")
    GWIF=${x##* }
 fi
-echo "Gateway Interface : $GWIF" >> /opt/zfs/${cn}/net.info
-echo "Gateway IP : $GWIP" >> /opt/zfs/${cn}/net.info
-echo "" >> /opt/zfs/${cn}/net.info
-kubectl get node -A -o custom-columns=NODE_NAME:.metadata.name,POD_CIDR:.spec.podCIDR >> /opt/zfs/${cn}/net.info
+echo "Gateway Interface : $GWIF" >> ${CLUSTERS_DIR}/${cn}/net.info
+echo "Gateway IP : $GWIP" >> ${CLUSTERS_DIR}/${cn}/net.info
+echo "" >> ${CLUSTERS_DIR}/${cn}/net.info
+kubectl get node -A -o custom-columns=NODE_NAME:.metadata.name,POD_CIDR:.spec.podCIDR >> ${CLUSTERS_DIR}/${cn}/net.info
 

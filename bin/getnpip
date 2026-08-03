@@ -1,4 +1,5 @@
 #!/bin/bash
+source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 
 [ "$1" == "" ] && echo "getnpip [svc name]" && exit 1
 ns="default"

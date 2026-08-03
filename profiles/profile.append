@@ -5,7 +5,9 @@ ips=$(ifconfig $GWIF | grep 'inet ')
 export IP=$(echo $ips | cut -d' ' -f2 | cut -d':' -f2)
 export NETID=${IP%.*}
 export GW=$(route -n | grep -e '^0.0.0.0' | tr -s \ - | cut -d ' ' -f2)
-export PATH="/home/bigred/bin:/home/bigred/tk/bin:/home/bigred/kind/bin:$PATH"
+# 平台 clone 位置（預設 ~/tk，放別處就改這行或先 export TK_HOME）
+export TK_HOME="${TK_HOME:-$HOME/tk}"
+export PATH="$HOME/bin:$TK_HOME/bin:$HOME/kind/bin:$PATH"
 # source /home/bigred/bin/myk3s
 clear && sleep 2
 
@@ -20,7 +22,7 @@ export TZ=Asia/Taipei
 export PS1='[$(grep "  cluster" ~/.kube/config 2>/dev/null | cut -d ":" -f 2 |tr -d " ")]\u@\h:\w$ '
 export KCN=$(grep "  cluster" /home/bigred/.kube/config 2>/dev/null | cut -d ":" -f 2 |tr -d " ")
 
-alias ksc='source tk/bin/ksc'
+alias ksc='source $TK_HOME/bin/ksc'
 alias ping='ping -c 4 '
 alias pingdup='sudo arping -D -I eth0 -c 2 '
 alias dir='ls -alh '

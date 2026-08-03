@@ -129,7 +129,7 @@ data:
   config.json: |-
     {
       "nodePathMap": [],
-      "sharedFileSystemPath": "/opt/zfs/storage"
+      "sharedFileSystemPath": "/opt/taroko/storage"
     }
   setup: |-
     #!/bin/sh

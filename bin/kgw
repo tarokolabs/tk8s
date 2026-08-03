@@ -1,12 +1,13 @@
 #!/bin/bash
+source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 
 [ "$1" == "" ] && echo "kgw cluster" && exit 1
 
-[ ! -f ~/tk/conf/$1.conf ] && echo "~/tk/conf/$1.conf not exist" && exit 1
-source ~/tk/conf/$1.conf
+[ ! -f ${TK_HOME}/conf/$1.conf ] && echo "${TK_HOME}/conf/$1.conf not exist" && exit 1
+source ${TK_HOME}/conf/$1.conf
 
 [ "$TKIND" != "K8S" ] && echo "$1 not K8S cluster" && exit 1
-[ ! -d /opt/zfs/$1 ] && echo "$1 cluster not found" && exit 1
+[ ! -d ${CLUSTERS_DIR}/$1 ] && echo "$1 cluster not found" && exit 1
 
 if [ "$GWIF" == "" ]; then
    x=$(route -n | grep -e "^0.0.0.0")

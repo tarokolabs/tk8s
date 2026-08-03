@@ -18,9 +18,9 @@ apiServer:
     - name: audit-log-format
       value: legacy        # text
     - name: audit-policy-file
-      value: /opt/zfs/logs/apiserver/audit-policy.yaml
+      value: /opt/taroko/logs/apiserver/audit-policy.yaml
     - name: audit-log-path
-      value: /opt/zfs/logs/apiserver/audit.log
+      value: /opt/taroko/logs/apiserver/audit.log
     - name: audit-log-maxage
       value: "3"   # Retain logs for 3 days
     - name: audit-log-maxbackup
@@ -31,8 +31,8 @@ apiServer:
     # Mount the Log Directory (Read-Write)
     # This allows the API server to write logs effectively to the host disk
     - name: audit-logs
-      hostPath: /opt/zfs
-      mountPath: /opt/zfs
+      hostPath: /opt/taroko
+      mountPath: /opt/taroko
       readOnly: false
       pathType: DirectoryOrCreate
     - name: host-localtime
@@ -106,7 +106,7 @@ evictionSoftGracePeriod:
   memory.available: "1m30s"
   nodefs.available: "1m30s"
 
-# podLogsDir: /opt/zfs/logs
+# podLogsDir: /opt/taroko/logs
 containerLogMaxFiles: 3
 containerLogMaxSize: 1Mi
 shutdownGracePeriod: 60s

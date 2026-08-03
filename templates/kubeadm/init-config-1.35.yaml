@@ -18,9 +18,9 @@ apiServer:
     - name: audit-log-format
       value: legacy        # text
     - name: audit-policy-file
-      value: /opt/zfs/logs/apiserver/audit-policy.yaml
+      value: /opt/taroko/logs/apiserver/audit-policy.yaml
     - name: audit-log-path
-      value: /opt/zfs/logs/apiserver/audit.log
+      value: /opt/taroko/logs/apiserver/audit.log
     - name: audit-log-maxage
       value: "3"   # Retain logs for 3 days
     - name: audit-log-maxbackup
@@ -31,8 +31,8 @@ apiServer:
     # Mount the Log Directory (Read-Write)
     # This allows the API server to write logs effectively to the host disk
     - name: audit-logs
-      hostPath: /opt/zfs
-      mountPath: /opt/zfs
+      hostPath: /opt/taroko
+      mountPath: /opt/taroko
       readOnly: false
       pathType: DirectoryOrCreate
     - name: host-localtime
@@ -89,11 +89,24 @@ mode: nftables
 ---
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
-podPidsLimit: 8192
 maxPods: 60
-# podLogsDir: /opt/zfs/logs
-imageMinimumGCAge: "2m0s"
-imageMaximumGCAge: "168h"
+
+evictionHard:
+  memory.available: "500Mi"
+  nodefs.available: "5%"
+  imagefs.available: "5%"
+
+# 軟驅逐閾值 (達到後開始倒數)
+evictionSoft:
+  memory.available: "500Mi"
+  nodefs.available: "5%"
+
+# 軟驅逐寬限期 (必須與 evictionSoft 搭配使用)
+evictionSoftGracePeriod:
+  memory.available: "1m30s"
+  nodefs.available: "1m30s"
+
+# podLogsDir: /opt/taroko/logs
 containerLogMaxFiles: 3
 containerLogMaxSize: 1Mi
 shutdownGracePeriod: 60s

@@ -9,7 +9,7 @@ data:
       "nodePathMap": [],
       "sharedFileSystemPath": [
         {
-          "path": "/opt/zfs"
+          "path": "/opt/taroko"
         }
       ]
     }

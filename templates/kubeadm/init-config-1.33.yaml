@@ -13,7 +13,33 @@ apiVersion: kubeadm.k8s.io/v1beta4
 kind: ClusterConfiguration
 certificatesDir: /etc/kubernetes/pki
 clusterName: $cn                             # set your clusterName
-apiServer: {}
+apiServer:
+  extraArgs:
+    - name: audit-log-format
+      value: legacy        # text
+    - name: audit-policy-file
+      value: /opt/taroko/logs/apiserver/audit-policy.yaml
+    - name: audit-log-path
+      value: /opt/taroko/logs/apiserver/audit.log
+    - name: audit-log-maxage
+      value: "3"   # Retain logs for 3 days
+    - name: audit-log-maxbackup
+      value: "5"   # Retain 5 old log files
+    - name: audit-log-maxsize
+      value: "10"  # Rotate after 10MB
+  extraVolumes:
+    # Mount the Log Directory (Read-Write)
+    # This allows the API server to write logs effectively to the host disk
+    - name: audit-logs
+      hostPath: /opt/taroko
+      mountPath: /opt/taroko
+      readOnly: false
+      pathType: DirectoryOrCreate
+    - name: host-localtime
+      hostPath: /etc/localtime
+      mountPath: /etc/localtime
+      readOnly: true
+      pathType: File
 controllerManager:
   extraArgs:
     - name: node-cidr-mask-size              # set pod cidr per node
@@ -39,7 +65,7 @@ mode: nftables
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
 maxPods: 60
-# podLogsDir: /opt/zfs/logs
+# podLogsDir: /opt/taroko/logs
 containerLogMaxFiles: 3
 containerLogMaxSize: 1Mi
 shutdownGracePeriod: 60s

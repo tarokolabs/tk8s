@@ -1,4 +1,5 @@
 #!/bin/bash
+source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 
 [ "$1"  == "" ] && echo "kpk cluster" && exit 1
 sudo podman ps | grep $1-control-plane &>/dev/null

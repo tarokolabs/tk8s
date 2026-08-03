@@ -6,7 +6,7 @@ localAPIEndpoint:
 nodeRegistration:
   criSocket: unix:///run/containerd/containerd.sock         # change from CRI-O Unix Socket
   imagePullPolicy: IfNotPresent
-  name: ${cn}-control-plane                                      # change from Master node hsotname
+  name: $cn-control-plane                                      # change from Master node hsotname
   taints: null
 ---
 apiVersion: kubeadm.k8s.io/v1beta4
@@ -18,9 +18,9 @@ apiServer:
     - name: audit-log-format
       value: legacy        # text
     - name: audit-policy-file
-      value: /opt/zfs/logs/apiserver/audit-policy.yaml
+      value: /opt/taroko/logs/apiserver/audit-policy.yaml
     - name: audit-log-path
-      value: /opt/zfs/logs/apiserver/audit.log
+      value: /opt/taroko/logs/apiserver/audit.log
     - name: audit-log-maxage
       value: "3"   # Retain logs for 3 days
     - name: audit-log-maxbackup
@@ -31,8 +31,8 @@ apiServer:
     # Mount the Log Directory (Read-Write)
     # This allows the API server to write logs effectively to the host disk
     - name: audit-logs
-      hostPath: /opt/zfs
-      mountPath: /opt/zfs
+      hostPath: /opt/taroko
+      mountPath: /opt/taroko
       readOnly: false
       pathType: DirectoryOrCreate
     - name: host-localtime
@@ -44,19 +44,45 @@ controllerManager:
   extraArgs:
     - name: node-cidr-mask-size              # set pod cidr per node
       value: "25"
-dns: {}
+    # Garbage Collection
+    # Max number of terminated pods to keep before cleaning up
+    - name: terminated-pod-gc-threshold
+      value: "500"
 etcd:
   local:
     dataDir: /var/lib/etcd
+    extraArgs:
+      # Performance Tuning (Crucial for high latency networks)
+      - name: heartbeat-interval
+        value: "250"     # Default 100ms. Bump if network is jittery.
+      - name: election-timeout
+        value: "2500"      # Default 1000ms. 10x heartbeat is standard.
+      # Snapshot/Storage
+      - name: quota-backend-bytes
+        value: "8589934592" # 8GB. Default is 2GB (often too small for prod).
+      - name: auto-compaction-retention
+        value: "3"    # Auto compact every 3 hour.
+scheduler:
+  extraArgs:
+    # Security: Disable profiling to reduce attack surface
+    - name: profiling
+      value: "false"
+    # Logging: Standard verbosity
+    - name: v
+      value: "2"
+    # Networking: Ensure it binds only to localhost
+    - name: bind-address
+      value: "127.0.0.1"
+dns: {}
 imageRepository: registry.k8s.io
 kubernetesVersion: $KVER
 caCertificateValidityPeriod: 43800h0m0s      # 5 years
 certificateValidityPeriod: 8760h0m0s         # 1 years
+controlPlaneEndpoint: "$KUBEVIP:6443"
 networking:
   dnsDomain: $cn.k8s                                    # DNS domain used by Kubernetes Services.
   podSubnet: ${PNID}                             # the subnet used by Pods.
   serviceSubnet: ${SNID}                           # subnet used by Kubernetes Services.
-scheduler: {}
 ---
 apiVersion: kubeproxy.config.k8s.io/v1alpha1
 kind: KubeProxyConfiguration
@@ -65,7 +91,7 @@ mode: nftables
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
 maxPods: 60
-# podLogsDir: /opt/zfs/logs
+# podLogsDir: /opt/taroko/logs
 containerLogMaxFiles: 3
 containerLogMaxSize: 1Mi
 shutdownGracePeriod: 60s

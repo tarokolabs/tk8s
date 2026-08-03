@@ -28,4 +28,4 @@ jobs:
       - name: 登入 GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
       - name: 建置並推送節點 image
-        run: TK="$GITHUB_WORKSPACE" SUDO="" bin/build-images.sh node $K8S_VERSIONS
+        run: TK="$GITHUB_WORKSPACE" SUDO="" scripts/build-images.sh node $K8S_VERSIONS

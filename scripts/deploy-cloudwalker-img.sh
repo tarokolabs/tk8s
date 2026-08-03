@@ -6,51 +6,51 @@ VER="26.01"
 # sudo curl -s https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/bin/mc &>/dev/null
 # if [ "$?" == "0" ]; then
 #   sudo chmod +x /usr/bin/mc
-#   cp -rP /usr/bin/mc ~/tk/wulin/images/base/
-#   cp -rP /usr/bin/mc ~/tk/wulin/images/jkagent/
+#   cp -rP /usr/bin/mc ${TK_HOME}/wulin/images/base/
+#   cp -rP /usr/bin/mc ${TK_HOME}/wulin/images/jkagent/
 #   echo "minio client ok"
 #fi
 
 sudo podman rmi quay.io/cloudwalker/alp.base &>/dev/null
 [ "$?" == "0" ] && echo "quay.io/cloudwalker/alp.base removed"
-sudo podman build --format=docker --build-arg="VER=3.23.4" --no-cache --force-rm -t quay.io/cloudwalker/alp.base ~/tk/wulin/images/base &>/tmp/alp.base
+sudo podman build --format=docker --build-arg="VER=3.23.4" --no-cache --force-rm -t quay.io/cloudwalker/alp.base ${TK_HOME}/wulin/images/base &>/tmp/alp.base
 [ "$?" != "0" ] && echo -e "quay.io/cloudwalker/alp.base image error\n" && exit 1
 echo -e "quay.io/cloudwalker/alp.base image ok\n"
 
 sudo podman rmi quay.io/cloudwalker/alp.sshd &>/dev/null
 [ "$?" == "0" ] && echo "quay.io/cloudwalker/alp.sshd removed"
-sudo podman build --format=docker --no-cache --force-rm -t quay.io/cloudwalker/alp.sshd ~/tk/wulin/images/sshd &>/tmp/alp.sshd
+sudo podman build --format=docker --no-cache --force-rm -t quay.io/cloudwalker/alp.sshd ${TK_HOME}/wulin/images/sshd &>/tmp/alp.sshd
 [ "$?" != "0" ] && echo "quay.io/cloudwalker/alp.sshd image error" && exit 1
 echo -e "quay.io/cloudwalker/alp.sshd image ok\n"
 
 sudo podman rmi quay.io/cloudwalker/alp.fbs &>/dev/null
 [ "$?" == "0" ] && echo "quay.io/cloudwalker/alp.fbs removed"
-sudo podman build --format=docker --no-cache --force-rm -t quay.io/cloudwalker/alp.fbs ~/tk/wulin/images/fbs &>/tmp/alp.fbs
+sudo podman build --format=docker --no-cache --force-rm -t quay.io/cloudwalker/alp.fbs ${TK_HOME}/wulin/images/fbs &>/tmp/alp.fbs
 [ "$?" != "0" ] && echo "quay.io/cloudwalker/alp.fbs image error" && exit 1
 echo -e "quay.io/cloudwalker/alp.fbs image ok\n"
 
 sudo podman rmi quay.io/cloudwalker/alp.tkadm &>/dev/null
 [ "$?" == "0" ] && echo "quay.io/cloudwalker/alp.tkadm removed"
-sudo podman build --format=docker --build-arg="VER=26.01" --no-cache --force-rm -t quay.io/cloudwalker/alp.tkadm ~/tk/wulin/images/tkadm &>/tmp/alp.tkadm
+sudo podman build --format=docker --build-arg="VER=26.01" --no-cache --force-rm -t quay.io/cloudwalker/alp.tkadm ${TK_HOME}/wulin/images/tkadm &>/tmp/alp.tkadm
 [ "$?" != "0" ] && echo "quay.io/cloudwalker/alp.tkadm image error" && exit 1 
 echo -e "quay.io/cloudwalker/alp.tkadm image ok\n"
 
 sudo podman rmi quay.io/cloudwalker/usdip34 &>/dev/null
 [ "$?" == "0" ] && echo "quay.io/cloudwalker/usdip34 removed"
-sudo podman build --build-arg VER=${VER} --format=docker --no-cache --force-rm -t quay.io/cloudwalker/usdip34 ~/tk/wulin/images/usdt.hdp341/ &>/tmp/usdip34
+sudo podman build --build-arg VER=${VER} --format=docker --no-cache --force-rm -t quay.io/cloudwalker/usdip34 ${TK_HOME}/wulin/images/usdt.hdp341/ &>/tmp/usdip34
 [ "$?" != "0" ] && echo -e "quay.io/cloudwalker/usdip34 image error\n" && exit 1
 echo -e "quay.io/cloudwalker/usdip34 image ok\n"
 
 sudo podman rmi quay.io/cloudwalker/alp.podman &>/dev/null
 [ "$?" == "0" ] && echo "quay.io/cloudwalker/alp.podman removed"
-sudo podman build --build-arg VER=${VER} --format=docker --no-cache --force-rm -t quay.io/cloudwalker/alp.podman ~/tk/wulin/images/alp.podman/ &>/tmp/alp.podman
+sudo podman build --build-arg VER=${VER} --format=docker --no-cache --force-rm -t quay.io/cloudwalker/alp.podman ${TK_HOME}/wulin/images/alp.podman/ &>/tmp/alp.podman
 [ "$?" != "0" ] && echo -e "quay.io/cloudwalker/alp.podman image error\n" && exit 1
 echo -e "quay.io/cloudwalker/alp.podman image ok\n"
 
 sudo podman rmi quay.io/cloudwalker/oracle.mysql &>/dev/null
 [ "$?" == "0" ] && echo "quay.io/cloudwalker/oracle.mysql removed"
-#sudo podman build --format=docker --build-arg="VER=8.0.37" --no-cache --force-rm -t quay.io/cloudwalker/oracle.mysql ~/tk/wulin/images/mysql &>/tmp/oracle.mysql
-sudo podman build --format=docker --build-arg="VER=8.4.5" --no-cache --force-rm -t quay.io/cloudwalker/oracle.mysql ~/tk/wulin/images/mysql &>/tmp/oracle.mysql
+#sudo podman build --format=docker --build-arg="VER=8.0.37" --no-cache --force-rm -t quay.io/cloudwalker/oracle.mysql ${TK_HOME}/wulin/images/mysql &>/tmp/oracle.mysql
+sudo podman build --format=docker --build-arg="VER=8.4.5" --no-cache --force-rm -t quay.io/cloudwalker/oracle.mysql ${TK_HOME}/wulin/images/mysql &>/tmp/oracle.mysql
 [ "$?" != "0" ] && echo -e "quay.io/cloudwalker/oracle.mysql image error\n" && exit 1
 echo -e "quay.io/cloudwalker/oracle.mysql image ok\n"
 
