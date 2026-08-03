@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # install etcdctl
 if [ -f /etc/kubernetes/pki/etcd/ca.crt ]; then

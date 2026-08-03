@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 nc -z -w 2 dkreg.kube-system 22100
 [ "$?" != "0" ] && echo "Kube-kadm not exist" && exit 1

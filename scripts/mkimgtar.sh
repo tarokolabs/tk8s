@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 mkdir -p ~/kindimg
 # docker system prune -a -f &>/dev/null

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # 建置並推送 tk8s 平台 image 至 GHCR（ghcr.io/tarokolabs/tk8s/*）
 #
 # 用法：

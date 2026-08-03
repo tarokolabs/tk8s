@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 [ "$1" == "" ] && echo "mkistio <cluser>" && exit 1
 

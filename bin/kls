@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 kn=$(sudo podman ps -a --format "{{.Names}} {{.Status}}" | cut -d ' ' -f 1,2 | tr '-' ' ' | grep -v 'plane' | cut -d ' ' -f1,3 | uniq | tr ' ' ':')
 if [ "$kn" == "" ]; then

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 
 VER="24.01"

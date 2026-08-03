@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 which yq &>/dev/null
 [ "$?" != "0" ] && sudo apk update &>/dev/null && sudo apk add yq &>/dev/null

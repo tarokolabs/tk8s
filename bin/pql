@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 source "$(dirname "$(realpath "$0")")/../lib/env.sh"
 
 [ "$#" == "0" ] && echo "psql <Query String>" && exit 1

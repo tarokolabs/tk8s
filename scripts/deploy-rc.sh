@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 cn=$(kubectl config view --minify -o jsonpath='{.clusters[].name}')
 [ "$cn" == "" ] && echo "can not find any K8S cluster" && exit 1
