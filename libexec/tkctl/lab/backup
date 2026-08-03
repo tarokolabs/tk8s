@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+source "$(dirname "$(realpath "$0")")/../../../lib/env.sh"
+
+[ "$1" == "" ] && echo "kbk cluster" && exit 1
+
+[ ! -d ${CLUSTERS_DIR}/${1} ] && echo "$1 not exist" && exit 1
+
+sudo podman ps -a | grep " $1" | grep 'Exited ' &>/dev/null
+[ "$?" == "0" ] && echo "$1 already Exited" && exit 1
+
+tk_load_conf ${1} || exit 1
+
+cn=$1
+
+for x in tkadm:taroko dtadm:dt
+do
+  lb=${x%%:*}
+  ns=${x##*:}
+  pn=$(kubectl get pod -l app=${lb} -o jsonpath="{.items[0].metadata.name}" -n $ns 2>/dev/null)
+ 
+  if [ "$pn" != "" ]; then
+     kubectl exec $pn -n $ns -- mkdir -p ${NODE_TAROKO_DIR}/${lb}bak/etc
+
+     kubectl exec $pn -n $ns -- sudo cp -p /etc/passwd /etc/group /etc/shadow ${NODE_TAROKO_DIR}/${lb}bak/etc/
+     [ "$?" == "0" ] && echo "${NODE_TAROKO_DIR}/${lb}bak/etc/ ok"
+
+     kubectl exec $pn -n $ns -- bash -c "cd /;zip -rp ${NODE_TAROKO_DIR}/${lb}bak/${lb}.zip home/ -x home/bigred/wulin\* &>/dev/null"
+     [ "$?" == "0" ] && echo "${NODE_TAROKO_DIR}/${lb}bak/${lb}.zip ok"
+  fi
+done

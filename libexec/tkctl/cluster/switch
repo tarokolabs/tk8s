@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+source "$(dirname "$(realpath "$0")")/../../../lib/env.sh"
+
+[ "$1" == "" ] && exit 1
+
+tk_load_conf ${1} || exit 1
+
+if [ "$TKIND" == "K8S" ]; then
+   cl=$(sudo podman ps -a | grep -o -e "${1}-[a-z]*[-]*[a-z]*[1-9]*" | tr '\n' ' ')
+   if [ "$cl" == "" ]; then
+      echo "$1 not exist"
+   else 
+      sudo podman ps -a | grep " $1" | grep 'Exited ' &>/dev/null
+      if [ "$?" == "0" ]; then 
+         echo "$1 Exited"
+      else
+         sudo podman cp ${1}-control-plane:/etc/kubernetes/admin.conf ~/.kube/config --overwrite
+         sudo chown $(id -u):$(id -g) ~/.kube/config
+         export KCN=$(grep "  cluster" /home/bigred/.kube/config 2>/dev/null | cut -d ":" -f 2 |tr -d " ")
+         echo "switch to $1 cluster ok"
+      fi
+   fi
+else
+   echo "$1 not K8S Cluster"
+fi

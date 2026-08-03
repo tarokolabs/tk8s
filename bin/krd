@@ -1,18 +1,3 @@
 #!/usr/bin/env bash
-source "$(dirname "$(realpath "$0")")/../lib/env.sh"
-
-r=$(cat /etc/hosts | grep -e "^172.22" | tr ' ' '.' | cut -d '.' -f 3,5)
-[ "$r" == "" ] && echo "no route to delete" && exit 1
-
-for n in $r
-do
-  nid=$(echo $n | cut -d '.' -f 1)
-  cn=$(echo $n | cut -d '.' -f 2)
-
-  echo "[$cn]"
-  sudo route del -net 10.244.${nid}.0 netmask 255.255.248.0 gw 172.22.${nid}.1 &>/dev/null
-  [ "$?" == "0" ] && echo "sudo route del -net 10.244.${nid}.0 netmask 255.255.248.0 gw 172.22.${nid}.1"
-  sudo route del -net 10.98.${nid}.0 netmask 255.255.255.0 gw 172.22.${nid}.1 &>/dev/null
-  [ "$?" == "0" ] && echo "sudo route del -net 10.98.${nid}.0 netmask 255.255.255.0 gw 172.22.${nid}.1"
-  echo ""
-done
+# 相容 shim：等同 tkctl net route-delete（實作見 libexec/tkctl/net/route-delete）
+exec "$(dirname "$(realpath "$0")")/tkctl" net route-delete "$@"

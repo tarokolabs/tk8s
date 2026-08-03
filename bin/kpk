@@ -1,14 +1,3 @@
 #!/usr/bin/env bash
-source "$(dirname "$(realpath "$0")")/../lib/env.sh"
-
-[ "$1"  == "" ] && echo "kpk cluster" && exit 1
-sudo podman ps | grep $1-control-plane &>/dev/null
-[ "$?" != "0" ] && echo "$1 cluster not exist" && exit 1
-
-sudo podman ps | grep $1-control-plane | grep Up &>/dev/null
-[ "$?" != "0" ] && echo "pls start $1 cluster first" && exit 1
-
-sudo podman cp $1-control-plane:/etc/kubernetes/admin.conf ~/.kube/config --overwrite
-sudo chown $(id -u):$(id -g) ~/.kube/config
-
-echo "get $1 cluster config ok"
+# 相容 shim：等同 tkctl cluster kubeconfig（實作見 libexec/tkctl/cluster/kubeconfig）
+exec "$(dirname "$(realpath "$0")")/tkctl" cluster kubeconfig "$@"
