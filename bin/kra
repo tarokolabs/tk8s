@@ -1,3 +1,8 @@
 #!/usr/bin/env bash
 # 相容 shim：等同 tkctl net route-add（實作見 libexec/tkctl/net/route-add）
-exec "$(dirname "$(realpath "$0")")/tkctl" net route-add "$@"
+# 被 source 時（舊 profile 的 alias）不可 exec——會把互動 shell 整個換掉
+if (return 0 2>/dev/null); then
+   "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/tkctl" net route-add "$@"
+else
+   exec "$(dirname "$(realpath "$0")")/tkctl" net route-add "$@"
+fi

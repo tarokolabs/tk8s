@@ -19,14 +19,14 @@ if [ "$TKIND" == "K8S" ]; then
 
    if [ "$KUBEVIP" != "" ]; then
       cpip=$(sudo podman inspect ${1}-control-plane --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
-      cp .kube/config ${CLUSTERS_DIR}/$1/config.100
-      sed -i "s|${KUBEVIP}|$cpip|g" .kube/config
-      cp .kube/config ${CLUSTERS_DIR}/$1/config.cp1
+      cp ~/.kube/config ${CLUSTERS_DIR}/$1/config.100
+      sed -i "s|${KUBEVIP}|$cpip|g" ~/.kube/config
+      cp ~/.kube/config ${CLUSTERS_DIR}/$1/config.cp1
 
       cpip=$(sudo podman inspect ${1}-control-plane1 --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
-      cp ${CLUSTERS_DIR}/$1/config.100 .kube/config
-      sed -i "s|${KUBEVIP}|$cpip|g" .kube/config
-      cp .kube/config ${CLUSTERS_DIR}/$1/config.cp2
+      cp ${CLUSTERS_DIR}/$1/config.100 ~/.kube/config
+      sed -i "s|${KUBEVIP}|$cpip|g" ~/.kube/config
+      cp ~/.kube/config ${CLUSTERS_DIR}/$1/config.cp2
    else
       [ ! -f ${CLUSTERS_DIR}/$1/config ] && mv ~/.kube/config ${CLUSTERS_DIR}/$1/
    fi

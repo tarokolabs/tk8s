@@ -3,7 +3,7 @@ source "$(dirname "$(realpath "$0")")/../../../lib/env.sh"
 
 [ "$1" == "" ] && echo "kmt (create|remove|list)" && exit 1
 
-cn=$(cat .kube/config | grep ' cluster: ' | cut -d ':' -f 2 | tr -d ' ')
+cn=$(cat ~/.kube/config | grep ' cluster: ' | cut -d ':' -f 2 | tr -d ' ')
 
 read -p "Are you sure (${cn})? " yn
 [ "$yn" != "YES" ] && exit 1

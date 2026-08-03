@@ -1,3 +1,8 @@
 #!/usr/bin/env bash
 # 相容 shim：等同 tkctl cluster switch（實作見 libexec/tkctl/cluster/switch）
-exec "$(dirname "$(realpath "$0")")/tkctl" cluster switch "$@"
+# 被 source 時（舊 profile 的 alias）不可 exec——會把互動 shell 整個換掉
+if (return 0 2>/dev/null); then
+   "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/tkctl" cluster switch "$@"
+else
+   exec "$(dirname "$(realpath "$0")")/tkctl" cluster switch "$@"
+fi
