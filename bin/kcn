@@ -19,7 +19,8 @@ if [ ! -d "$WULIN_DIR" ]; then
 fi
 
 # 節點 image：本地沒有先嘗試 GHCR 拉取，拉不到（離線或該版本未發佈）
-# 就以同名配方本地建置（node/crio → images/node-crio；node/containerd → images/node-containerd）
+# 就以同名配方本地建置——GHCR 名稱與 images/ 底下的配方路徑恆等對映
+# （ghcr.io/tarokolabs/tk8s/node/crio ↔ images/node/crio），新變體零改動
 # 基底 kindest/node 可公開拉取，全新環境不依賴任何私有 registry
 if [[ "${IMG}" == ghcr.io/tarokolabs/tk8s/node/* || "${IMG%%:*}" == "localhost/taroko.crio" ]]; then
    if ! sudo podman image exists ${IMG} &>/dev/null; then
@@ -27,8 +28,8 @@ if [[ "${IMG}" == ghcr.io/tarokolabs/tk8s/node/* || "${IMG%%:*}" == "localhost/t
          echo "${IMG} pulled"
       else
          case "${IMG}" in
-            */node/containerd:*) BDIR=${TK_HOME}/images/node-containerd ;;
-            *)                   BDIR=${TK_HOME}/images/node-crio ;;
+            ghcr.io/tarokolabs/tk8s/*) rel="${IMG#ghcr.io/tarokolabs/tk8s/}"; BDIR=${TK_HOME}/images/${rel%%:*} ;;
+            *)                         BDIR=${TK_HOME}/images/node/crio ;;
          esac
          echo "building ${IMG} (not available remotely; first build takes a few minutes)"
          sudo podman build --build-arg VER=${KVER} --force-rm -t ${IMG} ${BDIR} &>/tmp/node-img-build.out
@@ -38,7 +39,7 @@ if [[ "${IMG}" == ghcr.io/tarokolabs/tk8s/node/* || "${IMG%%:*}" == "localhost/t
    fi
 fi
 
-# 共用唯讀 image store：主機上有才掛（見 images/node-crio/storage.conf）
+# 共用唯讀 image store：主機上有才掛（見 images/node/crio/storage.conf）
 SHARED_STORE=""
 [ -d ${TAROKO_HOME}/images/base ] && SHARED_STORE="--volume ${TAROKO_HOME}/images/base:/var/lib/shared:ro"
 

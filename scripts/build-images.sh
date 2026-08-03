@@ -41,8 +41,8 @@ node)
    shift
    [ "$1" == "" ] && echo "build-images.sh node <K8s版本>..." && exit 1
    for v in "$@"; do
-      build_push "node/containerd:v${v}" images/node-containerd --build-arg=VER=${v}
-      build_push "node/crio:v${v}"       images/node-crio       --build-arg=VER=${v}
+      build_push "node/containerd:v${v}" images/node/containerd --build-arg=VER=${v}
+      build_push "node/crio:v${v}"       images/node/crio       --build-arg=VER=${v}
    done
    ;;
 *)
