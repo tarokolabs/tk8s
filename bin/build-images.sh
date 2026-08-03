@@ -15,7 +15,7 @@
 
 REG="ghcr.io/tarokolabs/tk8s"
 LABELS="--label=org.opencontainers.image.source=https://github.com/tarokolabs/tk8s \
-        --label=org.opencontainers.image.licenses=GPL-2.0"
+        --label=org.opencontainers.image.licenses=GPL-2.0-or-later"
 TK="${TK:-$HOME/tk}"
 SUDO="${SUDO-sudo}"
 
