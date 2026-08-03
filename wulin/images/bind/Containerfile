@@ -1,8 +1,0 @@
-ARG VER=0.0
-FROM ghcr.io/tarokolabs/tk8s/toolbox:v2026.8.0
-RUN apk update && apk upgrade && apk add bind tcpdump && \
-    # 必需執行以下命令, 才可成功執行 sudo rndc dumpdb -cache 這命令
-    rndc-confgen -a && chown -R root:root /etc/bind/ && \
-    echo "/usr/sbin/named" > /usr/bin/ash.rc && \
-    touch /etc/bind/named.conf
-CMD ["/bin/ash"]
