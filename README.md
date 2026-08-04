@@ -43,17 +43,70 @@
 | 其他指令 | `jq` `bc` `envsubst`（gettext）`nc` `curl` `tar` |
 | 核心模組 | `br_netfilter` |
 
-## 安裝位置
+## 安裝
 
-**放哪裡都可以。** CLI 依自身位置自我定位，不要求特定安裝路徑（要顯式指定時設 `TK_HOME`）：
+**放哪裡都可以**——CLI 依自身位置自我定位，不要求特定安裝路徑（需要顯式指定時設 `TK_HOME`）。以下以 `~/tk` 為例，一步一步來：
+
+### 1. 確認需求
+
+上方[需求](#需求)表逐項確認，特別是 **swap 必須關閉**：
 
 ```bash
-git clone https://github.com/tarokolabs/tk8s.git ~/tk
+sudo swapoff -a        # 立即關閉（永久關閉請註解 /etc/fstab 的 swap 行）
+swapon --show          # 沒有輸出即為關閉
 ```
 
-把 `<clone 位置>/bin` 加入 PATH，並套用 shell 環境設定（`profiles/profile.append` 供 Alpine 使用，`profiles/us-profile` 供 Ubuntu 使用；clone 到非 `~/tk` 時調整其中的 `TK_HOME`）。
+### 2. 取得平台（建議釘住發佈版本）
 
-### 主機側狀態
+```bash
+git clone --branch v2026.8.0 https://github.com/tarokolabs/tk8s.git ~/tk
+```
+
+釘住 tag 可確保拿到的是**經完整驗證的快照**，與該版 [Release](https://github.com/tarokolabs/tk8s/releases) 列出的節點 image digest 相互對應——課程與正式使用都建議如此。最新版本號見 [Releases 頁](https://github.com/tarokolabs/tk8s/releases)；要跟最新開發進度，改 clone `main` 即可。
+
+### 3. 設定 shell 環境
+
+把 CLI 加入 PATH 並載入環境設定（依主機 OS 擇一）：
+
+```bash
+# Ubuntu / 一般發行版
+echo 'source ~/tk/profiles/us-profile' >> ~/.bashrc && source ~/.bashrc
+
+# Alpine
+echo 'source ~/tk/profiles/profile.append' >> ~/.profile && source ~/.profile
+```
+
+clone 到非 `~/tk` 時，先 `export TK_HOME=<clone 位置>` 再 source（profile 內以 `TK_HOME` 定位）。
+
+### 4.（選配）放置教材
+
+有教材（[wulin](https://github.com/tarokolabs/wulin)）時，建叢集會自動部署管理主機與私有 registry；沒有也能建裸叢集：
+
+```bash
+sudo mkdir -p /opt/taroko && sudo chown $(id -un) /opt/taroko
+git clone https://github.com/tarokolabs/wulin.git /opt/taroko/wulin
+```
+
+教材放別處的話，`export WULIN_DIR=<位置>` 即可。
+
+### 5. 建立第一個叢集
+
+```bash
+tkctl cluster create tk8s 1.36.1
+```
+
+輸入 `YES` 確認後全自動進行，約 8 分鐘；結尾出現 `tk8s: take office` 即完成。
+
+### 6. 驗證
+
+```bash
+kubectl get nodes        # 三個節點 Ready
+tkctl cluster list       # 叢集狀態總覽
+```
+
+之後的日常操作見[使用](#使用)與 [docs/commands.md](docs/commands.md)。
+
+### 主機側狀態的去處
 
 叢集執行期的狀態與資料收斂在 `/opt/taroko/`（FHS 的 `/opt/<vendor>`；`TAROKO_HOME` 可覆寫）：
 
@@ -63,7 +116,7 @@ git clone https://github.com/tarokolabs/tk8s.git ~/tk
 | `cni/` | 主機側 CNI plugin |
 | `wulin/` | 教材 repo 的預設位置（`WULIN_DIR` 可覆寫） |
 
-節點容器內看到的是同一個語彙：主機的 `clusters/<叢集名>` 掛載為節點內的 `/opt/taroko`，教材掛載為 `/opt/taroko/wulin`。
+節點容器內看到的是同一個語彙：主機的 `clusters/<叢集名>` 掛載為節點內的 `/opt/taroko`，教材掛載為 `/opt/taroko/wulin`。**平台程式（repo）與狀態（/opt/taroko）分離**——重新 clone 或升級平台不會動到叢集與 PVC 資料。
 
 ## 使用
 
