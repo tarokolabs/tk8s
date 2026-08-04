@@ -2,11 +2,6 @@
 # 憑證與環境狀態
 # 憑證應於環境建置時生成，不進版控。
 # ============================================================
-wulin/cosign/
-wulin/images/*/ssh/
-wulin/images/*/talosconfig
-wulin/images/*/htpasswd
-wulin/images/*/.gitconfig
 
 # 通用樣式（防止之後新增同類檔案）
 *.key
@@ -45,7 +40,6 @@ htpasswd
 # ============================================================
 # 建置與執行殘留
 # ============================================================
-wulin/ci-*/
 *.save
 *.temp
 
@@ -56,7 +50,6 @@ wulin/ci-*/
 *.swp
 *~
 
-# 建置素材二進位不進版控（於建置時自官方來源下載）
-wulin/images/base/mc
-wulin/images/base/kube-linter
-wulin/images/base/rclone
+
+# 教材已移交 wulin repo；本地殘留的 wulin/ 素材目錄不進版控
+wulin/

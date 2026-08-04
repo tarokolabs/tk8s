@@ -238,7 +238,7 @@ if [ "$TKIND" == "K8S" ]; then
             kubectl apply -f ${TK_HOME}/manifests/runtimeclass-crio.yaml &>/dev/null
             [ "$?" == "0" ] && echo "RuntimeClass crun ok (gVisor: containerd only, see README)"
          else
-            ${TK_HOME}/bin/deploy-rc.sh &>/dev/null
+            ${TK_HOME}/scripts/deploy-rc.sh &>/dev/null
             echo "gVisor & crun ok"
             kubectl apply -f ${TK_HOME}/manifests/runtimeclass-containerd.yaml &>/dev/null
             [ "$?" == "0" ] && echo "RuntimeClass gvisor & crun ok"
