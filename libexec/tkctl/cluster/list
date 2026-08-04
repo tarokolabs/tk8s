@@ -10,6 +10,12 @@ if [ "$kn" == "" ]; then
       echo "--------------------------------------"
       echo -e "$bl\n"
    fi
+   lb=$(ls -d ${CLUSTERS_DIR}/*/*bak* 2>/dev/null)
+   if [ "$lb" != "" ]; then
+      echo "backup lab"
+      echo "--------------------------------------"
+      echo -e "$lb\n"
+   fi
    exit 1
 fi
 
@@ -57,4 +63,10 @@ if [ "$bl" != "" ]; then
    echo "backup cluster"
    echo "--------------------------------------"
    echo -e "$bl\n"
+fi
+lb=$(ls -d ${CLUSTERS_DIR}/*/*bak* 2>/dev/null)
+if [ "$lb" != "" ]; then
+   echo "backup lab"
+   echo "--------------------------------------"
+   echo -e "$lb\n"
 fi

@@ -5,13 +5,13 @@ source "$(dirname "$(realpath "$0")")/../../../lib/env.sh"
 which ipvsadm &>/dev/null
 [ "$?" != "0" ] && echo "pls install ipvsadm" && exit 1
 
+# 條目對應教材（wulin）的 NodePort：tkadm ssh、prometheus/alertmanager/grafana
 ipvs1="taroko:tkadm:22100:32200"
-ipvs2="taroko:xtkadm:3389:30089"
-ipvs3="prom:dep-prometheus:9090:30090"
-ipvs4="prom:alertmanager:3093:30093"
-ipvs5="prom:grafana:3000:30030"
+ipvs2="prom:dep-prometheus:9090:30090"
+ipvs3="prom:alertmanager:3093:30093"
+ipvs4="prom:grafana:3000:30030"
 
-for iv in $ipvs1 $ipvs2 $ipvs3 $ipvs4 $ipvs5
+for iv in $ipvs1 $ipvs2 $ipvs3 $ipvs4
 do
    ns=$(echo ${iv} | cut -d ':' -f1)
    npod=$(echo ${iv} | cut -d ':' -f2)
