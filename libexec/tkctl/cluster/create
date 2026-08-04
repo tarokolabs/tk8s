@@ -292,16 +292,16 @@ if [ "$TKIND" == "K8S" ]; then
          # 管理主機（tkadm）與教學 registry（dkreg）屬教材範疇（wulin repo）——
          # 平台不內建，WULIN_DIR 有對應 manifest 才部署（kcn 已將 WULIN_DIR 掛進節點；
          # 預設 ${TAROKO_HOME}/wulin，見 lib/env.sh）
-         if [ -f ${WULIN_DIR}/wk/tkadm/tkadm-dkreg.yaml ]; then
+         if [ -f ${WULIN_DIR}/platform/tkadm/tkadm-dkreg.yaml ]; then
             kubectl create ns taroko &>/dev/null
             sudo mkdir -p ${CLUSTERS_DIR}/${cn}/{tkadm,users}
             sudo chmod 777 -R ${CLUSTERS_DIR}/${cn}
-            sudo cp -R ${WULIN_DIR}/wk/tkadm/k8suser ${CLUSTERS_DIR}/${cn}/
-            cp ${WULIN_DIR}/bin/system.sh ${CLUSTERS_DIR}/${cn}/tkadm/system.sh
-            cp ${WULIN_DIR}/bin/ash.init ${CLUSTERS_DIR}/${cn}/tkadm/ash.init
+            sudo cp -R ${WULIN_DIR}/platform/tkadm/k8suser ${CLUSTERS_DIR}/${cn}/
+            cp ${WULIN_DIR}/platform/tkadm/system.sh ${CLUSTERS_DIR}/${cn}/tkadm/system.sh
+            cp ${WULIN_DIR}/platform/tkadm/ash.init ${CLUSTERS_DIR}/${cn}/tkadm/ash.init
             echo ${cn} > ${CLUSTERS_DIR}/${cn}/tkadm/cn.txt
 
-            cat ${WULIN_DIR}/wk/tkadm/tkadm-dkreg.yaml | sed "s|k1|${cn}|g" | sed "s|10.98.0.10|${SNID%.*}.10|g" >${CLUSTERS_DIR}/${cn}/tkadm/tkadm.yaml
+            cat ${WULIN_DIR}/platform/tkadm/tkadm-dkreg.yaml | sed "s|k1|${cn}|g" | sed "s|10.98.0.10|${SNID%.*}.10|g" >${CLUSTERS_DIR}/${cn}/tkadm/tkadm.yaml
             kubectl apply -f ${CLUSTERS_DIR}/${cn}/tkadm/tkadm.yaml &>/tmp/tkadm.out
             sleep 60
             kubectl wait -n taroko pod -l app=tkadm --for=condition=Ready --timeout=360s
