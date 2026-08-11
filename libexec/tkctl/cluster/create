@@ -189,8 +189,19 @@ if [ "$TKIND" == "K8S" ]; then
          # - bpf.masquerade：SNAT 走 eBPF（與 KPR 成對，資料面不再依賴 iptables）
          # （bandwidthManager/BBR 實測不可用：容器節點的巢狀 netns 讀不到
          #   /proc/sys/net/core/default_qdisc，agent 會自動停用——故不設）
+         # netkit datapath（取代 veth，實測南北向 +30%、pod-to-pod 持平）：
+         # 需核心 ≥6.8，不足時退回 veth；此為建叢集時的 datapath 決策，
+         # 既有叢集不可熱切（agent 拒絕與 veth endpoint 共存）
+         NETKIT=""
+         KMAJ=$(uname -r | cut -d. -f1); KMIN=$(uname -r | cut -d. -f2 | cut -d- -f1)
+         if [ "$KMAJ" -gt 6 ] 2>/dev/null || { [ "$KMAJ" -eq 6 ] && [ "$KMIN" -ge 8 ]; } 2>/dev/null; then
+            NETKIT="--set bpf.datapathMode=netkit"
+         else
+            echo "kernel $(uname -r) < 6.8: netkit unavailable, using veth datapath"
+         fi
+
          export CILIUM_VER=${CILIUM_VER:-1.20.0}
-         cilium install --version ${CILIUM_VER} --set cgroup.autoMount.enabled=false \
+         cilium install --version ${CILIUM_VER} ${NETKIT} --set cgroup.autoMount.enabled=false \
                 --set cgroup.hostRoot=/sys/fs/cgroup \
                 --set securityContext.privileged=true \
                 --set ipam.mode=kubernetes \
