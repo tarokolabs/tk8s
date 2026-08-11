@@ -88,6 +88,15 @@ if [ "$TKIND" == "K8S" ]; then
    ls -al /proc/sys/net/bridge/bridge-nf-call-iptables &>/dev/null
    [ "$?" != "0" ] && sudo modprobe br_netfilter 
 
+   # 主機層網路調校（全域 sysctl，重開機後由使用者的主機設定持久化）：
+   # - default_qdisc=fq：cilium bandwidth manager 在容器節點讀不到此 sysctl
+   #   而自動停用（見 cluster create 的 cilium 註記），全域設定是嵌套環境
+   #   唯一的施力點
+   # - tcp_congestion_control=bbr：新建的 pod netns 繼承此值（實測），
+   #   BBR 自核心 4.13 起內建 pacing、不依賴 fq
+   sudo sysctl -w net.core.default_qdisc=fq &>/dev/null
+   sudo sysctl -w net.ipv4.tcp_congestion_control=bbr &>/dev/null
+
    for n in ${LCTN}
    do
      tn=$(echo $n | cut -d ":" -f 2)
