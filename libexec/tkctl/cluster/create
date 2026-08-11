@@ -187,7 +187,8 @@ if [ "$TKIND" == "K8S" ]; then
          # - routingMode=native + autoDirectNodeRoutes：去 VXLAN 封裝，節點間 pod 流量直接路由
          # - ipv4NativeRoutingCIDR：kubeadm podSubnet，此段不做 masquerade
          # - bpf.masquerade：SNAT 走 eBPF（與 KPR 成對，資料面不再依賴 iptables）
-         # - bandwidthManager（含 BBR，需核心 ≥5.18）：EDT 佇列與 Pod 頻寬註記
+         # （bandwidthManager/BBR 實測不可用：容器節點的巢狀 netns 讀不到
+         #   /proc/sys/net/core/default_qdisc，agent 會自動停用——故不設）
          export CILIUM_VER=${CILIUM_VER:-1.20.0}
          cilium install --version ${CILIUM_VER} --set cgroup.autoMount.enabled=false \
                 --set cgroup.hostRoot=/sys/fs/cgroup \
@@ -202,9 +203,7 @@ if [ "$TKIND" == "K8S" ]; then
                 --set routingMode=native \
                 --set autoDirectNodeRoutes=true \
                 --set ipv4NativeRoutingCIDR=10.244.0.0/16 \
-                --set bpf.masquerade=true \
-                --set bandwidthManager.enabled=true \
-                --set bandwidthManager.bbr=true &>/tmp/cilium${CILIUM_VER}.out
+                --set bpf.masquerade=true &>/tmp/cilium${CILIUM_VER}.out
 
          cilium status --wait &>/tmp/cilium.status
          [ "$?" == "0" ] && echo "cilium ${CILIUM_VER} ok"
