@@ -182,6 +182,13 @@ if [ "$TKIND" == "K8S" ]; then
 	 # use the kubernetes IPAM mode:
          # kube-proxy 已刪除，kubeProxyReplacement 為必要，並需明確指向 apiserver（SRVIP 來自 conf）
          # l2announcements 讓 LoadBalancer IP 可從叢集外（主機側）到達
+         #
+         # 效能組（前提：全部節點在同一 L2——podman bridge 天然滿足；跨主機（#24）時要重新評估）：
+         # - routingMode=native + autoDirectNodeRoutes：去 VXLAN 封裝，節點間 pod 流量直接路由
+         # - ipv4NativeRoutingCIDR：kubeadm podSubnet，此段不做 masquerade
+         # - bpf.masquerade：SNAT 走 eBPF（與 KPR 成對，資料面不再依賴 iptables）
+         # （bandwidthManager/BBR 實測不可用：容器節點的巢狀 netns 讀不到
+         #   /proc/sys/net/core/default_qdisc，agent 會自動停用——故不設）
          export CILIUM_VER=${CILIUM_VER:-1.20.0}
          cilium install --version ${CILIUM_VER} --set cgroup.autoMount.enabled=false \
                 --set cgroup.hostRoot=/sys/fs/cgroup \
@@ -192,7 +199,11 @@ if [ "$TKIND" == "K8S" ]; then
                 --set kubeProxyReplacement=true \
                 --set k8sServiceHost=${SRVIP} \
                 --set k8sServicePort=6443 \
-                --set l2announcements.enabled=true &>/tmp/cilium${CILIUM_VER}.out
+                --set l2announcements.enabled=true \
+                --set routingMode=native \
+                --set autoDirectNodeRoutes=true \
+                --set ipv4NativeRoutingCIDR=10.244.0.0/16 \
+                --set bpf.masquerade=true &>/tmp/cilium${CILIUM_VER}.out
 
          cilium status --wait &>/tmp/cilium.status
          [ "$?" == "0" ] && echo "cilium ${CILIUM_VER} ok"
