@@ -64,9 +64,8 @@ do
   ${CLUSTERS_DIR}/${cn}-bak-${KVER}/${ctn}-v${KVER}.sh &>/dev/null
   [ "$?" == "0" ] && echo "${ctn} created ok"
   sleep 30
-  ans=$(echo "${KVER%.*} > 1.29" | bc)
   alp=$(cat /etc/os-release | grep 'Alpine Linux')
-  if [[ "$alp" != "" || "$ans" == "1" ]]; then
+  if [[ "$alp" != "" || "$(tk_kver_minor)" -gt 29 ]]; then
      sudo podman exec ${ctn} update-alternatives --set iptables /usr/sbin/iptables-nft &>/dev/null
      [ "$?" == "0" ] && echo "${ctn} iptables (nft) ok"
   fi

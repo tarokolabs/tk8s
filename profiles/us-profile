@@ -25,7 +25,7 @@ fi
 #fi
 
 clear && sleep 2
-echo "Welcome to Ubuntu 24.04 : $IP"
+echo "Welcome to $(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-Linux}") : $IP"
 echo ""
 
 export NOW="--force --grace-period 0"

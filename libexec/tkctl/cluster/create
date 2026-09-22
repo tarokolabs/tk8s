@@ -30,8 +30,7 @@ export cn=${1}
 
 tk_load_conf ${cn} || exit 1
 
-ans=$(echo "${KVER%.*} < 1.30" | bc)
-[ "$ans" == "1" ] && echo "Version ${KVER} not support" && exit 1 
+[ "$(tk_kver_minor)" -lt 30 ] && echo "Version ${KVER} not support" && exit 1
 
 sw=$(swapon --show)
 [ "$sw" != "" ] && echo "pls turn off swapfile(/etc/fstab)" && exit 1
@@ -83,9 +82,8 @@ if [ "$TKIND" == "K8S" ]; then
    do
      tn=$(echo $n | cut -d ":" -f 2)
 
-     ans=$(echo "${KVER%.*} > 1.29" | bc)
      cat /etc/os-release | grep 'Alpine Linux' &>/dev/null
-     if [[ "$?" == "0" || "$ans" == "1" ]]; then
+     if [[ "$?" == "0" || "$(tk_kver_minor)" -gt 29 ]]; then
         sudo podman exec -it ${tn} update-alternatives --set iptables /usr/sbin/iptables-nft &>/dev/null
         [ "$?" == "0" ] && echo "iptables-nft set ok"
      fi 

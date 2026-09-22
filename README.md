@@ -40,7 +40,7 @@
 | 儲存路徑 | `/opt/taroko/`（自動建立；`TAROKO_HOME` 可覆寫）——叢集狀態、PVC 儲存與工具下載都在這 |
 | 權限 | 需要 `sudo` |
 | 網路 | 需連外——會下載 CNI plugins、kubectl、cilium CLI、canal manifest、metrics-server |
-| 其他指令 | `jq` `bc` `envsubst`（gettext）`nc` `curl` `tar` |
+| 其他指令 | `jq` `envsubst`（gettext）`nc` `curl` `tar` |
 | 核心模組 | `br_netfilter` |
 
 ## 安裝
