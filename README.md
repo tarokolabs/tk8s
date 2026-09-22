@@ -17,7 +17,7 @@
 | 儲存 | local-path-provisioner |
 | Gateway API | cilium 內建 controller（GatewayClass `cilium`；cilium-envoy 為 DaemonSet，Gateway 的 Service 採 `externalTrafficPolicy: Local`，客戶端 IP 以 `X-Forwarded-For` 帶給後端；Gateway API v1.6.1 CRD 採 experimental channel，含 TCPRoute/UDPRoute） |
 | 管理主機（選配） | 偵測到教材 repo（`WULIN_DIR`，預設 `/opt/taroko/wulin`）時自動部署 wulin 的管理主機與私有 registry；無教材時建裸叢集 |
-| RuntimeClass | CRI-O 路徑：`crun`（CRI-O 套件自帶，1.37 為 crun 1.29.1）。containerd 路徑（`K8SCRI=containerd`）：另有 `gvisor`——gVisor 官方僅支援 containerd，不在 CRI-O 路徑提供；CRI-O 上的沙箱容器規劃採 Kata Containers |
+| RuntimeClass | CRI-O 路徑：`crun`（CRI-O 套件自帶，1.37 為 crun 1.29.1）。containerd 路徑（`K8SCRI=containerd`）：另有 `gvisor`（gVisor release 20260914.0，`GVISOR_REL` 可覆寫）——gVisor 官方僅支援 containerd，不在 CRI-O 路徑提供；CRI-O 上的沙箱容器規劃採 Kata Containers |
 | 資源監控 | metrics-server（`kubectl top` 可用） |
 
 **不包含** Prometheus / Grafana 等監控工具、資料庫、物件儲存與應用工作負載——這些在 [wulin](https://github.com/tarokolabs/wulin)。MetalLB 與 ingress-nginx 也移列教材選配（LoadBalancer 與南北向入口已由 cilium 的 LB-IPAM 與 Gateway API 原生涵蓋）。

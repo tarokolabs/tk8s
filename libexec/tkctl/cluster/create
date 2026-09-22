@@ -271,8 +271,8 @@ if [ "$TKIND" == "K8S" ]; then
             kubectl apply -f ${TK_HOME}/manifests/runtimeclass-crio.yaml &>/dev/null
             [ "$?" == "0" ] && echo "RuntimeClass crun ok (gVisor: containerd only, see README)"
          else
-            ${TK_HOME}/scripts/deploy-rc.sh &>/dev/null
-            echo "gVisor & crun ok"
+            # deploy-rc.sh 逐節點回報 crun/runsc 安裝結果（runsc FAILED 時 RuntimeClass gvisor 的 pod 會起不來）
+            ${TK_HOME}/scripts/deploy-rc.sh 2>/dev/null | grep -E 'crun|runsc'
             kubectl apply -f ${TK_HOME}/manifests/runtimeclass-containerd.yaml &>/dev/null
             [ "$?" == "0" ] && echo "RuntimeClass gvisor & crun ok"
          fi
