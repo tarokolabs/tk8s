@@ -186,13 +186,24 @@ if [ "$TKIND" == "K8S" ]; then
          # netkit datapath（取代 veth，實測南北向 +30%、pod-to-pod 持平）：
          # 需核心 ≥6.8，不足時退回 veth；此為建叢集時的 datapath 決策，
          # 既有叢集不可熱切（agent 拒絕與 veth endpoint 共存）
-         NETKIT=""
-         KMAJ=$(uname -r | cut -d. -f1); KMIN=$(uname -r | cut -d. -f2 | cut -d- -f1)
-         if [ "$KMAJ" -gt 6 ] 2>/dev/null || { [ "$KMAJ" -eq 6 ] && [ "$KMIN" -ge 8 ]; } 2>/dev/null; then
-            NETKIT="--set bpf.datapathMode=netkit"
-         else
-            echo "kernel $(uname -r) < 6.8: netkit unavailable, using veth datapath"
+         # CILIUM_DATAPATH=auto（預設：核心 ≥6.8 用 netkit，否則 veth）| netkit | veth
+         # 實測（#56）：gVisor 沙箱在 netkit 下完全沒有網路，要用 RuntimeClass gvisor 的叢集請設 veth
+         export CILIUM_DATAPATH=${CILIUM_DATAPATH:-auto}
+         DATAPATH="$CILIUM_DATAPATH"
+         if [ "$DATAPATH" == "auto" ]; then
+            KMAJ=$(uname -r | cut -d. -f1); KMIN=$(uname -r | cut -d. -f2 | cut -d- -f1)
+            if [ "$KMAJ" -gt 6 ] 2>/dev/null || { [ "$KMAJ" -eq 6 ] && [ "$KMIN" -ge 8 ]; } 2>/dev/null; then
+               DATAPATH="netkit"
+            else
+               echo "kernel $(uname -r) < 6.8: netkit unavailable, using veth datapath"; DATAPATH="veth"
+            fi
          fi
+         case "$DATAPATH" in
+            netkit|veth) NETKIT="--set bpf.datapathMode=${DATAPATH}" ;;
+            *) echo "CILIUM_DATAPATH=${CILIUM_DATAPATH} invalid (auto|netkit|veth)"; exit 1 ;;
+         esac
+         [ "$DATAPATH" == "netkit" ] && echo "cilium datapath: netkit (gVisor pods will have no network; CILIUM_DATAPATH=veth to enable)" \
+                                     || echo "cilium datapath: veth"
 
          # Gateway API 由 cilium 內建的 controller 實作（不另裝 Envoy Gateway）：
          # cilium 要求 CRD 在安裝當下已存在才會啟用 gateway controller，故先裝 CRD。
@@ -268,19 +279,15 @@ if [ "$TKIND" == "K8S" ]; then
 
          echo ""
          echo "[${cn}:${KVER} Cluster Addon]"
-         # RuntimeClass 依 runtime 分流：
-         # - crio：crun 由 cri-o 套件原生提供。gVisor 官方僅支援 containerd，
-         #   不在 crio 路徑硬掛；沙箱容器的官方路線是 Kata（另案規劃）
-         # - containerd：deploy-rc.sh 安裝 gVisor（官方 shim 掛法）與 crun
-         if [ "$K8SCRI" == "crio" ]; then
-            kubectl apply -f ${TK_HOME}/manifests/runtimeclass-crio.yaml &>/dev/null
-            [ "$?" == "0" ] && echo "RuntimeClass crun ok (gVisor: containerd only, see README)"
-         else
+         # RuntimeClass（crun、gvisor）兩種 runtime 共用一份 manifest：
+         # - crio：crun 與 gVisor（runtime_type=vm 的 runsc handler）都烤在節點 image
+         # - containerd：deploy-rc.sh 於此時安裝 gVisor（官方 shim 掛法）與 crun
+         if [ "$K8SCRI" != "crio" ]; then
             # deploy-rc.sh 逐節點回報 crun/runsc 安裝結果（runsc FAILED 時 RuntimeClass gvisor 的 pod 會起不來）
             ${TK_HOME}/scripts/deploy-rc.sh 2>/dev/null | grep -E 'crun|runsc'
-            kubectl apply -f ${TK_HOME}/manifests/runtimeclass-containerd.yaml &>/dev/null
-            [ "$?" == "0" ] && echo "RuntimeClass gvisor & crun ok"
          fi
+         kubectl apply -f ${TK_HOME}/manifests/runtimeclass.yaml &>/dev/null
+         [ "$?" == "0" ] && echo "RuntimeClass gvisor & crun ok"
 
          # install Metrics Server
          [ -f /tmp/metrics.yaml ] && rm /tmp/metrics.yaml
