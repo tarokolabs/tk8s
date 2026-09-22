@@ -13,7 +13,7 @@ do
    # install crun (https://github.com/containers/crun/releases)
    sudo podman exec ${nn} which crun &>/dev/null
    if [ "$?" != "0" ]; then
-      sudo podman exec ${nn} wget https://github.com/containers/crun/releases/download/1.21/crun-1.21-linux-amd64 -O /usr/bin/crun &>/dev/null
+      sudo podman exec ${nn} wget https://github.com/containers/crun/releases/download/1.29.1/crun-1.29.1-linux-amd64 -O /usr/bin/crun &>/dev/null
       [ "$?" == "0" ] && sudo podman exec ${nn} chmod +x /usr/bin/crun && echo "$nn crun ok"
    fi
    #[ "$?" != "0" ] && sudo podman exec ${nn} bash -c 'apt install -y nano crun &>/dev/null' && echo "$nn crun ok" 

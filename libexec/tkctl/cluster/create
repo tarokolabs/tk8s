@@ -16,8 +16,8 @@ tdcs1 -> 172.22.160.0/24 (與 lkh5 同網段，不可同時存在)
 lkh5  -> 172.22.160.0/24'
    echo
    echo '[K8S Version List]
-1.35.5
-1.36.1
+1.36.4
+1.37.0
 （主要支援最新與次新 K8s minor；更舊版本可自行指定，節點 image 將以本地配方建置）'
    echo
    exit 1
@@ -59,15 +59,6 @@ if [ "$?" != "0" ]; then
    curl -LO https://github.com/cilium/cilium-cli/releases/latest/download/cilium-linux-amd64.tar.gz &>/dev/null
    sudo tar xzvfC cilium-linux-amd64.tar.gz /usr/local/bin
    rm cilium-linux-amd64.tar.gz
-fi
-
-which helm &>/dev/null
-if [ "$?" != "0" ]; then
-   export HELM_VER=${HELM_VER:-v4.2.3}
-   curl -sL https://get.helm.sh/helm-${HELM_VER}-linux-amd64.tar.gz -o /tmp/helm.tgz &>/dev/null
-   sudo tar xzf /tmp/helm.tgz -C /usr/local/bin --strip-components=1 linux-amd64/helm
-   rm /tmp/helm.tgz
-   [ -x /usr/local/bin/helm ] && echo "helm ${HELM_VER} ok"
 fi
 
 which kubeletctl &>/dev/null
@@ -200,7 +191,21 @@ if [ "$TKIND" == "K8S" ]; then
             echo "kernel $(uname -r) < 6.8: netkit unavailable, using veth datapath"
          fi
 
-         export CILIUM_VER=${CILIUM_VER:-1.20.0}
+         # Gateway API 由 cilium 內建的 controller 實作（不另裝 Envoy Gateway）：
+         # cilium 要求 CRD 在安裝當下已存在才會啟用 gateway controller，故先裝 CRD。
+         # channel 預設 experimental（標準集 + TCPRoute/UDPRoute/ListenerSet，cilium 1.20 皆支援）
+         export GWAPI_VER=${GWAPI_VER:-v1.6.1}
+         export GWAPI_CHANNEL=${GWAPI_CHANNEL:-experimental}
+         GWAPI_URL="https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/${GWAPI_VER}/config/crd/${GWAPI_CHANNEL}"
+         GWAPI_OK="ok"
+         for crd in gatewayclasses gateways httproutes grpcroutes referencegrants backendtlspolicies tlsroutes tcproutes udproutes listenersets; do
+            kubectl apply --server-side -f ${GWAPI_URL}/gateway.networking.k8s.io_${crd}.yaml &>>/tmp/gwapi-crds.out || GWAPI_OK="failed (${crd})"
+         done
+         echo "Gateway API ${GWAPI_VER} CRD (${GWAPI_CHANNEL}) ${GWAPI_OK}"
+
+         # gatewayAPI.externalTrafficPolicy=Local 保留來源 IP：cilium-envoy 本身是 DaemonSet，
+         # 持有 L2 lease 的節點必有本地 envoy，不會有「有 lease 沒後端」丟包的問題
+         export CILIUM_VER=${CILIUM_VER:-1.20.2}
          cilium install --version ${CILIUM_VER} ${NETKIT} --set cgroup.autoMount.enabled=false \
                 --set cgroup.hostRoot=/sys/fs/cgroup \
                 --set securityContext.privileged=true \
@@ -214,7 +219,9 @@ if [ "$TKIND" == "K8S" ]; then
                 --set routingMode=native \
                 --set autoDirectNodeRoutes=true \
                 --set ipv4NativeRoutingCIDR=10.244.0.0/16 \
-                --set bpf.masquerade=true &>/tmp/cilium${CILIUM_VER}.out
+                --set bpf.masquerade=true \
+                --set gatewayAPI.enabled=true \
+                --set gatewayAPI.externalTrafficPolicy=Local &>/tmp/cilium${CILIUM_VER}.out
 
          cilium status --wait &>/tmp/cilium.status
          [ "$?" == "0" ] && echo "cilium ${CILIUM_VER} ok"
@@ -223,6 +230,11 @@ if [ "$TKIND" == "K8S" ]; then
          export LBNET=${NID%.*}
          cat ${TK_HOME}/manifests/cilium-lb.yaml | envsubst '${LBNET}' | kubectl apply -f - &>/tmp/cilium-lb.out
          [ "$?" == "0" ] && echo "cilium LB-IPAM (${LBNET}.200-219) ok"
+
+         # GatewayClass cilium 由 operator 自動建立（gatewayAPI.gatewayClass.create=auto）
+         kubectl wait gatewayclass cilium --for=condition=Accepted --timeout=120s &>/dev/null
+         [ "$?" == "0" ] && echo "Gateway API (cilium; GatewayClass: cilium, externalTrafficPolicy: Local) ok" \
+                         || echo "GatewayClass cilium not accepted (kubectl describe gatewayclass cilium)"
 
          CNI="ok"
       fi
@@ -275,41 +287,9 @@ if [ "$TKIND" == "K8S" ]; then
          kubectl wait -n kube-system pod -l k8s-app=metrics-server --for=condition=Ready --timeout=360s
 
          # install Local Path Provisioner
-         #kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.35/deploy/local-path-storage.yaml &>/dev/null
-         kubectl apply -f ${TK_HOME}/manifests/local-path-storage.0.0.35.yaml &>/tmp/local-path-storage.0.0.35.out
+         # 上游 v0.0.37 deploy/local-path-storage.yaml 加兩處平台客製（見 manifests/ 檔頭）
+         kubectl apply -f ${TK_HOME}/manifests/local-path-storage.0.0.37.yaml &>/tmp/local-path-storage.0.0.37.out
          [ "$?" == "0" ] && echo "Local Path Provisioner (${NODE_TAROKO_DIR}/storage) ok"
-
-         # install Envoy Gateway（Gateway API 實作；LoadBalancer IP 由 cilium LB-IPAM 提供，
-         # 故僅在 cilium 路徑安裝）
-         # - CRD 由專用的 gateway-crds-helm 管理，channel 可選（預設 experimental，
-         #   含 TCPRoute/UDPRoute/TLSRoute）
-         # - 本叢集的 DNS 網域是 ${cn}.k8s 而非 cluster.local，必須以
-         #   kubernetesClusterDomain 告知 EG，否則 envoy 的 xDS bootstrap 會寫死
-         #   cluster.local 導致 proxy 永遠起不來
-         if [ "$K8SCNI" == "cilium" ]; then
-            export EG_VER=${EG_VER:-v1.8.3}
-            export GWAPI_CHANNEL=${GWAPI_CHANNEL:-experimental}
-
-            helm template eg-crds oci://docker.io/envoyproxy/gateway-crds-helm --version ${EG_VER} \
-                 --set crds.gatewayAPI.enabled=true \
-                 --set crds.gatewayAPI.channel=${GWAPI_CHANNEL} \
-                 --set crds.envoyGateway.enabled=true 2>/dev/null | grep -vE "^(Pulled|Digest):" | kubectl apply --server-side -f - &>/tmp/eg-crds.out
-            [ "$?" == "0" ] && echo "Gateway API CRD (${GWAPI_CHANNEL}) ok"
-
-            helm install eg oci://docker.io/envoyproxy/gateway-helm --version ${EG_VER} \
-                 -n envoy-gateway-system --create-namespace \
-                 --set crds.enabled=false \
-                 --set kubernetesClusterDomain=${cn}.k8s &>/tmp/envoy-gateway.out
-            kubectl wait -n envoy-gateway-system deployment/envoy-gateway --for=condition=Available --timeout=300s &>/dev/null
-            if [ "$?" == "0" ]; then
-               # EnvoyProxy 需先於 GatewayClass 存在（GatewayClass 以 parametersRef 引用它）
-               kubectl apply -f ${TK_HOME}/manifests/envoyproxy.yaml &>/dev/null
-               kubectl apply -f ${TK_HOME}/manifests/gatewayclass.yaml &>/dev/null
-               [ "$?" == "0" ] && echo "Envoy Gateway ${EG_VER} ok (GatewayClass: eg, DaemonSet, domain: ${cn}.k8s)"
-            else
-               echo "Envoy Gateway ${EG_VER} not ready (see /tmp/envoy-gateway.out)"
-            fi
-         fi
 
          # 管理主機（tkadm）與教學 registry（dkreg）屬教材範疇（wulin repo）——
          # 平台不內建，WULIN_DIR 有對應 manifest 才部署（kcn 已將 WULIN_DIR 掛進節點；

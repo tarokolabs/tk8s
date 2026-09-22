@@ -12,15 +12,15 @@
 |---|---|
 | Kubernetes | 以 `kubeadm` 建置，節點為 privileged podman 容器 |
 | Container runtime | **CRI-O**（版本對齊 K8s minor；可切換 containerd）。節點 image 自 GHCR 拉取，拉不到時本地自動建置 |
-| CNI | **cilium**（預設 1.20.0，kube-proxy replacement 模式；可切換 canal） |
+| CNI | **cilium**（預設 1.20.2，kube-proxy replacement 模式；可切換 canal） |
 | 負載平衡 | cilium LB-IPAM + L2 announcement——LoadBalancer IP 原生提供（節點網段 .200–.219） |
 | 儲存 | local-path-provisioner |
-| Gateway API | Envoy Gateway（GatewayClass `eg`；envoy 以 DaemonSet 部署，`externalTrafficPolicy: Local` 保留來源 IP；CRD 採 experimental channel，含 TCPRoute/UDPRoute） |
+| Gateway API | cilium 內建 controller（GatewayClass `cilium`；cilium-envoy 為 DaemonSet，`externalTrafficPolicy: Local` 保留來源 IP；Gateway API v1.6.1 CRD 採 experimental channel，含 TCPRoute/UDPRoute） |
 | 管理主機（選配） | 偵測到教材 repo（`WULIN_DIR`，預設 `/opt/taroko/wulin`）時自動部署 wulin 的管理主機與私有 registry；無教材時建裸叢集 |
 | RuntimeClass | CRI-O 路徑：`crun`（套件原生）。containerd 路徑（`K8SCRI=containerd`）：另有 `gvisor`——gVisor 官方僅支援 containerd，不在 CRI-O 路徑提供；CRI-O 上的沙箱容器規劃採 Kata Containers |
 | 資源監控 | metrics-server（`kubectl top` 可用） |
 
-**不包含** Prometheus / Grafana 等監控工具、資料庫、物件儲存與應用工作負載——這些在 [wulin](https://github.com/tarokolabs/wulin)。MetalLB 與 ingress-nginx 也移列教材選配（LoadBalancer 與南北向入口已由 cilium LB-IPAM 與 Envoy Gateway 原生涵蓋）。
+**不包含** Prometheus / Grafana 等監控工具、資料庫、物件儲存與應用工作負載——這些在 [wulin](https://github.com/tarokolabs/wulin)。MetalLB 與 ingress-nginx 也移列教材選配（LoadBalancer 與南北向入口已由 cilium 的 LB-IPAM 與 Gateway API 原生涵蓋）。
 
 邊界規則一句話：**tk8s 是讓叢集存在的東西；跑在叢集裡的東西都在 wulin**。因此本 repo 發佈的 image 只有節點 image（`node/crio`、`node/containerd`）；管理主機（admin）、工具底層（toolbox）等叢集內 image 由 wulin 發佈。
 
@@ -92,7 +92,7 @@ git clone https://github.com/tarokolabs/wulin.git /opt/taroko/wulin
 ### 5. 建立第一個叢集
 
 ```bash
-tkctl cluster create tk8s 1.36.1
+tkctl cluster create tk8s 1.37.0
 ```
 
 輸入 `YES` 確認後全自動進行，約 8 分鐘；結尾出現 `tk8s: take office` 即完成。
@@ -144,15 +144,15 @@ kto <叢集名稱> [K8s 版本]    # 等同 tkctl cluster create
 
 | 名稱 | 節點數 | 網段 | 預設 K8s 版本 |
 |---|---|---|---|
-| `tk8s` | 3 | `172.22.0.0/24` | 1.35.5 |
-| `tkbp` | 3 | `172.22.8.0/24` | 1.35.5 |
-| `tkdt` | 5 | `172.22.16.0/24` | 1.35.5 |
-| `tklh` | 3 | `172.22.16.0/24` | 1.35.5 |
-| `tkops` | 3 | `172.22.24.0/24` | 1.35.5 |
-| `tkdev` | 3 | `172.22.32.0/24` | 1.35.5 |
-| `tkha` | 5 | `172.22.64.0/24` | 1.35.5 |
-| `tdcs1` | 5 | `172.22.160.0/24` | 1.35.5 |
-| `lkh5` | 5 | `172.22.160.0/24` | 1.35.5 |
+| `tk8s` | 3 | `172.22.0.0/24` | 1.37.0 |
+| `tkbp` | 3 | `172.22.8.0/24` | 1.37.0 |
+| `tkdt` | 5 | `172.22.16.0/24` | 1.37.0 |
+| `tklh` | 3 | `172.22.16.0/24` | 1.37.0 |
+| `tkops` | 3 | `172.22.24.0/24` | 1.37.0 |
+| `tkdev` | 3 | `172.22.32.0/24` | 1.37.0 |
+| `tkha` | 5 | `172.22.64.0/24` | 1.37.0 |
+| `tdcs1` | 5 | `172.22.160.0/24` | 1.37.0 |
+| `lkh5` | 5 | `172.22.160.0/24` | 1.37.0 |
 
 要新增環境，複製一份 `.conf` 改網段與節點清單即可。
 
@@ -160,7 +160,7 @@ kto <叢集名稱> [K8s 版本]    # 等同 tkctl cluster create
 
 ## 支援的 K8s 版本
 
-支援政策：**最新與次新的 K8s minor**——目前為 **1.36.x 與 1.35.x**。這兩個版本系列隨每次發佈重建節點 image、經完整驗證。更舊的版本（`templates/kubeadm/` 仍保有 1.31 起的範本）可自行指定，節點 image 會以本地配方建置，但不在主要支援範圍。
+支援政策：**最新與次新的 K8s minor**——目前為 **1.37.x 與 1.36.x**。這兩個版本系列隨每次發佈重建節點 image、經完整驗證。更舊的版本（`templates/kubeadm/` 仍保有 1.31 起的範本）可自行指定，節點 image 會以本地配方建置，但不在主要支援範圍。
 
 節點 image 依 K8s 版本自 `ghcr.io/tarokolabs/tk8s/node/<runtime>` 拉取；未發佈的版本會於首次使用時以 repo 內配方本地建置，不依賴任何私有 registry。
 
