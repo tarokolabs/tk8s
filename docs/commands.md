@@ -87,6 +87,7 @@ tkctl cluster delete tk8s          # 拆掉
 | `K8SCRI` | Container runtime：`crio`（預設）或 `containerd` |
 | `IMG` | 節點 image（依 `K8SCRI` 自動對應 GHCR 名稱） |
 | `K8SCNI` | CNI：`cilium`（預設）或 `canal` |
+| `CILIUM_DATAPATH` | （環境變數，非 conf 欄位）cilium datapath：`auto`（預設，核心 ≥6.8 用 netkit）、`netkit`、`veth`。RuntimeClass `gvisor` 需 `veth` |
 | `NID` / `NGW` / `SNID` | 節點網段（CIDR）／閘道／service 網段 |
 | `LCTN` | 節點清單：`IP:名稱:記憶體:CPU`，空白分隔（External 型態用 `ECTN`） |
 | `NTP` | 網路型態：`Internal`（單機 bridge）或 `External`（跨主機 macvlan） |
