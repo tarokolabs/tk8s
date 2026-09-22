@@ -201,8 +201,9 @@ if [ "$TKIND" == "K8S" ]; then
          done
          echo "Gateway API ${GWAPI_VER} CRD (${GWAPI_CHANNEL}) ${GWAPI_OK}"
 
-         # gatewayAPI.externalTrafficPolicy=Local 保留來源 IP：cilium-envoy 本身是 DaemonSet，
-         # 持有 L2 lease 的節點必有本地 envoy，不會有「有 lease 沒後端」丟包的問題
+         # gatewayAPI.externalTrafficPolicy=Local：cilium-envoy 本身是 DaemonSet，持有 L2 lease 的
+         # 節點必有本地 envoy，不會有「有 lease 沒後端」丟包的問題；客戶端 IP 由 envoy 以
+         # X-Forwarded-For 帶給後端（L7 proxy，後端看到的 TCP 來源是節點的 cilium_host IP）
          export CILIUM_VER=${CILIUM_VER:-1.20.2}
          cilium install --version ${CILIUM_VER} ${NETKIT} --set cgroup.autoMount.enabled=false \
                 --set cgroup.hostRoot=/sys/fs/cgroup \
