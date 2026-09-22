@@ -38,12 +38,17 @@ sw=$(swapon --show)
 read -p "Are you sure ? " yn
 [ "$yn" != "YES" ] && exit 1
 
-# install cni
-sudo rm -r ${CNI_DIR} &>/dev/null
+# install / refresh cni plugins
+# CNI_DIR 是「所有」叢集節點的 /opt/cni/bin bind mount 來源，cilium agent 也把 cilium-cni 放在這裡。
+# 絕不能 rm -r 重建：刪掉 bind mount 的來源目錄會讓既有叢集節點內的 /opt/cni/bin 變成
+# 指向已刪除 inode 的殘留掛載（mountinfo 顯示 //deleted），節點下次 crio/containerd 重啟或
+# 節點重啟就找不到 cilium-cni 而 NotReady。改為解到暫存目錄後就地覆蓋檔案，目錄 inode 不動。
 sudo mkdir -p ${CNI_DIR} && sudo chown $(id -un) ${CNI_DIR}
+rm -rf /tmp/cni-plugins && mkdir -p /tmp/cni-plugins
 curl -sL "$(curl -sL https://api.github.com/repos/containernetworking/plugins/releases/latest | \
 jq -r '.assets[].browser_download_url' | grep 'linux-amd64.*.tgz$')" -o /tmp/cni-plugins.tgz &>/dev/null
-tar xf /tmp/cni-plugins.tgz -C ${CNI_DIR}; rm /tmp/cni-plugins.tgz
+tar xf /tmp/cni-plugins.tgz -C /tmp/cni-plugins && cp -a /tmp/cni-plugins/. ${CNI_DIR}/
+rm -rf /tmp/cni-plugins.tgz /tmp/cni-plugins
 echo "[cni version]" && ${CNI_DIR}/bridge --version && echo
 
 which kubectl &>/dev/null
