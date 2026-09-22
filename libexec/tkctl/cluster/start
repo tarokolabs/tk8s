@@ -23,9 +23,8 @@ if [ "$NTP" == "Internal" ]; then
         sudo podman start ${ctn} &>/dev/null
         if [ "$?" == "0" ]; then
             echo "${x#*:} Up"
-            ans=$(echo "${KVER%.*} > 1.29" | bc)
             alp=$(cat /etc/os-release | grep 'Alpine Linux')
-            if [[ "$alp" != "" || "$ans" == "1" ]]; then
+            if [[ "$alp" != "" || "$(tk_kver_minor)" -gt 29 ]]; then
                sleep 5
                sudo podman exec -it ${ctn} update-alternatives --set iptables /usr/sbin/iptables-nft &>/dev/null
                [ "$?" == "0" ] && echo "iptables-nft set ok"

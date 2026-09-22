@@ -22,6 +22,9 @@ export CNI_DIR="${TAROKO_HOME}/cni"             # CNI plugin 下載
 # 載入並驗證叢集設定檔。用法：tk_load_conf <叢集名> || exit 1
 # 格式維持「被 source 的 shell 變數」（教材相容），但缺漏與格式錯誤會具名報錯，
 # 不再靜默失敗
+# K8s minor 版本數字（KVER=1.37.0 → 37），供各腳本做版本比較；不依賴 bc
+tk_kver_minor() { local v="${1:-$KVER}"; v="${v#*.}"; echo "${v%%.*}"; }
+
 tk_load_conf() {
    local _f="${TK_HOME}/conf/${1}.conf" _err=0 _v
    if [ ! -f "${_f}" ]; then

@@ -9,7 +9,7 @@ Taroko 平台的統一命令入口是 `tkctl <名詞> <動詞> [參數…]`。�
 ## 快速開始
 
 ```bash
-tkctl cluster create tk8s 1.36.1   # 建三節點叢集（約 8 分鐘）
+tkctl cluster create tk8s 1.37.0   # 建三節點叢集（約 8 分鐘）
 tkctl cluster list                 # 看狀態
 tkctl cluster stop tk8s            # 下班
 tkctl cluster start tk8s           # 上班
@@ -20,7 +20,7 @@ tkctl cluster delete tk8s          # 拆掉
 
 | 命令 | 說明 |
 |---|---|
-| `tkctl cluster create <叢集名> [K8s版本]` | 建整套叢集：檢查 swap → 下載工具（CNI plugin、kubectl、cilium、helm）→ 建節點容器 → `kubeadm init`/`join` → CNI（預設 cilium，kube-proxy replacement）＋ LB-IPAM ＋ Envoy Gateway ＋ RuntimeClass ＋ metrics-server ＋ local-path → 教材 repo（`WULIN_DIR`）在場時自動部署管理主機（tkadm）與私有 registry（dkreg）。版本不指定時用 conf 的預設值 |
+| `tkctl cluster create <叢集名> [K8s版本]` | 建整套叢集：檢查 swap → 下載工具（CNI plugin、kubectl、cilium CLI）→ 建節點容器 → `kubeadm init`/`join` → Gateway API CRD ＋ CNI（預設 cilium，kube-proxy replacement，內建 Gateway API controller）＋ LB-IPAM ＋ RuntimeClass ＋ metrics-server ＋ local-path → 教材 repo（`WULIN_DIR`）在場時自動部署管理主機（tkadm）與私有 registry（dkreg）。版本不指定時用 conf 的預設值 |
 | `tkctl cluster delete <叢集名>` | 刪除叢集（節點容器＋網路） |
 | `tkctl cluster stop <叢集名>` / `start <叢集名>` | 停止／啟動叢集容器，狀態保留 |
 | `tkctl cluster list` | 列出叢集狀態、pods 與既有備份 |

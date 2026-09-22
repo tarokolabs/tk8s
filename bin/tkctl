@@ -18,7 +18,7 @@ usage() {
       printf "  %-9s %s\n" "$noun" "$verbs"
    done
    echo
-   echo "例：tkctl cluster create tk8s 1.35.5（等同舊命令 kto tk8s 1.35.5）"
+   echo "例：tkctl cluster create tk8s 1.37.0（等同舊命令 kto tk8s 1.37.0）"
 }
 
 case "$1" in
