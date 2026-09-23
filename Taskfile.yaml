@@ -21,3 +21,9 @@ tasks:
     desc: List tasks
     cmds:
       - task --list
+
+  cluster:create:
+    desc: Create a cluster from CLUSTER_FILE (plan only until nodes, kubeadm and cni land)
+    requires: { vars: [CLUSTER_FILE] }
+    cmds:
+      - task: plan:resolve

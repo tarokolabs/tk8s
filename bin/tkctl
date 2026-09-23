@@ -1,4 +1,180 @@
 #!/usr/bin/env bash
-# tkctl: entry point for the tk8s platform (v2, work in progress).
-echo "tkctl v2 (not implemented)" >&2
-exit 1
+# tkctl: entry point for the tk8s platform.
+# Translates flags into a cluster.yaml and delegates to go-task. It contains no
+# cluster logic; read Taskfile.yaml and taskfiles/ for what actually happens.
+set -euo pipefail
+
+TK_HOME="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
+export TK_HOME
+TASK_BIN="${TASK_BIN:-task}"
+
+usage() {
+  cat <<'USAGE'
+tkctl: create and manage tk8s Kubernetes clusters on a single podman host.
+
+Usage:
+  tkctl create cluster [NAME] [flags]
+  tkctl delete cluster NAME [--yes]
+  tkctl get clusters
+  tkctl describe cluster NAME [-o yaml]
+  tkctl stop cluster NAME
+  tkctl start cluster NAME
+  tkctl use cluster NAME
+  tkctl verify cluster NAME
+  tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] [--no-join]
+  tkctl delete node CLUSTER NODE [--yes]
+  tkctl join node CLUSTER NODE
+  tkctl version
+
+Create flags:
+  --control-planes N     control-plane nodes (default 1; 3 or 5 enables kube-vip HA)
+  --workers N            worker nodes (default 2)
+  --cpu N                CPUs per node (default 2)
+  --memory SIZE          memory per node, e.g. 4G or 4096M (default 4G)
+  --k8s VERSION          Kubernetes version (default from versions.yaml)
+  --gvisor               install the gVisor RuntimeClass (forces --datapath veth)
+  --datapath MODE        cilium datapath: auto | netkit | veth (default auto)
+  --defer-join           create the extra control planes but do not join them (HA exercise);
+                         join later with: tkctl join node CLUSTER NODE
+  -f FILE                cluster definition file; cannot be combined with topology flags
+  --allow-overlap        allow subnets that overlap an existing cluster
+  --dry-run              print the resolved cluster.yaml and generated units without changing the host
+
+NAME must match ^[a-z][a-z0-9-]{0,15}$ (it becomes the DNS domain NAME.k8s).
+USAGE
+}
+
+die() { echo "tkctl: $*" >&2; exit 1; }
+
+run_task() { "$TASK_BIN" -d "$TK_HOME" "$@"; }
+
+validate_name() {
+  [[ "$1" =~ ^[a-z][a-z0-9-]{0,15}$ ]] || die "invalid cluster name '$1': use lowercase letters, digits and '-', start with a letter, max 16 characters"
+}
+
+normalize_memory() {  # 4G|4g|4096M|4096m -> lower-case podman format
+  [[ "$1" =~ ^[0-9]+[GgMm]$ ]] || die "invalid --memory '$1': use a number followed by G or M, e.g. 4G or 4096M"
+  echo "${1,,}"
+}
+
+cmd_create() {
+  local name="" cps=1 workers=2 cpu=2 memory="4G" k8s="" gvisor=false datapath="" file="" dry=0 overlap=0 topo_flags=0 defer=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --control-planes) cps=${2:-}; topo_flags=1; shift 2 ;;
+      --workers) workers=${2:-}; topo_flags=1; shift 2 ;;
+      --cpu) cpu=${2:-}; topo_flags=1; shift 2 ;;
+      --memory) memory=${2:-}; topo_flags=1; shift 2 ;;
+      --k8s) k8s=${2:-}; shift 2 ;;
+      --gvisor) gvisor=true; shift ;;
+      --datapath) datapath=${2:-}; shift 2 ;;
+      --defer-join) defer=1; shift ;;
+      -f) file=${2:-}; shift 2 ;;
+      --dry-run) dry=1; shift ;;
+      --allow-overlap) overlap=1; shift ;;
+      -h|--help) usage; exit 0 ;;
+      -*) die "unknown flag '$1' (see tkctl --help)" ;;
+      *) [ -z "$name" ] || die "unexpected argument '$1'"; name=$1; shift ;;
+    esac
+  done
+  [[ "$cps" =~ ^[0-9]+$ ]] && [ "$cps" -ge 1 ] || die "--control-planes must be a positive integer"
+  [ $((cps % 2)) -eq 1 ] || die "--control-planes must be odd (1, 3, 5) for etcd quorum"
+  [ "$defer" == 0 ] || [ "$cps" -gt 1 ] || die "--defer-join needs --control-planes 3 or more"
+  [[ "$workers" =~ ^[0-9]+$ ]] || die "--workers must be an integer"
+  [[ "$cpu" =~ ^[0-9]+$ ]] && [ "$cpu" -ge 1 ] || die "--cpu must be a positive integer"
+  memory=$(normalize_memory "$memory")
+  case "$datapath" in ""|auto|netkit|veth) ;; *) die "--datapath must be auto, netkit or veth" ;; esac
+  if [ "$gvisor" == true ]; then
+    [ "$datapath" == netkit ] && die "--gvisor requires the veth datapath; gVisor sandboxes have no network under netkit (drop --datapath netkit)"
+    [ -z "$datapath" ] && datapath=veth
+  fi
+  [ -n "$datapath" ] || datapath=auto
+  [ -z "$k8s" ] || [[ "$k8s" =~ ^1\.[0-9]+\.[0-9]+$ ]] || die "--k8s must look like 1.37.0"
+
+  local tmp; tmp=$(mktemp -t tkctl-cluster.XXXXXX)
+  trap 'rm -f "$tmp"' EXIT
+  if [ -n "$file" ]; then
+    [ "$topo_flags" == 0 ] || die "-f cannot be combined with --control-planes/--workers/--cpu/--memory; put them in the file"
+    [ -f "$file" ] || die "file not found: $file"
+    [ -z "$name" ] || die "the cluster name comes from metadata.name in $file"
+    cp "$file" "$tmp"
+    name=$(sed -nE 's/^\s*name:\s*"?([^" }]+)"?.*$/\1/p; s/.*\{\s*name:\s*"?([^" ,}]+)"?.*/\1/p' "$tmp" | head -1)
+    [ -n "$name" ] || die "metadata.name is missing in $file"
+    validate_name "$name"
+    # Flags that are not about topology still apply on top of the file.
+    [ -z "$k8s" ] || printf '  kubernetes: "%s"\n' "$k8s" >> "$tmp"
+    [ "$gvisor" == false ] || printf '  gvisor: true\n  datapath: veth\n' >> "$tmp"
+  else
+    [ -n "$name" ] || name=tk8s
+    validate_name "$name"
+    {
+      printf 'apiVersion: taroko.io/v1alpha1\nkind: Cluster\nmetadata:\n  name: %s\nspec:\n' "$name"
+      [ -z "$k8s" ] || printf '  kubernetes: "%s"\n' "$k8s"
+      printf '  gvisor: %s\n  datapath: %s\n  nodes:\n' "$gvisor" "$datapath"
+      printf '    - role: control-plane\n      count: 1\n      cpu: %s\n      memory: %s\n' "$cpu" "$memory"
+      if [ "$cps" -gt 1 ]; then
+        printf '    - role: control-plane\n      count: %s\n      cpu: %s\n      memory: %s\n      join: %s\n' \
+          "$((cps - 1))" "$cpu" "$memory" "$([ "$defer" == 1 ] && echo false || echo true)"
+      fi
+      printf '    - role: worker\n      count: %s\n      cpu: %s\n      memory: %s\n' "$workers" "$cpu" "$memory"
+    } > "$tmp"
+  fi
+  run_task cluster:create CLUSTER_FILE="$tmp" DRY_RUN="$dry" ALLOW_OVERLAP="$overlap"
+}
+
+cmd_named() {  # verb task NAME [extra task vars...]
+  local verb=$1 task=$2; shift 2
+  [ "${1:-}" == cluster ] || die "usage: tkctl $verb cluster NAME"
+  local name=${2:-}; [ -n "$name" ] || die "usage: tkctl $verb cluster NAME"
+  validate_name "$name"; shift 2
+  run_task "$task" NAME="$name" "$@"
+}
+
+cmd_add_node() {
+  [ "${1:-}" == node ] || die "usage: tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] [--no-join]"; shift
+  local cl=${1:-}; [ -n "$cl" ] || die "cluster name required"; validate_name "$cl"; shift
+  local role="" ncpu="" nmem="" njoin=true
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --role) role=${2:-}; shift 2 ;;
+      --cpu) ncpu=${2:-}; shift 2 ;;
+      --memory) nmem=$(normalize_memory "${2:-}"); shift 2 ;;
+      --no-join) njoin=false; shift ;;
+      *) die "unknown flag '$1'" ;;
+    esac
+  done
+  case "$role" in worker|control-plane) ;; *) die "--role must be worker or control-plane" ;; esac
+  run_task node:add NAME="$cl" ROLE="$role" CPU="$ncpu" MEMORY="$nmem" JOIN="$njoin"
+}
+
+main() {
+  [ $# -gt 0 ] || { usage; exit 1; }
+  case "$1" in
+    create)   shift; [ "${1:-}" == cluster ] || die "usage: tkctl create cluster [NAME] [flags]"; shift; cmd_create "$@" ;;
+    delete)   shift
+              case "${1:-}" in
+                cluster) local yes=0; [ "${3:-}" == --yes ] && yes=1; cmd_named delete lifecycle:delete "$1" "${2:-}" FORCE="$yes" ;;
+                node) [ -n "${2:-}" ] && [ -n "${3:-}" ] || die "usage: tkctl delete node CLUSTER NODE [--yes]"; validate_name "$2"
+                      run_task node:delete NAME="$2" NODE="$3" FORCE="$([ "${4:-}" == --yes ] && echo 1 || echo 0)" ;;
+                *) die "usage: tkctl delete cluster NAME | tkctl delete node CLUSTER NODE" ;;
+              esac ;;
+    stop)     shift; cmd_named stop lifecycle:stop "$@" ;;
+    start)    shift; cmd_named start lifecycle:start "$@" ;;
+    use)      shift; cmd_named use lifecycle:use "$@" ;;
+    verify)   shift; cmd_named verify verify:cluster "$@" ;;
+    describe) shift; [ "${1:-}" == cluster ] || die "usage: tkctl describe cluster NAME [-o yaml]"; shift
+              local name=${1:-}; [ -n "$name" ] || die "usage: tkctl describe cluster NAME [-o yaml]"; validate_name "$name"; shift
+              local fmt=""; [ "${1:-}" == "-o" ] && fmt=${2:-}
+              run_task lifecycle:describe NAME="$name" OUTPUT="$fmt" ;;
+    get)      shift; [ "${1:-}" == clusters ] || die "usage: tkctl get clusters"; run_task lifecycle:list ;;
+    add)      shift; cmd_add_node "$@" ;;
+    join)     shift; [ "${1:-}" == node ] || die "usage: tkctl join node CLUSTER NODE"
+              [ -n "${2:-}" ] && [ -n "${3:-}" ] || die "usage: tkctl join node CLUSTER NODE"; validate_name "$2"
+              run_task node:join NAME="$2" NODE="$3" ;;
+    version)  echo "tkctl $(git -C "$TK_HOME" describe --tags --always 2>/dev/null || echo dev)"
+              echo "kubernetes default $(sed -nE 's/^\s+default:\s*"([^"]+)"/\1/p' "$TK_HOME/versions.yaml")" ;;
+    -h|--help|help) usage ;;
+    *) die "unknown command '$1' (see tkctl --help)" ;;
+  esac
+}
+main "$@"
