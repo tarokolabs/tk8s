@@ -119,6 +119,14 @@ tasks:
       - task: render
         vars: { NAME: '{{ .NAME }}' }
       - sudo mkdir -p {{ .CLUSTERS_DIR }}/{{ .NAME }}/storage {{ .CLUSTERS_DIR }}/{{ .NAME }}/logs {{ .WULIN_DIR }}
+      - |
+        # A leftover <node>-var volume from an earlier cluster carries old kubelet/etcd
+        # state and makes kubeadm preflight fail. Drop it when the node container is new.
+        {{ range .NODES }}
+        if ! sudo podman container exists {{ .name }} 2>/dev/null && sudo podman volume exists {{ .name }}-var 2>/dev/null; then
+          sudo podman volume rm -f {{ .name }}-var >/dev/null && echo "removed stale volume {{ .name }}-var"
+        fi
+        {{ end }}
       - sudo systemctl daemon-reload
       - sudo systemctl reset-failed "{{ .NAME }}*" 2>/dev/null || true
       - sudo systemctl enable --now --quiet {{ .NAME }}.target
