@@ -51,12 +51,18 @@ tasks:
           --set routingMode=native --set autoDirectNodeRoutes=true --set ipv4NativeRoutingCIDR={{ .C.spec.network.pods }} \
           --set bpf.masquerade=true \
           --set gatewayAPI.enabled=true --set gatewayAPI.externalTrafficPolicy=Local >/tmp/{{ .NAME }}-cilium.out 2>&1
-        cilium status --wait --wait-duration 5m >/tmp/{{ .NAME }}-cilium-status.out 2>&1 && echo "cilium {{ .VERSIONS.cilium }} ok ($action)"
+        # errexit ignores a failing left side of &&, so every wait fails explicitly.
+        cilium status --wait --wait-duration 5m >/tmp/{{ .NAME }}-cilium-status.out 2>&1 || {
+          tail -20 /tmp/{{ .NAME }}-cilium-status.out >&2
+          echo "cilium did not become ready within 5 minutes (see /tmp/{{ .NAME }}-cilium.out and cilium status)" >&2; exit 1; }
+        echo "cilium {{ .VERSIONS.cilium }} ok ($action)"
         sed -e 's/${LBNET}.200/{{ .LB_START }}/' -e 's/${LBNET}.219/{{ .LB_STOP }}/' {{ .TK_HOME }}/manifests/cilium-lb.yaml | kubectl apply -f - >/dev/null
         echo "LB-IPAM pool {{ .C.spec.network.lb_range }}"
-        kubectl wait gatewayclass cilium --for=condition=Accepted --timeout=120s >/dev/null && echo "GatewayClass cilium accepted"
+        kubectl wait gatewayclass cilium --for=condition=Accepted --timeout=120s >/dev/null || {
+          echo "GatewayClass cilium was not accepted within 120 s (kubectl describe gatewayclass cilium)" >&2; exit 1; }
+        echo "GatewayClass cilium accepted"
         f={{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml
-        grep -q '^  datapath_resolved:' $f && sed -i "s/^  datapath_resolved:.*/  datapath_resolved: {{ .DATAPATH }}/" $f || sed -i "s/^  datapath: .*/&\n  datapath_resolved: {{ .DATAPATH }}/" $f
+        awk -v d="{{ .DATAPATH }}" '/^  datapath_resolved:/ {next} {print} /^  datapath: / {print "  datapath_resolved: " d}' $f > $f.tmp && mv $f.tmp $f
         {{ else }}
         kubectl get configmap kube-proxy -n kube-system -o yaml | sed 's/maxPerCore: null/maxPerCore: 0/' | kubectl apply -f - >/dev/null
         kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/{{ .VERSIONS.calico }}/manifests/canal.yaml >/dev/null
@@ -64,10 +70,14 @@ tasks:
         echo "canal ok (no Gateway API on this path)"
         {{ end }}
       - |
+        set -e
         # Route the pod and service subnets from the host through the first control plane.
         sudo ip route replace {{ .C.spec.network.pods }} via {{ .CP_IP }}
         sudo ip route replace {{ .C.spec.network.services }} via {{ .CP_IP }}
         for i in $(seq 1 60); do
-          nr=$(kubectl get nodes --no-headers | awk '$2!="Ready"' | wc -l); [ "$nr" -eq 0 ] && break; sleep 5
+          nr=$(kubectl get nodes --no-headers | awk '$2!="Ready"' | wc -l)
+          if [ "$nr" -eq 0 ]; then break; fi
+          if [ $i -eq 60 ]; then echo "nodes are not Ready after 5 minutes:" >&2; kubectl get nodes >&2; exit 1; fi
+          sleep 5
         done
         kubectl get nodes --no-headers | awk '{print "  "$1, $2}'
