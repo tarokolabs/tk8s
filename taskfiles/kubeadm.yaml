@@ -165,6 +165,8 @@ tasks:
     vars:
       RAW: { sh: 'cat {{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml' }
       C: { ref: fromYaml .RAW }
+      VIP: '{{ .C.spec.network.vip | default "" }}'
+      HAS_CP_JOIN: '{{ $n := 0 }}{{ range .C.spec.nodes }}{{ if and (eq .role "control-plane") (ne .name (print $.NAME "-control-plane")) (ne (toString .join) "false") }}{{ $n = add $n 1 }}{{ end }}{{ end }}{{ $n }}'
     env:
       KUBECONFIG: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig'
     cmds:
@@ -172,6 +174,12 @@ tasks:
         set -e
         join=$(sudo podman exec {{ .NAME }}-control-plane kubeadm token create --print-join-command | tr -d '\r')
         key=$(cat {{ .CLUSTERS_DIR }}/{{ .NAME }}/.certificate-key 2>/dev/null || true)
+        if [ "{{ .HAS_CP_JOIN }}" != "0" ] && [ -z "$key" ]; then
+          # Certificate keys expire after two hours; upload a fresh one when none is stored.
+          key=$(sudo podman exec {{ .NAME }}-control-plane kubeadm init phase upload-certs --upload-certs 2>/dev/null | tail -1)
+          [ -n "$key" ] || { echo "could not obtain a certificate key from {{ .NAME }}-control-plane" >&2; exit 1; }
+          printf '%s\n' "$key" > {{ .CLUSTERS_DIR }}/{{ .NAME }}/.certificate-key && chmod 600 {{ .CLUSTERS_DIR }}/{{ .NAME }}/.certificate-key
+        fi
         {{ range .C.spec.nodes }}{{ if ne .name (print $.NAME "-control-plane") }}
         {{ if eq (toString .join) "false" }}
         echo "{{ .name }} left unjoined (join: false); join later with: tkctl join node {{ $.NAME }} {{ .name }}"
