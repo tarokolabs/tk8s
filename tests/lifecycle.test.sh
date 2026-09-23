@@ -50,6 +50,13 @@ out=$(task lifecycle:describe NAME=demo OUTPUT=yaml 2>&1)
 assert_contains "$out" "apiVersion" "describe -o yaml prints cluster.yaml"
 assert_fails "describe unknown cluster fails" task lifecycle:describe NAME=nope
 assert_fails "stop unknown cluster fails" task lifecycle:stop NAME=nope
+out=$(task lifecycle:delete NAME=nope FORCE=1 2>&1); rc=$?
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "delete unknown cluster exits non-zero"
+assert_contains "$out" "cluster nope not found" "delete unknown cluster names the cluster"
+out=$(task lifecycle:delete NAME=demo 2>&1 </dev/null); rc=$?
+assert_contains "$out" "aborted" "delete without confirmation aborts"
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "aborted delete exits non-zero"
+if [ -f "$TMP/clusters/demo/cluster.yaml" ]; then echo "PASS  aborted delete keeps the state directory"; else echo "FAIL  aborted delete keeps the state directory"; FAILURES=$((FAILURES+1)); fi
 rm -rf "$TMP/clusters/demo"
 out=$(task lifecycle:list 2>&1); assert_contains "$out" "no clusters" "list with no clusters"
 rm -rf "$TMP"; finish

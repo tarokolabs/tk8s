@@ -90,3 +90,35 @@ tasks:
       - mkdir -p ~/.kube && { [ ! -f ~/.kube/config ] || cp ~/.kube/config ~/.kube/config.bak; }
       - install -m 600 {{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig ~/.kube/config
       - echo "~/.kube/config now points at {{ .NAME }}"
+
+  delete:
+    desc: 'Delete a cluster: units, containers, volumes, network, routes, state (asks for confirmation)'
+    silent: true
+    deps: [{ task: _exists, vars: { NAME: '{{ .NAME }}' } }]
+    vars:
+      F: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml'
+      RAW: { sh: 'cat {{ .F }} 2>/dev/null || true' }
+      C: { ref: fromYaml .RAW }
+    cmds:
+      - |
+        if [ "{{ .FORCE }}" != "1" ] && [ "${TKCTL_ASSUME_YES:-}" != "1" ]; then
+          printf 'Delete cluster {{ .NAME }} including its PVC data under {{ .CLUSTERS_DIR }}/{{ .NAME }}/storage? [y/N] '
+          read -r a || a=""
+          case "$a" in y|Y) ;; *) echo "aborted"; exit 1 ;; esac
+        fi
+        errs=0
+        step() { echo "  $1"; shift; "$@" >/dev/null 2>&1 || { echo "    failed: $*"; errs=$((errs+1)); }; }
+        systemctl list-units --all --no-legend "{{ .NAME }}.target" | grep -q . && step "stop {{ .NAME }}.target" sudo systemctl disable --now {{ .NAME }}.target
+        step "remove units" sudo rm -rf /etc/containers/systemd/{{ .NAME }} /etc/systemd/system/{{ .NAME }}.target
+        step "daemon-reload" sudo systemctl daemon-reload
+        {{ range .C.spec.nodes }}
+        sudo podman container exists {{ .name }} 2>/dev/null && step "remove container {{ .name }}" sudo podman rm -f {{ .name }}
+        sudo podman volume exists {{ .name }}-var 2>/dev/null && step "remove volume {{ .name }}-var" sudo podman volume rm -f {{ .name }}-var
+        {{ end }}
+        sudo podman network exists {{ .NAME }} 2>/dev/null && step "remove network {{ .NAME }}" sudo podman network rm -f {{ .NAME }}
+        {{ if .C.spec.network }}
+        ip route show {{ .C.spec.network.pods }} 2>/dev/null | grep -q . && step "remove route {{ .C.spec.network.pods }}" sudo ip route del {{ .C.spec.network.pods }}
+        ip route show {{ .C.spec.network.services }} 2>/dev/null | grep -q . && step "remove route {{ .C.spec.network.services }}" sudo ip route del {{ .C.spec.network.services }}
+        {{ end }}
+        step "remove state {{ .CLUSTERS_DIR }}/{{ .NAME }}" sudo rm -rf {{ .CLUSTERS_DIR }}/{{ .NAME }}
+        if [ $errs -eq 0 ]; then echo "cluster {{ .NAME }} deleted"; else echo "cluster {{ .NAME }} deleted with $errs failed step(s); see the lines above" >&2; exit 1; fi
