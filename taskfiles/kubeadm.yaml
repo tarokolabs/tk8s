@@ -134,15 +134,15 @@ tasks:
           # kubeadm prints the certificate key only when controlPlaneEndpoint is set (multi-control-plane).
           key=$(echo "$out" | sed -nE 's/.*--certificate-key ([0-9a-f]+).*/\1/p' | head -1)
           if [ -n "$key" ]; then
-            printf '%s\n' "$key" > {{ .CLUSTERS_DIR }}/{{ .NAME }}/.certificate-key && chmod 600 {{ .CLUSTERS_DIR }}/{{ .NAME }}/.certificate-key
+            install -m 600 /dev/null {{ .CLUSTERS_DIR }}/{{ .NAME }}/.certificate-key && printf '%s\n' "$key" > {{ .CLUSTERS_DIR }}/{{ .NAME }}/.certificate-key
           elif [ -n "{{ .VIP }}" ]; then
             echo "certificate key not found in kubeadm output" >&2; exit 1
           fi
           echo "$cp initialized"
         fi
-        sudo podman cp $cp:/etc/kubernetes/admin.conf {{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig
-        sudo chown "$(id -u):$(id -g)" {{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig
-        chmod 600 {{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig
+        # Create the kubeconfig 0600 before any content lands in it.
+        install -m 600 /dev/null {{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig
+        sudo podman exec $cp cat /etc/kubernetes/admin.conf > {{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig
 
   join-plan:
     desc: Print how each node other than the first control plane is handled (join or skip)
@@ -178,7 +178,7 @@ tasks:
           # Certificate keys expire after two hours; upload a fresh one when none is stored.
           key=$(sudo podman exec {{ .NAME }}-control-plane kubeadm init phase upload-certs --upload-certs 2>/dev/null | tail -1)
           [ -n "$key" ] || { echo "could not obtain a certificate key from {{ .NAME }}-control-plane" >&2; exit 1; }
-          printf '%s\n' "$key" > {{ .CLUSTERS_DIR }}/{{ .NAME }}/.certificate-key && chmod 600 {{ .CLUSTERS_DIR }}/{{ .NAME }}/.certificate-key
+          install -m 600 /dev/null {{ .CLUSTERS_DIR }}/{{ .NAME }}/.certificate-key && printf '%s\n' "$key" > {{ .CLUSTERS_DIR }}/{{ .NAME }}/.certificate-key
         fi
         {{ range .C.spec.nodes }}{{ if ne .name (print $.NAME "-control-plane") }}
         {{ if eq (toString .join) "false" }}
