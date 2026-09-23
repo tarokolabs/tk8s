@@ -120,6 +120,7 @@ tasks:
         vars: { NAME: '{{ .NAME }}' }
       - sudo mkdir -p {{ .CLUSTERS_DIR }}/{{ .NAME }}/storage {{ .CLUSTERS_DIR }}/{{ .NAME }}/logs {{ .WULIN_DIR }}
       - sudo systemctl daemon-reload
+      - sudo systemctl reset-failed "{{ .NAME }}*" 2>/dev/null || true
       - sudo systemctl enable --now --quiet {{ .NAME }}.target
       - |
         for n in {{ range .NODES }}{{ .name }} {{ end }}; do

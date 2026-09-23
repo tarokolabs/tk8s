@@ -36,7 +36,7 @@ tasks:
     deps: [{ task: _exists, vars: { NAME: '{{ .NAME }}' } }]
     vars:
       F: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml'
-      RAW: { sh: 'cat {{ .F }} 2>/dev/null || true' }
+      RAW: { sh: 'cat {{ .F }} 2>/dev/null || printf "metadata: {name: %s}\nspec: {nodes: []}\n" {{ .NAME }}' }
       C: { ref: fromYaml .RAW }
       KUBECONFIG: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig'
     cmds:
@@ -97,7 +97,7 @@ tasks:
     deps: [{ task: _exists, vars: { NAME: '{{ .NAME }}' } }]
     vars:
       F: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml'
-      RAW: { sh: 'cat {{ .F }} 2>/dev/null || true' }
+      RAW: { sh: 'cat {{ .F }} 2>/dev/null || printf "metadata: {name: %s}\nspec: {nodes: []}\n" {{ .NAME }}' }
       C: { ref: fromYaml .RAW }
     cmds:
       - |
@@ -109,8 +109,11 @@ tasks:
         errs=0
         step() { echo "  $1"; shift; "$@" >/dev/null 2>&1 || { echo "    failed: $*"; errs=$((errs+1)); }; }
         systemctl list-units --all --no-legend "{{ .NAME }}.target" | grep -q . && step "stop {{ .NAME }}.target" sudo systemctl disable --now {{ .NAME }}.target
+        # The Quadlet network unit is a oneshot that stays active; stop it or a later cluster with the same name never creates its network.
+        systemctl list-units --all --no-legend "{{ .NAME }}-network.service" | grep -q . && step "stop {{ .NAME }}-network.service" sudo systemctl stop {{ .NAME }}-network.service
         step "remove units" sudo rm -rf /etc/containers/systemd/{{ .NAME }} /etc/systemd/system/{{ .NAME }}.target
         step "daemon-reload" sudo systemctl daemon-reload
+        sudo systemctl reset-failed "{{ .NAME }}*" 2>/dev/null || true
         {{ range .C.spec.nodes }}
         sudo podman container exists {{ .name }} 2>/dev/null && step "remove container {{ .name }}" sudo podman rm -f {{ .name }}
         sudo podman volume exists {{ .name }}-var 2>/dev/null && step "remove volume {{ .name }}-var" sudo podman volume rm -f {{ .name }}-var
