@@ -125,6 +125,7 @@ tasks:
           [ -n "$key" ] || { echo "could not obtain a certificate key from {{ .NAME }}-control-plane" >&2; exit 1; }
           install -m 600 /dev/null {{ .CLUSTERS_DIR }}/{{ .NAME }}/.certificate-key && printf '%s\n' "$key" > {{ .CLUSTERS_DIR }}/{{ .NAME }}/.certificate-key
           sudo podman exec {{ .NODE }} bash -c "$join --control-plane --certificate-key $key --apiserver-advertise-address {{ .IP }} --ignore-preflight-errors=SystemVerification" >/tmp/{{ .NODE }}.join 2>&1 || { tail -20 /tmp/{{ .NODE }}.join >&2; exit 1; }
+          task --silent -d {{ .TK_HOME }} kubeadm:kube-vip NAME={{ .NAME }} NODE={{ .NODE }}
           kubectl taint node {{ .NODE }} node-role.kubernetes.io/control-plane:NoSchedule- >/dev/null 2>&1 || true
         else
           sudo podman exec {{ .NODE }} bash -c "$join --ignore-preflight-errors=SystemVerification" >/tmp/{{ .NODE }}.join 2>&1 || { tail -20 /tmp/{{ .NODE }}.join >&2; exit 1; }

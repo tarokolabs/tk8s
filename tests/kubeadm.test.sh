@@ -27,9 +27,10 @@ sed -i.bak 's/runtime: crio/runtime: containerd/; s/, vip: 172.22.3.100//' "$TMP
 out=$(task kubeadm:render NAME=demo DRY_RUN=1 2>&1)
 assert_contains "$out" "criSocket: unix:///run/containerd/containerd.sock" "containerd socket"
 if [[ "$out" == *controlPlaneEndpoint* ]]; then echo "FAIL  no controlPlaneEndpoint without vip"; FAILURES=$((FAILURES+1)); else echo "PASS  no controlPlaneEndpoint without vip"; fi
-# join plan: which nodes join and how (pure computation, no cluster needed)
+# join plan: which nodes join and how (pure computation, no cluster needed); restore the vip first
+mv "$TMP/clusters/demo/cluster.yaml.bak" "$TMP/clusters/demo/cluster.yaml"
 out=$(task kubeadm:join-plan NAME=demo 2>&1)
-assert_contains "$out" "demo-control-plane2 control-plane join" "extra control plane joins as control plane"
+assert_contains "$out" "demo-control-plane2 control-plane join kube-vip" "extra control plane joins and gets kube-vip (cluster has a vip)"
 assert_contains "$out" "demo-control-plane3 control-plane skip" "join: false is skipped"
 assert_contains "$out" "demo-worker1 worker join" "worker joins"
 if [[ "$out" == *"demo-control-plane "* ]]; then echo "FAIL  first control plane is not in the join plan"; FAILURES=$((FAILURES+1)); else echo "PASS  first control plane is not in the join plan"; fi

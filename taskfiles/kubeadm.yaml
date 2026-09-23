@@ -91,21 +91,23 @@ tasks:
         {{ end }}
 
   kube-vip:
-    desc: Place the kube-vip static pod on the first control plane (multi-control-plane clusters only)
+    desc: Place the kube-vip static pod on a control plane (NODE, default the first; multi-control-plane clusters only)
     silent: true
     requires: { vars: [NAME] }
     vars:
       RAW: { sh: 'cat {{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml' }
       C: { ref: fromYaml .RAW }
       VIP: '{{ .C.spec.network.vip | default "" }}'
+      TARGET: '{{ .NODE | default (print .NAME "-control-plane") }}'
     status:
-      - '[ -z "{{ .VIP }}" ] || sudo podman exec {{ .NAME }}-control-plane test -f /etc/kubernetes/manifests/kube-vip.yaml'
+      - '[ -z "{{ .VIP }}" ] || sudo podman exec {{ .TARGET }} test -f /etc/kubernetes/manifests/kube-vip.yaml'
     cmds:
       - |
         [ -n "{{ .VIP }}" ] || exit 0
+        # Every control plane runs kube-vip so the VIP fails over when one of them is down.
         sed -e 's/\$KUBEVIP/{{ .VIP }}/' -e 's#ghcr.io/kube-vip/kube-vip:v[0-9.]*#ghcr.io/kube-vip/kube-vip:{{ .VERSIONS.kube_vip }}#' {{ .TK_HOME }}/manifests/kube-vip.yaml \
-          | sudo podman exec -i {{ .NAME }}-control-plane sh -c 'mkdir -p /etc/kubernetes/manifests && cat > /etc/kubernetes/manifests/kube-vip.yaml'
-        echo "kube-vip {{ .VERSIONS.kube_vip }} static pod placed (vip {{ .VIP }})"
+          | sudo podman exec -i {{ .TARGET }} sh -c 'mkdir -p /etc/kubernetes/manifests && cat > /etc/kubernetes/manifests/kube-vip.yaml'
+        echo "kube-vip {{ .VERSIONS.kube_vip }} static pod placed on {{ .TARGET }} (vip {{ .VIP }})"
 
   init:
     desc: kubeadm init on the first control plane; store kubeconfig and the certificate key
@@ -154,7 +156,7 @@ tasks:
     cmds:
       - |
         {{ range .C.spec.nodes }}{{ if ne .name (print $.NAME "-control-plane") }}
-        echo "{{ .name }} {{ .role }} {{ if eq (toString .join) "false" }}skip{{ else }}join{{ end }}"
+        echo "{{ .name }} {{ .role }} {{ if eq (toString .join) "false" }}skip{{ else }}join{{ if and (eq .role "control-plane") $.C.spec.network.vip }} kube-vip{{ end }}{{ end }}"
         {{- end }}{{ end }}
 
   join:
@@ -187,6 +189,7 @@ tasks:
         if kubectl get node {{ .name }} >/dev/null 2>&1; then echo "{{ .name }} already joined"; else
           {{ if eq .role "control-plane" }}
           sudo podman exec {{ .name }} bash -c "$join --control-plane --certificate-key $key --apiserver-advertise-address {{ .ip }} --ignore-preflight-errors=SystemVerification" >/tmp/{{ .name }}.join 2>&1 || { tail -20 /tmp/{{ .name }}.join >&2; exit 1; }
+          task --silent -d {{ $.TK_HOME }} kubeadm:kube-vip NAME={{ $.NAME }} NODE={{ .name }}
           {{ else }}
           sudo podman exec {{ .name }} bash -c "$join --ignore-preflight-errors=SystemVerification" >/tmp/{{ .name }}.join 2>&1 || { tail -20 /tmp/{{ .name }}.join >&2; exit 1; }
           {{ end }}
