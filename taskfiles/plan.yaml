@@ -44,9 +44,36 @@ tasks:
           [ -f "{{ .EXISTING }}" ] && { echo no; exit 0; }
           grep -hsoE 'index: *[0-9]+' {{ .CLUSTERS_DIR }}/*/cluster.yaml 2>/dev/null | awk '{print $2}' | grep -qx "{{ .INDEX }}" && echo yes || echo no
       OUT_DIR: '{{ .CLUSTERS_DIR }}/{{ .NAME }}'
+      # First problem found in the input, or empty. A -f file gets the same rules and
+      # messages as the flags bin/tkctl validates; podman and kubeadm errors come late
+      # and read badly.
+      INVALID:
+        sh: |
+          case "{{ .RUNTIME }}" in crio|containerd) ;; *) echo 'spec.runtime "{{ .RUNTIME }}" must be crio or containerd'; exit 0 ;; esac
+          case "{{ .CNI }}" in cilium|canal) ;; *) echo 'spec.cni "{{ .CNI }}" must be cilium or canal'; exit 0 ;; esac
+          case "{{ .DATAPATH }}" in auto|netkit|veth) ;; *) echo 'spec.datapath "{{ .DATAPATH }}" must be auto, netkit or veth'; exit 0 ;; esac
+          {{ if and (eq .GVISOR "true") (eq .DATAPATH "netkit") }}echo 'gvisor requires the veth datapath; gVisor sandboxes have no network under netkit'; exit 0{{ end }}
+          {{ if not .C.spec.nodes }}echo 'spec.nodes must list at least one control-plane node'; exit 0{{ end }}
+          names=""
+          {{ range .C.spec.nodes }}
+          case "{{ .role }}" in control-plane|worker) ;; *) echo 'node role "{{ .role }}" must be control-plane or worker'; exit 0 ;; esac
+          echo "{{ default "4G" .memory }}" | grep -qE '^[0-9]+[GgMm]$' || { echo 'node memory "{{ .memory }}" must be a number followed by G or M, e.g. 4G or 4096M (podman does not accept 4Gi)'; exit 0; }
+          echo "{{ default 2 .cpu }}" | grep -qE '^[1-9][0-9]*$' || { echo 'node cpu "{{ .cpu }}" must be a positive integer'; exit 0; }
+          echo "{{ default 1 .count }}" | grep -qE '^[1-9][0-9]*$' || { echo 'node count "{{ .count }}" must be a positive integer'; exit 0; }
+          {{ if .name }}
+          echo "{{ .name }}" | grep -qE '^[a-z][a-z0-9-]*$' || { echo 'node name "{{ .name }}" must use lowercase letters, digits and -, starting with a letter'; exit 0; }
+          [ "{{ default 1 .count }}" = 1 ] || { echo 'node name "{{ .name }}" cannot be combined with count {{ .count }}; a named entry is one node'; exit 0; }
+          case " $names " in *" {{ .name }} "*) echo 'node name "{{ .name }}" is used twice'; exit 0 ;; esac
+          names="$names {{ .name }}"
+          {{ end }}
+          {{ end }}
+          {{ if .C.spec.nodes }}[ "{{ (index .C.spec.nodes 0).role }}" = control-plane ] || { echo 'the first entry in spec.nodes must be a control-plane (it runs kubeadm init)'; exit 0; }{{ end }}
+          [ $(( {{ .CP_COUNT }} % 2 )) -eq 1 ] || { echo 'control-plane count {{ .CP_COUNT }} must be odd (1, 3, 5) for etcd quorum'; exit 0; }
     preconditions:
       - sh: '[ -n "{{ .NAME }}" ]'
         msg: "metadata.name is required in {{ .CLUSTER_FILE }}"
+      - sh: '[ -z "{{ .INVALID }}" ]'
+        msg: "{{ .INVALID }}"
       - sh: '[ -n "{{ .INDEX }}" ]'
         msg: "spec.network.nodes must be 172.22.N.0/24 (N = 0..255) or omitted for automatic allocation"
       - sh: '[ "{{ .OVERLAP }}" == "no" ] || [ "{{ .ALLOW_OVERLAP }}" == "1" ]'

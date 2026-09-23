@@ -58,4 +58,26 @@ YAML
 assert_fails "explicit overlapping subnet is rejected" task plan:resolve CLUSTER_FILE="$TMP/in2.yaml" DRY_RUN=1
 out=$(task plan:resolve CLUSTER_FILE="$TMP/in2.yaml" DRY_RUN=1 ALLOW_OVERLAP=1 2>&1)
 assert_contains "$out" "nodes: 172.22.0.0/24" "overlap allowed with ALLOW_OVERLAP=1"
+# -f input is validated with the same rules bin/tkctl applies to flags.
+bad() {  # label spec-body expected-message
+  printf 'metadata: {name: bad}\nspec:\n%b\n' "$2" > "$TMP/bad.yaml"
+  out=$(task plan:resolve CLUSTER_FILE="$TMP/bad.yaml" DRY_RUN=1 2>&1); rc=$?
+  assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "$1 is rejected"
+  assert_contains "$out" "$3" "$1 message"
+}
+bad "memory 4Gi" '  nodes: [{role: control-plane}, {role: worker, memory: 4Gi}]' "4096M"
+bad "non-integer cpu" '  nodes: [{role: control-plane}, {role: worker, cpu: two}]' "cpu"
+bad "invalid node name" '  nodes: [{role: control-plane}, {role: worker, name: Big_Node}]' "Big_Node"
+bad "name with count > 1" '  nodes: [{role: control-plane}, {role: worker, name: bad-big, count: 2}]' "count"
+bad "duplicate explicit name" '  nodes: [{role: control-plane}, {role: worker, name: bad-x}, {role: worker, name: bad-x}]' "bad-x"
+bad "unknown role" '  nodes: [{role: control-plane}, {role: master}]' "role"
+bad "no control plane" '  nodes: [{role: worker, count: 2}]' "control-plane"
+bad "worker listed first" '  nodes: [{role: worker}, {role: control-plane}]' "first"
+bad "even control-plane count" '  nodes: [{role: control-plane, count: 2}]' "odd"
+bad "gvisor with netkit" '  gvisor: true\n  datapath: netkit\n  nodes: [{role: control-plane}]' "netkit"
+bad "unknown runtime" '  runtime: docker\n  nodes: [{role: control-plane}]' "runtime"
+printf 'metadata: {name: good}\nspec:\n  nodes: [{role: control-plane, memory: 4096M}, {role: worker, name: good-big, cpu: 8}]\n' > "$TMP/good.yaml"
+out=$(task plan:resolve CLUSTER_FILE="$TMP/good.yaml" DRY_RUN=1 2>&1); rc=$?
+assert_eq "0" "$rc" "valid -f input passes validation"
+assert_contains "$out" "memory: 4096m" "explicit memory lower-cased"
 rm -rf "$TMP"; finish
