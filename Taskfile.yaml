@@ -5,6 +5,7 @@ version: '3'
 includes:
   preflight: ./taskfiles/preflight.yaml
   plan: ./taskfiles/plan.yaml
+  nodes: ./taskfiles/nodes.yaml
 vars:
   TK_HOME:
     sh: pwd
@@ -23,7 +24,11 @@ tasks:
       - task --list
 
   cluster:create:
-    desc: Create a cluster from CLUSTER_FILE (plan only until nodes, kubeadm and cni land)
+    desc: Create a cluster from CLUSTER_FILE (plan, preflight, nodes; kubeadm and cni follow)
     requires: { vars: [CLUSTER_FILE] }
+    vars:
+      NAME: { sh: "sed -nE 's/^\\s*name:\\s*\"?([^\" ]+)\"?\\s*$/\\1/p' {{ .CLUSTER_FILE }} | head -1" }
     cmds:
       - task: plan:resolve
+      - '{{ if ne .DRY_RUN "1" }}task -d {{ .TK_HOME }} preflight:check{{ else }}true{{ end }}'
+      - '{{ if ne .DRY_RUN "1" }}task -d {{ .TK_HOME }} nodes:up NAME={{ .NAME }}{{ else }}true{{ end }}'
