@@ -130,7 +130,7 @@ tasks:
         {{ range .NODES }}
         if ! sudo podman container exists {{ .name }} 2>/dev/null && [ ! -f {{ $.CLUSTERS_DIR }}/{{ $.NAME }}/kubeconfig ]; then
           for v in {{ .name }}-var {{ .name }}-etc {{ .name }}-usr-local-bin; do
-            sudo podman volume exists $v 2>/dev/null && sudo podman volume rm -f $v >/dev/null && echo "removed stale volume $v"
+            if sudo podman volume exists $v 2>/dev/null; then sudo podman volume rm -f $v >/dev/null && echo "removed stale volume $v"; fi
           done
         fi
         {{ end }}

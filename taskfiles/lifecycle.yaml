@@ -108,20 +108,23 @@ tasks:
         fi
         errs=0
         step() { echo "  $1"; shift; "$@" >/dev/null 2>&1 || { echo "    failed: $*"; errs=$((errs+1)); }; }
-        systemctl list-units --all --no-legend "{{ .NAME }}.target" | grep -q . && step "stop {{ .NAME }}.target" sudo systemctl disable --now {{ .NAME }}.target
+        if systemctl list-units --all --no-legend "{{ .NAME }}.target" | grep -q .; then step "stop {{ .NAME }}.target" sudo systemctl disable --now {{ .NAME }}.target; fi
         # The Quadlet network unit is a oneshot that stays active; stop it or a later cluster with the same name never creates its network.
-        systemctl list-units --all --no-legend "{{ .NAME }}-network.service" | grep -q . && step "stop {{ .NAME }}-network.service" sudo systemctl stop {{ .NAME }}-network.service
+        if systemctl list-units --all --no-legend "{{ .NAME }}-network.service" | grep -q .; then step "stop {{ .NAME }}-network.service" sudo systemctl stop {{ .NAME }}-network.service; fi
         step "remove units" sudo rm -rf /etc/containers/systemd/{{ .NAME }} /etc/systemd/system/{{ .NAME }}.target
         step "daemon-reload" sudo systemctl daemon-reload
         sudo systemctl reset-failed "{{ .NAME }}*" 2>/dev/null || true
+        # go-task's shell exits when a loop body ends with a failing && list, so use if/then throughout.
         {{ range .C.spec.nodes }}
-        sudo podman container exists {{ .name }} 2>/dev/null && step "remove container {{ .name }}" sudo podman rm -f {{ .name }}
-        for v in {{ .name }}-var {{ .name }}-etc {{ .name }}-usr-local-bin; do sudo podman volume exists $v 2>/dev/null && step "remove volume $v" sudo podman volume rm -f $v; done
+        if sudo podman container exists {{ .name }} 2>/dev/null; then step "remove container {{ .name }}" sudo podman rm -f {{ .name }}; fi
+        for v in {{ .name }}-var {{ .name }}-etc {{ .name }}-usr-local-bin; do
+          if sudo podman volume exists $v 2>/dev/null; then step "remove volume $v" sudo podman volume rm -f $v; fi
+        done
         {{ end }}
-        sudo podman network exists {{ .NAME }} 2>/dev/null && step "remove network {{ .NAME }}" sudo podman network rm -f {{ .NAME }}
+        if sudo podman network exists {{ .NAME }} 2>/dev/null; then step "remove network {{ .NAME }}" sudo podman network rm -f {{ .NAME }}; fi
         {{ if .C.spec.network }}
-        ip route show {{ .C.spec.network.pods }} 2>/dev/null | grep -q . && step "remove route {{ .C.spec.network.pods }}" sudo ip route del {{ .C.spec.network.pods }}
-        ip route show {{ .C.spec.network.services }} 2>/dev/null | grep -q . && step "remove route {{ .C.spec.network.services }}" sudo ip route del {{ .C.spec.network.services }}
+        if ip route show {{ .C.spec.network.pods }} 2>/dev/null | grep -q .; then step "remove route {{ .C.spec.network.pods }}" sudo ip route del {{ .C.spec.network.pods }}; fi
+        if ip route show {{ .C.spec.network.services }} 2>/dev/null | grep -q .; then step "remove route {{ .C.spec.network.services }}" sudo ip route del {{ .C.spec.network.services }}; fi
         {{ end }}
         step "remove state {{ .CLUSTERS_DIR }}/{{ .NAME }}" sudo rm -rf {{ .CLUSTERS_DIR }}/{{ .NAME }}
         if [ $errs -eq 0 ]; then echo "cluster {{ .NAME }} deleted"; else echo "cluster {{ .NAME }} deleted with $errs failed step(s); see the lines above" >&2; exit 1; fi
