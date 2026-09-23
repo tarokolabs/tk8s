@@ -38,7 +38,10 @@ tasks:
         done
         echo "Gateway API {{ .VERSIONS.gateway_api }} CRDs installed (experimental channel)"
         echo "cilium datapath: {{ .DATAPATH }}{{ if eq .DATAPATH "netkit" }} (gVisor sandboxes have no network under netkit; use --datapath veth if you need gVisor){{ end }}"
-        cilium install --version {{ .VERSIONS.cilium }} \
+        # A partially installed release (interrupted create) is upgraded in place instead of failing.
+        action=install
+        kubectl -n kube-system get secret -l owner=helm,name=cilium --no-headers 2>/dev/null | grep -q . && action=upgrade
+        cilium $action --version {{ .VERSIONS.cilium }} \
           --set bpf.datapathMode={{ .DATAPATH }} \
           --set cgroup.autoMount.enabled=false --set cgroup.hostRoot=/sys/fs/cgroup \
           --set securityContext.privileged=true \
@@ -48,7 +51,7 @@ tasks:
           --set routingMode=native --set autoDirectNodeRoutes=true --set ipv4NativeRoutingCIDR={{ .C.spec.network.pods }} \
           --set bpf.masquerade=true \
           --set gatewayAPI.enabled=true --set gatewayAPI.externalTrafficPolicy=Local >/tmp/{{ .NAME }}-cilium.out 2>&1
-        cilium status --wait --wait-duration 5m >/tmp/{{ .NAME }}-cilium-status.out 2>&1 && echo "cilium {{ .VERSIONS.cilium }} ok"
+        cilium status --wait --wait-duration 5m >/tmp/{{ .NAME }}-cilium-status.out 2>&1 && echo "cilium {{ .VERSIONS.cilium }} ok ($action)"
         sed -e 's/${LBNET}.200/{{ .LB_START }}/' -e 's/${LBNET}.219/{{ .LB_STOP }}/' {{ .TK_HOME }}/manifests/cilium-lb.yaml | kubectl apply -f - >/dev/null
         echo "LB-IPAM pool {{ .C.spec.network.lb_range }}"
         kubectl wait gatewayclass cilium --for=condition=Accepted --timeout=120s >/dev/null && echo "GatewayClass cilium accepted"

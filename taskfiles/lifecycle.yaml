@@ -1,0 +1,92 @@
+version: '3'
+# Day-2 operations on existing clusters.
+tasks:
+  _exists:
+    internal: true
+    requires: { vars: [NAME] }
+    preconditions:
+      - sh: 'test -f {{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml'
+        msg: "cluster {{ .NAME }} not found under {{ .CLUSTERS_DIR }} (tkctl get clusters)"
+
+  list:
+    desc: List clusters
+    silent: true
+    cmds:
+      - |
+        found=0
+        for f in {{ .CLUSTERS_DIR }}/*/cluster.yaml; do
+          [ -f "$f" ] || continue
+          [ $found -eq 0 ] && printf '%-12s %-7s %-8s %-11s %-9s %-9s %s\n' NAME NODES K8S RUNTIME DATAPATH STATE SUBNET
+          found=1
+          d=$(dirname "$f"); n=$(basename "$d")
+          k8s=$(grep -oE 'kubernetes: *"?[0-9.]+' "$f" | head -1 | tr -d '"' | awk '{print $2}')
+          rt=$(grep -oE 'runtime: *[a-z]+' "$f" | head -1 | awk '{print $2}')
+          dp=$(grep -oE 'datapath_resolved: *[a-z]+' "$f" | head -1 | awk '{print $2}'); [ -n "$dp" ] || dp=$(grep -oE 'datapath: *[a-z]+' "$f" | head -1 | awk '{print $2}')
+          cp=$(grep -c 'role: control-plane' "$f"); wk=$(grep -c 'role: worker' "$f")
+          sub=$(grep -oE 'nodes: *172\.[0-9.]+/24' "$f" | head -1 | awk '{print $2}')
+          if [ ! -f "$d/.create-complete" ]; then st=Creating
+          elif systemctl is-active --quiet "$n.target" 2>/dev/null; then st=Running; else st=Stopped; fi
+          printf '%-12s %-7s %-8s %-11s %-9s %-9s %s\n' "$n" "${cp}+${wk}" "$k8s" "$rt" "$dp" "$st" "$sub"
+        done
+        [ $found -eq 1 ] || echo "no clusters"
+
+  describe:
+    desc: Describe a cluster (OUTPUT=yaml prints cluster.yaml)
+    silent: true
+    deps: [{ task: _exists, vars: { NAME: '{{ .NAME }}' } }]
+    vars:
+      F: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml'
+      RAW: { sh: 'cat {{ .F }} 2>/dev/null || true' }
+      C: { ref: fromYaml .RAW }
+      KUBECONFIG: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig'
+    cmds:
+      - |
+        {{ if eq .OUTPUT "yaml" }}cat {{ .F }}{{ else }}
+        state=$( [ -f {{ .CLUSTERS_DIR }}/{{ .NAME }}/.create-complete ] && (systemctl is-active --quiet {{ .NAME }}.target && echo Running || echo Stopped) || echo Creating )
+        echo "Name:        {{ .NAME }}"
+        echo "State:       $state"
+        echo "Kubernetes:  {{ .C.spec.kubernetes }}   runtime: {{ .C.spec.runtime }}   cni: {{ .C.spec.cni }}   datapath: {{ .C.spec.datapath_resolved | default .C.spec.datapath }}   gvisor: {{ .C.spec.gvisor }}"
+        echo "Network:     nodes {{ .C.spec.network.nodes }} (gateway {{ .C.spec.network.gateway }})  pods {{ .C.spec.network.pods }}  services {{ .C.spec.network.services }}  lb {{ .C.spec.network.lb_range }}{{ if .C.spec.network.vip }}  vip {{ .C.spec.network.vip }}{{ end }}"
+        echo "Nodes:"
+        printf '  %-24s %-14s %-14s %-14s %s\n' NAME ROLE IP RESOURCES JOIN
+        {{ range .C.spec.nodes }}
+        j="{{ if eq (toString .join) "false" }}not joined{{ else }}joined{{ end }}"
+        printf '  %-24s %-14s %-14s %-14s %s\n' "{{ .name }}" "{{ .role }}" "{{ .ip }}" "{{ .cpu }} cpu, {{ .memory }}" "$j"
+        {{- end }}
+        echo "Paths:"
+        echo "  state:      {{ .CLUSTERS_DIR }}/{{ .NAME }}/"
+        echo "  kubeconfig: {{ .KUBECONFIG }}"
+        echo "  units:      /etc/containers/systemd/{{ .NAME }}/   target: /etc/systemd/system/{{ .NAME }}.target"
+        {{ end }}
+
+  stop:
+    desc: Stop every node of a cluster (state and data are kept)
+    silent: true
+    deps: [{ task: _exists, vars: { NAME: '{{ .NAME }}' } }]
+    cmds:
+      - sudo systemctl stop {{ .NAME }}.target
+      - echo "cluster {{ .NAME }} stopped"
+
+  start:
+    desc: Start a stopped cluster and wait for its nodes to be Ready
+    silent: true
+    deps: [{ task: _exists, vars: { NAME: '{{ .NAME }}' } }]
+    cmds:
+      - sudo systemctl start {{ .NAME }}.target
+      - |
+        export KUBECONFIG={{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig
+        for i in $(seq 1 90); do
+          total=$(kubectl get nodes --no-headers 2>/dev/null | wc -l)
+          nr=$(kubectl get nodes --no-headers 2>/dev/null | awk '$2!="Ready"' | wc -l)
+          [ "$total" -gt 0 ] && [ "$nr" -eq 0 ] && break; sleep 5
+        done
+        kubectl get nodes --no-headers | awk '{print "  "$1, $2}'
+
+  use:
+    desc: Point ~/.kube/config at a cluster (the previous file is kept as ~/.kube/config.bak)
+    silent: true
+    deps: [{ task: _exists, vars: { NAME: '{{ .NAME }}' } }]
+    cmds:
+      - mkdir -p ~/.kube && { [ ! -f ~/.kube/config ] || cp ~/.kube/config ~/.kube/config.bak; }
+      - install -m 600 {{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig ~/.kube/config
+      - echo "~/.kube/config now points at {{ .NAME }}"

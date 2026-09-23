@@ -8,6 +8,7 @@ includes:
   nodes: ./taskfiles/nodes.yaml
   kubeadm: ./taskfiles/kubeadm.yaml
   cni: ./taskfiles/cni.yaml
+  lifecycle: ./taskfiles/lifecycle.yaml
 vars:
   TK_HOME:
     sh: pwd
