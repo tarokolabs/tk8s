@@ -1,0 +1,219 @@
+#!/usr/bin/env bash
+# tkctl cluster verify <叢集名>——平台元件健康驗證（#57 的 L3 叢集 E2E 斷言集，人與 CI 共用）
+#
+# 每項印一行 PASS／FAIL／SKIP，任一 FAIL 結束碼為 1。測試資源全部建在 namespace tk-verify，
+# 結束（含中斷）時整個刪除。項目：節點 Ready → 系統 pod → metrics-server → local-path 寫入 →
+# RuntimeClass（crun、gvisor）→ Gateway API（GatewayClass、HTTPRoute/TCPRoute 從叢集外打通、
+# X-Forwarded-For）→ 教材整合（tkadm/dkreg，教材在場才測）。
+# 環境變數：VERIFY_TIMEOUT（每項等待秒數，預設 180）
+source "$(dirname "$(realpath "$0")")/../../../lib/env.sh"
+
+[ "$1" == "" ] && echo "tkctl cluster verify <叢集名>" && exit 1
+cn=$1
+tk_load_conf ${cn} || exit 1
+[ -f ${CLUSTERS_DIR}/${cn}/config ] || { echo "${cn} not exist（${CLUSTERS_DIR}/${cn}/config 不存在）"; exit 1; }
+export KUBECONFIG=${CLUSTERS_DIR}/${cn}/config
+
+NS="tk-verify"
+T=${VERIFY_TIMEOUT:-180}
+BUSYBOX="docker.io/library/busybox"
+ALPINE="docker.io/library/alpine"
+ECHO_IMG="registry.k8s.io/e2e-test-images/agnhost:2.53"
+PASS=0; FAIL=0; SKIP=0
+ok()   { echo "PASS  $1"; PASS=$((PASS+1)); }
+ng()   { echo "FAIL  $1${2:+ — $2}"; FAIL=$((FAIL+1)); }
+skip() { echo "SKIP  $1 — $2"; SKIP=$((SKIP+1)); }
+sect() { echo; echo "[$1]"; }
+cleanup() { kubectl delete ns ${NS} --ignore-not-found --wait=false &>/dev/null; }
+trap cleanup EXIT
+
+# 節點數與名稱來自 conf 的 LCTN（IP:名稱:記憶體:CPU）
+NODES=$(for n in ${LCTN}; do echo ${n} | cut -d: -f2; done)
+NODE_COUNT=$(echo "${NODES}" | wc -l | tr -d ' ')
+HOST_IP=${NGW}   # 主機在節點網段的 IP（podman bridge 閘道）＝從叢集外打 Gateway 時的客戶端 IP
+
+echo "verify ${cn}（${K8SCRI}/${K8SCNI}，${NODE_COUNT} 節點，timeout ${T}s）"
+
+# ── 0. 節點 Ready（先等，不在節點還沒穩定時開測——tkdev 驗太早曾誤判 NotReady）
+sect "nodes"
+for i in $(seq 1 $((T/5))); do
+   ready=$(kubectl get nodes --no-headers 2>/dev/null | awk '$2=="Ready"' | wc -l | tr -d ' ')
+   [ "${ready}" == "${NODE_COUNT}" ] && break
+   sleep 5
+done
+if [ "${ready}" == "${NODE_COUNT}" ]; then
+   ok "nodes: ${NODE_COUNT}/${NODE_COUNT} Ready"
+   kubectl get nodes -o custom-columns='  NODE:.metadata.name,K8S:.status.nodeInfo.kubeletVersion,RUNTIME:.status.nodeInfo.containerRuntimeVersion,KERNEL:.status.nodeInfo.kernelVersion' --no-headers | sed 's/^/  /'
+else
+   ng "nodes: ${ready:-0}/${NODE_COUNT} Ready" "$(kubectl get nodes --no-headers 2>/dev/null | awk '$2!="Ready"{print $1}' | tr '\n' ' ')"
+fi
+
+# ── 1. 系統 pod 與 CNI
+sect "system"
+notrun=$(kubectl get pods -n kube-system --no-headers 2>/dev/null | awk '$3!="Running" && $3!="Completed"{print $1"("$3")"}' | tr '\n' ' ')
+[ -z "${notrun}" ] && ok "kube-system pods all Running" || ng "kube-system pods" "${notrun}"
+if [ "${K8SCNI}" == "cilium" ]; then
+   if command -v cilium &>/dev/null; then
+      cilium status --wait --wait-duration ${T}s &>/tmp/verify-cilium.out && ok "cilium status" || ng "cilium status" "見 /tmp/verify-cilium.out"
+   else
+      skip "cilium status" "主機無 cilium CLI"
+   fi
+   DATAPATH=$(kubectl -n kube-system get cm cilium-config -o jsonpath='{.data.datapath-mode}' 2>/dev/null)
+   echo "  datapath: ${DATAPATH:-unknown}"
+fi
+
+# 測試 namespace（殘留就先清）
+kubectl delete ns ${NS} --ignore-not-found --wait=true --timeout=60s &>/dev/null
+kubectl create ns ${NS} &>/dev/null || { ng "create namespace ${NS}"; echo; echo "PASS ${PASS}  FAIL ${FAIL}  SKIP ${SKIP}"; exit 1; }
+
+# ── 2. metrics-server
+sect "metrics-server"
+kubectl top nodes &>/dev/null && ok "kubectl top nodes" || ng "kubectl top nodes" "metrics-server 未就緒"
+
+# ── 3. local-path：PVC 建立即 Bound（Immediate）、pod 寫入、資料落在主機側
+sect "local-path"
+kubectl apply -n ${NS} -f - &>/dev/null <<YAML
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: pvc}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources: {requests: {storage: 100Mi}}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: writer}
+spec:
+  restartPolicy: Never
+  containers:
+  - name: w
+    image: ${BUSYBOX}
+    command: ["sh","-c","echo verify-ok > /data/f && cat /data/f"]
+    volumeMounts: [{name: d, mountPath: /data}]
+  volumes: [{name: d, persistentVolumeClaim: {claimName: pvc}}]
+YAML
+if kubectl wait -n ${NS} pod/writer --for=jsonpath='{.status.phase}'=Succeeded --timeout=${T}s &>/dev/null \
+   && [ "$(kubectl logs -n ${NS} writer 2>/dev/null)" == "verify-ok" ]; then
+   ok "PVC bound & pod wrote data"
+   pv=$(kubectl get pvc -n ${NS} pvc -o jsonpath='{.spec.volumeName}')
+   sudo ls -d ${CLUSTERS_DIR}/${cn}/storage/${pv}_* &>/dev/null && ok "PV data on host (${CLUSTERS_DIR}/${cn}/storage)" \
+      || ng "PV data on host" "找不到 ${CLUSTERS_DIR}/${cn}/storage/${pv}_*"
+else
+   ng "PVC / writer pod" "$(kubectl get pvc -n ${NS} pvc --no-headers 2>/dev/null | awk '{print "pvc "$2}'); $(kubectl get pod -n ${NS} writer -o jsonpath='{.status.phase}' 2>/dev/null)"
+fi
+
+# ── 4. RuntimeClass
+sect "runtimeclass"
+run_rc() {  # <runtimeclass> <name> <cmd...>：回傳 pod 輸出
+   local rc=$1 name=$2; shift 2
+   kubectl run -n ${NS} ${name} --image=${ALPINE} --restart=Never --pod-running-timeout=${T}s \
+      --overrides="{\"spec\":{\"runtimeClassName\":\"${rc}\"}}" -- sh -c "$*" &>/dev/null
+   kubectl wait -n ${NS} pod/${name} --for=jsonpath='{.status.phase}'=Succeeded --timeout=${T}s &>/dev/null
+   kubectl logs -n ${NS} ${name} 2>/dev/null
+}
+if kubectl get runtimeclass crun &>/dev/null; then
+   out=$(run_rc crun rc-crun 'uname -r')
+   [ -n "${out}" ] && ok "RuntimeClass crun (kernel ${out})" || ng "RuntimeClass crun" "pod 未成功結束"
+else
+   ng "RuntimeClass crun" "不存在"
+fi
+if kubectl get runtimeclass gvisor &>/dev/null; then
+   if [ "${K8SCNI}" == "cilium" ] && [ "${DATAPATH}" == "netkit" ]; then
+      skip "RuntimeClass gvisor" "netkit datapath 下 gVisor 沙箱無網路（CILIUM_DATAPATH=veth 建叢集才可用，見 #56）"
+   else
+      out=$(run_rc gvisor rc-gvisor 'uname -r; wget -qO- -T 10 --no-check-certificate https://kubernetes.default.svc/version 2>/dev/null | grep -o gitVersion')
+      echo "${out}" | grep -q gvisor && ok "RuntimeClass gvisor (kernel $(echo "${out}" | head -1))" || ng "RuntimeClass gvisor" "pod 未成功或核心非 gVisor：$(echo ${out} | head -c 80)"
+      echo "${out}" | grep -q gitVersion && ok "gvisor sandbox network (kubernetes API reachable)" || ng "gvisor sandbox network" "沙箱內打不到 kubernetes.default.svc"
+   fi
+else
+   skip "RuntimeClass gvisor" "不存在（未提供）"
+fi
+
+# ── 5. Gateway API（cilium 內建 controller）
+sect "gateway-api"
+if [ "${K8SCNI}" != "cilium" ]; then
+   skip "Gateway API" "K8SCNI=${K8SCNI}（僅 cilium 路徑提供）"
+else
+   kubectl wait gatewayclass cilium --for=condition=Accepted --timeout=60s &>/dev/null && ok "GatewayClass cilium Accepted" || ng "GatewayClass cilium" "not Accepted"
+   kubectl apply -n ${NS} -f - &>/dev/null <<YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: echo}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: echo}}
+  template:
+    metadata: {labels: {app: echo}}
+    spec:
+      containers:
+      - name: echo
+        image: ${ECHO_IMG}
+        args: ["netexec", "--http-port=8080"]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: echo}
+spec:
+  selector: {app: echo}
+  ports: [{name: http, port: 8080}]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: gw}
+spec:
+  gatewayClassName: cilium
+  listeners:
+  - {name: http, protocol: HTTP, port: 80}
+  - {name: tcp, protocol: TCP, port: 9000, allowedRoutes: {kinds: [{kind: TCPRoute}]}}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: http}
+spec:
+  parentRefs: [{name: gw, sectionName: http}]
+  hostnames: ["verify.${cn}.test"]
+  rules:
+  - matches: [{path: {type: PathPrefix, value: /}}]
+    backendRefs: [{name: echo, port: 8080}]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: TCPRoute
+metadata: {name: tcp}
+spec:
+  parentRefs: [{name: gw, sectionName: tcp}]
+  rules:
+  - backendRefs: [{name: echo, port: 8080}]
+YAML
+   kubectl rollout status -n ${NS} deploy/echo --timeout=${T}s &>/dev/null || ng "echo backend rollout" "pod 未就緒"
+   for i in $(seq 1 $((T/5))); do
+      GWIP=$(kubectl get gateway -n ${NS} gw -o jsonpath='{.status.addresses[0].value}' 2>/dev/null); [ -n "${GWIP}" ] && break; sleep 5
+   done
+   if [ -z "${GWIP}" ]; then
+      ng "Gateway address" "LB-IPAM 未配發 IP"
+   else
+      ok "Gateway programmed (${GWIP})"
+      sleep 5   # envoy 收 xDS 需要一點時間
+      for i in 1 2 3 4 5 6; do
+         host=$(curl -s -m 8 -H "Host: verify.${cn}.test" "http://${GWIP}/hostname"); [ -n "${host}" ] && break; sleep 5
+      done
+      [ -n "${host}" ] && ok "HTTPRoute reachable from host (backend ${host})" || ng "HTTPRoute from host" "curl http://${GWIP}/ 無回應"
+      xff=$(curl -s -m 8 -H "Host: verify.${cn}.test" "http://${GWIP}/header?key=X-Forwarded-For")
+      [ "${xff}" == "${HOST_IP}" ] && ok "X-Forwarded-For carries client IP (${xff})" || ng "X-Forwarded-For" "得到 '${xff}'，預期 ${HOST_IP}"
+      tcp=$(curl -s -m 8 "http://${GWIP}:9000/hostname")
+      [ -n "${tcp}" ] && ok "TCPRoute reachable from host (backend ${tcp})" || ng "TCPRoute from host" "curl ${GWIP}:9000 無回應"
+   fi
+fi
+
+# ── 6. 教材整合（wulin 在場時 kto 會部署 tkadm 與 dkreg）
+sect "wulin"
+if kubectl get ns taroko &>/dev/null; then
+   kubectl wait -n taroko pod -l app=tkadm --for=condition=Ready --timeout=60s &>/dev/null && ok "tkadm Ready" || ng "tkadm" "pod 未 Ready"
+   kubectl get svc -n taroko dkreg &>/dev/null && ok "dkreg service" || ng "dkreg service" "不存在"
+else
+   skip "tkadm / dkreg" "無 taroko namespace（建叢集時教材不在場）"
+fi
+
+echo
+echo "PASS ${PASS}  FAIL ${FAIL}  SKIP ${SKIP}"
+[ "${FAIL}" == "0" ]
