@@ -2,7 +2,9 @@
 source "$(dirname "$0")/lib.sh"
 T="$(dirname "$0")/../bin/tkctl"
 TMP=$(mktemp -d); export TAROKO_HOME="$TMP"
-out=$($T create cluster --dry-run 2>&1)
+out=$($T create cluster --dry-run 2>&1); rc=$?
+assert_eq "0" "$rc" "dry-run exits 0"
+if [[ "$out" == *"unbound variable"* ]]; then echo "FAIL  dry-run has no shell errors"; FAILURES=$((FAILURES+1)); else echo "PASS  dry-run has no shell errors"; fi
 assert_contains "$out" "name: tk8s" "default cluster name"
 assert_contains "$out" "name: tk8s-worker2" "default 1 control-plane + 2 workers"
 assert_contains "$out" "cpu: 2" "default cpu"

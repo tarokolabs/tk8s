@@ -91,8 +91,10 @@ cmd_create() {
   [ -n "$datapath" ] || datapath=auto
   [ -z "$k8s" ] || [[ "$k8s" =~ ^1\.[0-9]+\.[0-9]+$ ]] || die "--k8s must look like 1.37.0"
 
-  local tmp; tmp=$(mktemp -t tkctl-cluster.XXXXXX)
-  trap 'rm -f "$tmp"' EXIT
+  # Global on purpose: the EXIT trap runs after this function's locals are gone.
+  TMP_CLUSTER_FILE=$(mktemp -t tkctl-cluster.XXXXXX)
+  trap 'rm -f "${TMP_CLUSTER_FILE:-}"' EXIT
+  local tmp=$TMP_CLUSTER_FILE
   if [ -n "$file" ]; then
     [ "$topo_flags" == 0 ] || die "-f cannot be combined with --control-planes/--workers/--cpu/--memory; put them in the file"
     [ -f "$file" ] || die "file not found: $file"
