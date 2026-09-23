@@ -4,6 +4,7 @@ version: '3'
 # cluster.yaml and calls these tasks with CLUSTER_FILE set.
 includes:
   preflight: ./taskfiles/preflight.yaml
+  plan: ./taskfiles/plan.yaml
 vars:
   TK_HOME:
     sh: pwd

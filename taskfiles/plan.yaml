@@ -1,0 +1,96 @@
+version: '3'
+# Resolve a cluster.yaml: fill defaults, allocate subnets, expand node groups.
+# The output is the canonical cluster.yaml every other task reads.
+tasks:
+  resolve:
+    desc: Resolve cluster.yaml (defaults, subnet allocation, node expansion)
+    silent: true
+    requires:
+      vars: [CLUSTER_FILE]
+    vars:
+      RAW:
+        sh: cat {{ .CLUSTER_FILE }}
+      C:
+        ref: fromYaml .RAW
+      NAME: '{{ .C.metadata.name }}'
+      K8S: '{{ .C.spec.kubernetes | default .VERSIONS.kubernetes.default }}'
+      RUNTIME: '{{ .C.spec.runtime | default "crio" }}'
+      CNI: '{{ .C.spec.cni | default "cilium" }}'
+      DATAPATH: '{{ .C.spec.datapath | default "auto" }}'
+      GVISOR: '{{ if eq (toString .C.spec.gvisor) "true" }}true{{ else }}false{{ end }}'
+      NODES:
+        ref: .C.spec.nodes
+      CP_COUNT:
+        sh: |
+          n=0; {{ range .C.spec.nodes }}{{ if eq .role "control-plane" }}n=$((n + {{ .count | default 1 }})); {{ end }}{{ end }}echo $n
+      # Explicit node subnet from the input, if any (172.22.N.0/24).
+      WANT_NODES: '{{ if .C.spec.network }}{{ .C.spec.network.nodes | default "" }}{{ end }}'
+      EXISTING: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml'
+      # Index N: reuse the one already recorded for this cluster (resume), else the
+      # one implied by an explicit subnet, else the smallest N no other cluster uses.
+      INDEX:
+        sh: |
+          if [ -f "{{ .EXISTING }}" ]; then
+            grep -oE 'index: *[0-9]+' "{{ .EXISTING }}" | head -1 | awk '{print $2}'; exit 0
+          fi
+          want="{{ .WANT_NODES }}"
+          if [ -n "$want" ]; then
+            echo "$want" | sed -nE 's#^172\.22\.([0-9]+)\.0/24$#\1#p'; exit 0
+          fi
+          used=$(grep -hsoE 'index: *[0-9]+' {{ .CLUSTERS_DIR }}/*/cluster.yaml 2>/dev/null | awk '{print $2}')
+          n=0; while echo "$used" | grep -qx "$n"; do n=$((n+1)); done; echo $n
+      OVERLAP:
+        sh: |
+          [ -f "{{ .EXISTING }}" ] && { echo no; exit 0; }
+          grep -hsoE 'index: *[0-9]+' {{ .CLUSTERS_DIR }}/*/cluster.yaml 2>/dev/null | awk '{print $2}' | grep -qx "{{ .INDEX }}" && echo yes || echo no
+      OUT_DIR: '{{ .CLUSTERS_DIR }}/{{ .NAME }}'
+    preconditions:
+      - sh: '[ -n "{{ .NAME }}" ]'
+        msg: "metadata.name is required in {{ .CLUSTER_FILE }}"
+      - sh: '[ -n "{{ .INDEX }}" ]'
+        msg: "spec.network.nodes must be 172.22.N.0/24 (N = 0..255) or omitted for automatic allocation"
+      - sh: '[ "{{ .OVERLAP }}" == "no" ] || [ "{{ .ALLOW_OVERLAP }}" == "1" ]'
+        msg: "subnet 172.22.{{ .INDEX }}.0/24 is already used by another cluster; pass --allow-overlap to force"
+    cmds:
+      - |
+        {{ if ne .DRY_RUN "1" }}sudo mkdir -p {{ .OUT_DIR }} && sudo chown "$(id -u):$(id -g)" {{ .OUT_DIR }}
+        exec > {{ .OUT_DIR }}/cluster.yaml{{ end }}
+        cat <<'YAML'
+        apiVersion: taroko.io/v1alpha1
+        kind: Cluster
+        metadata:
+          name: {{ .NAME }}
+        spec:
+          kubernetes: "{{ .K8S }}"
+          runtime: {{ .RUNTIME }}
+          cni: {{ .CNI }}
+          datapath: {{ .DATAPATH }}
+          gvisor: {{ .GVISOR }}
+          network:
+            index: {{ .INDEX }}
+            nodes: 172.22.{{ .INDEX }}.0/24
+            gateway: 172.22.{{ .INDEX }}.254
+            lb_range: 172.22.{{ .INDEX }}.200-172.22.{{ .INDEX }}.219
+            pods: 10.244.{{ mul (atoi .INDEX) 8 }}.0/21
+            services: 10.98.{{ .INDEX }}.0/24
+        {{- if gt (atoi .CP_COUNT) 1 }}
+            vip: 172.22.{{ .INDEX }}.100
+        {{- end }}
+          nodes:
+        {{- $idx := .INDEX }}{{ $ip := 0 }}{{ $cp := 0 }}{{ $wk := 0 }}
+        {{- range .NODES }}{{ $grp := . }}
+        {{- range $i := until (int (default 1 $grp.count)) }}
+        {{- $ip = add $ip 1 }}
+        {{- if eq $grp.role "control-plane" }}{{ $cp = add $cp 1 }}
+            - role: control-plane
+              name: {{ if $grp.name }}{{ $grp.name }}{{ else }}{{ $.NAME }}-control-plane{{ if gt (int $cp) 1 }}{{ $cp }}{{ end }}{{ end }}
+        {{- else }}{{ $wk = add $wk 1 }}
+            - role: worker
+              name: {{ if $grp.name }}{{ $grp.name }}{{ else }}{{ $.NAME }}-worker{{ $wk }}{{ end }}
+        {{- end }}
+              ip: 172.22.{{ $idx }}.{{ $ip }}
+              cpu: {{ default 2 $grp.cpu }}
+              memory: {{ default "4G" $grp.memory | toString | lower }}
+              join: {{ if eq (toString $grp.join) "false" }}false{{ else }}true{{ end }}
+        {{- end }}{{ end }}
+        YAML
