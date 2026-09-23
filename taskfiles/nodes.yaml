@@ -100,9 +100,9 @@ tasks:
         set -e
         sudo mkdir -p {{ .CNI_DIR }}
         tmp=$(mktemp -d)
-        url=$(curl -sL https://api.github.com/repos/containernetworking/plugins/releases/latest | grep -oE 'https://[^"]+linux-amd64[^"]+\.tgz' | head -1)
-        curl -sL "$url" | tar -xz -C "$tmp"
-        sudo cp -a "$tmp"/. {{ .CNI_DIR }}/ && rm -rf "$tmp"
+        curl -fsSL https://github.com/containernetworking/plugins/releases/download/{{ .VERSIONS.cni_plugins }}/cni-plugins-linux-amd64-{{ .VERSIONS.cni_plugins }}.tgz | tar -xz -C "$tmp"
+        sudo cp -a "$tmp"/. {{ .CNI_DIR }}/
+        rm -rf "$tmp"
         echo "CNI plugins $( {{ .CNI_DIR }}/bridge --version 2>/dev/null | head -1 ) in {{ .CNI_DIR }}"
     status:
       - test -x {{ .CNI_DIR }}/bridge

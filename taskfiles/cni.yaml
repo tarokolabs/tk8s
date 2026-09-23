@@ -30,7 +30,7 @@ tasks:
       - |
         set -e
         {{ if eq .C.spec.cni "cilium" }}
-        command -v cilium >/dev/null || { curl -sL https://github.com/cilium/cilium-cli/releases/latest/download/cilium-linux-amd64.tar.gz | sudo tar -xz -C /usr/local/bin cilium; }
+        command -v cilium >/dev/null || { curl -fsSL https://github.com/cilium/cilium-cli/releases/download/{{ .VERSIONS.cilium_cli }}/cilium-linux-amd64.tar.gz | sudo tar -xz -C /usr/local/bin cilium; }
         kubectl -n kube-system delete ds kube-proxy --ignore-not-found >/dev/null
         base=https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/{{ .VERSIONS.gateway_api }}/config/crd/experimental
         for crd in gatewayclasses gateways httproutes grpcroutes referencegrants backendtlspolicies tlsroutes tcproutes udproutes listenersets; do
@@ -59,7 +59,7 @@ tasks:
         grep -q '^  datapath_resolved:' $f && sed -i "s/^  datapath_resolved:.*/  datapath_resolved: {{ .DATAPATH }}/" $f || sed -i "s/^  datapath: .*/&\n  datapath_resolved: {{ .DATAPATH }}/" $f
         {{ else }}
         kubectl get configmap kube-proxy -n kube-system -o yaml | sed 's/maxPerCore: null/maxPerCore: 0/' | kubectl apply -f - >/dev/null
-        kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.5/manifests/canal.yaml >/dev/null
+        kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/{{ .VERSIONS.calico }}/manifests/canal.yaml >/dev/null
         kubectl -n kube-system rollout status ds/canal --timeout=5m >/dev/null
         echo "canal ok (no Gateway API on this path)"
         {{ end }}
