@@ -6,6 +6,7 @@ out=$($T create cluster --dry-run 2>&1); rc=$?
 assert_eq "0" "$rc" "dry-run exits 0"
 if [[ "$out" == *"unbound variable"* ]]; then echo "FAIL  dry-run has no shell errors"; FAILURES=$((FAILURES+1)); else echo "PASS  dry-run has no shell errors"; fi
 assert_contains "$out" "name: tk8s" "default cluster name"
+if [[ "$out" == *"task: ["* ]]; then echo "FAIL  tkctl output does not echo task commands"; FAILURES=$((FAILURES+1)); else echo "PASS  tkctl output does not echo task commands"; fi
 assert_contains "$out" "name: tk8s-worker2" "default 1 control-plane + 2 workers"
 assert_contains "$out" "cpu: 2" "default cpu"
 assert_contains "$out" "memory: 4g" "default memory, lower-cased"
