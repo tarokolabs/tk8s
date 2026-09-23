@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+source "$(dirname "$0")/lib.sh"
+TMP=$(mktemp -d); export TAROKO_HOME="$TMP"
+mkdir -p "$TMP/clusters/demo"; touch "$TMP/clusters/demo/.create-complete"
+cat > "$TMP/clusters/demo/cluster.yaml" <<'YAML'
+apiVersion: taroko.io/v1alpha1
+kind: Cluster
+metadata:
+  name: demo
+spec:
+  kubernetes: "1.37.0"
+  runtime: crio
+  network:
+    index: 3
+    nodes: 172.22.3.0/24
+    gateway: 172.22.3.254
+    lb_range: 172.22.3.200-172.22.3.219
+    pods: 10.244.24.0/21
+    services: 10.98.3.0/24
+  nodes:
+    - role: control-plane
+      name: demo-control-plane
+      ip: 172.22.3.1
+      cpu: 2
+      memory: 4g
+      join: true
+    - role: worker
+      name: demo-worker1
+      ip: 172.22.3.2
+      cpu: 2
+      memory: 4g
+      join: true
+YAML
+out=$(task node:plan-add NAME=demo ROLE=worker 2>&1)
+assert_contains "$out" "name=demo-worker2" "next worker name"
+assert_contains "$out" "ip=172.22.3.3" "next ip"
+assert_contains "$out" "cpu=2 memory=4g" "inherits resources from the first node of the same role"
+out=$(task node:plan-add NAME=demo ROLE=control-plane CPU=4 MEMORY=8g 2>&1)
+assert_contains "$out" "name=demo-control-plane2" "second control plane name"
+assert_contains "$out" "cpu=4 memory=8g" "explicit resources"
+task node:append NAME=demo ROLE=worker NODE=demo-worker2 IP=172.22.3.3 CPU=2 MEMORY=4g JOIN=false >/dev/null
+assert_eq "3" "$(grep -c 'role:' "$TMP/clusters/demo/cluster.yaml")" "node appended to cluster.yaml"
+assert_contains "$(cat "$TMP/clusters/demo/cluster.yaml")" "join: false" "join flag written"
+out=$(task node:plan-add NAME=demo ROLE=worker 2>&1)
+assert_contains "$out" "name=demo-worker3 ip=172.22.3.4" "plan-add sees the appended node"
+task node:mark-joined NAME=demo NODE=demo-worker2 >/dev/null
+assert_eq "0" "$(grep -c 'join: false' "$TMP/clusters/demo/cluster.yaml")" "mark-joined flips join to true"
+task node:remove-entry NAME=demo NODE=demo-worker2 >/dev/null
+assert_eq "2" "$(grep -c 'role:' "$TMP/clusters/demo/cluster.yaml")" "node entry removed"
+assert_contains "$(cat "$TMP/clusters/demo/cluster.yaml")" "name: demo-worker1" "other nodes survive removal"
+assert_contains "$(cat "$TMP/clusters/demo/cluster.yaml")" "lb_range: 172.22.3.200-172.22.3.219" "network block survives removal"
+out=$(task node:remove-entry NAME=demo NODE=demo-control-plane 2>&1); rc=$?
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "cannot remove the first control plane"
+assert_contains "$out" "cannot be deleted" "first control plane message"
+out=$(task node:remove-entry NAME=demo NODE=demo-nope 2>&1); assert_contains "$out" "not found" "remove unknown node message"
+rm -rf "$TMP"; finish
