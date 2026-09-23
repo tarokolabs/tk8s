@@ -84,9 +84,10 @@ tasks:
         KUBEADM
       - |
         {{ if ne .DRY_RUN "1" }}
-        mkdir -p {{ .CLUSTERS_DIR }}/{{ .NAME }}/logs/apiserver
-        cp {{ .TK_HOME }}/manifests/audit-policy.yaml {{ .CLUSTERS_DIR }}/{{ .NAME }}/logs/apiserver/
-        chmod -R 777 {{ .CLUSTERS_DIR }}/{{ .NAME }}/logs
+        # logs/ is created root-owned by nodes:up and written by the apiserver inside the node.
+        sudo mkdir -p {{ .CLUSTERS_DIR }}/{{ .NAME }}/logs/apiserver
+        sudo cp {{ .TK_HOME }}/manifests/audit-policy.yaml {{ .CLUSTERS_DIR }}/{{ .NAME }}/logs/apiserver/
+        sudo chmod -R 777 {{ .CLUSTERS_DIR }}/{{ .NAME }}/logs
         {{ end }}
 
   kube-vip:

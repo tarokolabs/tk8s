@@ -31,6 +31,6 @@ tasks:
       NAME: { sh: "sed -nE 's/^\\s*name:\\s*\"?([^\" ]+)\"?\\s*$/\\1/p' {{ .CLUSTER_FILE }} | head -1" }
     cmds:
       - task: plan:resolve
-      - '{{ if ne .DRY_RUN "1" }}task -d {{ .TK_HOME }} preflight:check{{ else }}true{{ end }}'
-      - '{{ if ne .DRY_RUN "1" }}task -d {{ .TK_HOME }} nodes:up NAME={{ .NAME }}{{ else }}true{{ end }}'
-      - '{{ if ne .DRY_RUN "1" }}task -d {{ .TK_HOME }} kubeadm:bootstrap NAME={{ .NAME }}{{ else }}true{{ end }}'
+      - '{{ if ne .DRY_RUN "1" }}task --silent -d {{ .TK_HOME }} preflight:check{{ else }}true{{ end }}'
+      - '{{ if ne .DRY_RUN "1" }}task --silent -d {{ .TK_HOME }} nodes:up NAME={{ .NAME }}{{ else }}true{{ end }}'
+      - '{{ if ne .DRY_RUN "1" }}task --silent -d {{ .TK_HOME }} kubeadm:bootstrap NAME={{ .NAME }}{{ else }}true{{ end }}'
