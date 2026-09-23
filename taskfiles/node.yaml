@@ -15,7 +15,11 @@ tasks:
         set -e
         f={{ .F }}
         idx=$(grep -oE 'index: *[0-9]+' $f | head -1 | awk '{print $2}')
-        last=$(grep -oE 'ip: *172\.22\.[0-9]+\.[0-9]+' $f | awk -F. '{print $4}' | sort -n | tail -1)
+        if [ "{{ .ROLE }}" = control-plane ] && ! grep -qE '^ +vip:' $f; then
+          echo "cluster {{ .NAME }} has no VIP (controlPlaneEndpoint); kubeadm cannot add control planes to it. Create HA clusters with --control-planes 3 (use --defer-join to add them by hand later)." >&2; exit 1
+        fi
+        # \b keeps 'vip:' from matching 'ip:'.
+        last=$(grep -oE '\bip: *172\.22\.[0-9]+\.[0-9]+' $f | awk -F. '{print $4}' | sort -n | tail -1)
         ip=$((last + 1)); [ $ip -eq 100 ] && ip=101
         [ $ip -le 199 ] || { echo "no free node address left in 172.22.$idx.0/24 (.200-.219 is the LB pool)" >&2; exit 1; }
         if [ "{{ .ROLE }}" = control-plane ]; then
@@ -108,6 +112,8 @@ tasks:
         msg: "node {{ .NODE }} not found in cluster {{ .NAME }}"
       - sh: 'systemctl is-active --quiet {{ .NODE }}.service'
         msg: "node {{ .NODE }} is not running (systemctl status {{ .NODE }})"
+      - sh: '[ "{{ .ROLE }}" != control-plane ] || grep -qE "^ +vip:" {{ .F }}'
+        msg: "cluster {{ .NAME }} has no VIP (controlPlaneEndpoint); kubeadm cannot add control planes to it"
     cmds:
       - |
         set -e

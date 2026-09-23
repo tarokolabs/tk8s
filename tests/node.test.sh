@@ -35,8 +35,12 @@ out=$(task node:plan-add NAME=demo ROLE=worker 2>&1)
 assert_contains "$out" "name=demo-worker2" "next worker name"
 assert_contains "$out" "ip=172.22.3.3" "next ip"
 assert_contains "$out" "cpu=2 memory=4g" "inherits resources from the first node of the same role"
+out=$(task node:plan-add NAME=demo ROLE=control-plane CPU=4 MEMORY=8g 2>&1); rc=$?
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "control plane cannot be added to a cluster without a vip"
+assert_contains "$out" "controlPlaneEndpoint" "no-vip message explains why"
+sed -i.bak 's#    services: 10.98.3.0/24#    services: 10.98.3.0/24\n    vip: 172.22.3.100#' "$TMP/clusters/demo/cluster.yaml"
 out=$(task node:plan-add NAME=demo ROLE=control-plane CPU=4 MEMORY=8g 2>&1)
-assert_contains "$out" "name=demo-control-plane2" "second control plane name"
+assert_contains "$out" "name=demo-control-plane2" "second control plane name (cluster with vip)"
 assert_contains "$out" "cpu=4 memory=8g" "explicit resources"
 task node:append NAME=demo ROLE=worker NODE=demo-worker2 IP=172.22.3.3 CPU=2 MEMORY=4g JOIN=false >/dev/null
 assert_eq "3" "$(grep -c 'role:' "$TMP/clusters/demo/cluster.yaml")" "node appended to cluster.yaml"
