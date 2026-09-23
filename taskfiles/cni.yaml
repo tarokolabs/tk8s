@@ -1,0 +1,70 @@
+version: '3'
+# CNI and Gateway API. cilium (default) provides kube-proxy replacement, LB-IPAM
+# with L2 announcements, and the Gateway API controller. canal is kept as an
+# alternative without Gateway API.
+tasks:
+  install:
+    desc: Install the CNI (cilium with Gateway API, or canal) and wait for nodes to be Ready
+    silent: true
+    requires: { vars: [NAME] }
+    vars:
+      RAW: { sh: 'cat {{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml' }
+      C: { ref: fromYaml .RAW }
+      KUBECONFIG: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig'
+      CP_IP: '{{ (index .C.spec.nodes 0).ip }}'
+      API_HOST: '{{ .C.spec.network.vip | default (index .C.spec.nodes 0).ip }}'
+      DATAPATH:
+        sh: |
+          d="{{ .C.spec.datapath }}"
+          if [ "$d" = auto ]; then
+            maj=$(uname -r | cut -d. -f1); min=$(uname -r | cut -d. -f2 | cut -d- -f1)
+            if [ "$maj" -gt 6 ] || { [ "$maj" -eq 6 ] && [ "$min" -ge 8 ]; }; then d=netkit; else d=veth; fi
+          fi; echo $d
+      LB_START: '{{ splitList "-" .C.spec.network.lb_range | first }}'
+      LB_STOP: '{{ splitList "-" .C.spec.network.lb_range | last }}'
+    env:
+      KUBECONFIG: '{{ .KUBECONFIG }}'
+    status:
+      - 'kubectl -n kube-system get ds cilium >/dev/null 2>&1 || kubectl -n kube-system get ds canal >/dev/null 2>&1'
+    cmds:
+      - |
+        set -e
+        {{ if eq .C.spec.cni "cilium" }}
+        command -v cilium >/dev/null || { curl -sL https://github.com/cilium/cilium-cli/releases/latest/download/cilium-linux-amd64.tar.gz | sudo tar -xz -C /usr/local/bin cilium; }
+        kubectl -n kube-system delete ds kube-proxy --ignore-not-found >/dev/null
+        base=https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/{{ .VERSIONS.gateway_api }}/config/crd/experimental
+        for crd in gatewayclasses gateways httproutes grpcroutes referencegrants backendtlspolicies tlsroutes tcproutes udproutes listenersets; do
+          kubectl apply --server-side -f $base/gateway.networking.k8s.io_${crd}.yaml >/dev/null
+        done
+        echo "Gateway API {{ .VERSIONS.gateway_api }} CRDs installed (experimental channel)"
+        echo "cilium datapath: {{ .DATAPATH }}{{ if eq .DATAPATH "netkit" }} (gVisor sandboxes have no network under netkit; use --datapath veth if you need gVisor){{ end }}"
+        cilium install --version {{ .VERSIONS.cilium }} \
+          --set bpf.datapathMode={{ .DATAPATH }} \
+          --set cgroup.autoMount.enabled=false --set cgroup.hostRoot=/sys/fs/cgroup \
+          --set securityContext.privileged=true \
+          --set ipam.mode=kubernetes --set k8s.requireIPv4PodCIDR=true --set ipam.operator.clusterPoolIPv4MaskSize=24 \
+          --set kubeProxyReplacement=true --set k8sServiceHost={{ .API_HOST }} --set k8sServicePort=6443 \
+          --set l2announcements.enabled=true \
+          --set routingMode=native --set autoDirectNodeRoutes=true --set ipv4NativeRoutingCIDR={{ .C.spec.network.pods }} \
+          --set bpf.masquerade=true \
+          --set gatewayAPI.enabled=true --set gatewayAPI.externalTrafficPolicy=Local >/tmp/{{ .NAME }}-cilium.out 2>&1
+        cilium status --wait --wait-duration 5m >/tmp/{{ .NAME }}-cilium-status.out 2>&1 && echo "cilium {{ .VERSIONS.cilium }} ok"
+        sed -e 's/${LBNET}.200/{{ .LB_START }}/' -e 's/${LBNET}.219/{{ .LB_STOP }}/' {{ .TK_HOME }}/manifests/cilium-lb.yaml | kubectl apply -f - >/dev/null
+        echo "LB-IPAM pool {{ .C.spec.network.lb_range }}"
+        kubectl wait gatewayclass cilium --for=condition=Accepted --timeout=120s >/dev/null && echo "GatewayClass cilium accepted"
+        f={{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml
+        grep -q '^  datapath_resolved:' $f && sed -i "s/^  datapath_resolved:.*/  datapath_resolved: {{ .DATAPATH }}/" $f || sed -i "s/^  datapath: .*/&\n  datapath_resolved: {{ .DATAPATH }}/" $f
+        {{ else }}
+        kubectl get configmap kube-proxy -n kube-system -o yaml | sed 's/maxPerCore: null/maxPerCore: 0/' | kubectl apply -f - >/dev/null
+        kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.5/manifests/canal.yaml >/dev/null
+        kubectl -n kube-system rollout status ds/canal --timeout=5m >/dev/null
+        echo "canal ok (no Gateway API on this path)"
+        {{ end }}
+      - |
+        # Route the pod and service subnets from the host through the first control plane.
+        sudo ip route replace {{ .C.spec.network.pods }} via {{ .CP_IP }}
+        sudo ip route replace {{ .C.spec.network.services }} via {{ .CP_IP }}
+        for i in $(seq 1 60); do
+          nr=$(kubectl get nodes --no-headers | awk '$2!="Ready"' | wc -l); [ "$nr" -eq 0 ] && break; sleep 5
+        done
+        kubectl get nodes --no-headers | awk '{print "  "$1, $2}'

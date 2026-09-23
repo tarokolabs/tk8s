@@ -53,7 +53,7 @@ tasks:
         msg: "subnet 172.22.{{ .INDEX }}.0/24 is already used by another cluster; pass --allow-overlap to force"
     cmds:
       - |
-        {{ if ne .DRY_RUN "1" }}sudo mkdir -p {{ .OUT_DIR }} && sudo chown "$(id -u):$(id -g)" {{ .OUT_DIR }}
+        {{ if ne .DRY_RUN "1" }}mkdir -p {{ .OUT_DIR }} 2>/dev/null || { sudo mkdir -p {{ .OUT_DIR }} && sudo chown "$(id -u):$(id -g)" {{ .OUT_DIR }}; }
         exec > {{ .OUT_DIR }}/cluster.yaml{{ end }}
         cat <<'YAML'
         apiVersion: taroko.io/v1alpha1

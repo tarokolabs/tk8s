@@ -10,6 +10,14 @@ if [[ "$out" == *"task: ["* ]]; then echo "FAIL  tkctl output does not echo task
 assert_contains "$out" "name: tk8s-worker2" "default 1 control-plane + 2 workers"
 assert_contains "$out" "cpu: 2" "default cpu"
 assert_contains "$out" "memory: 4g" "default memory, lower-cased"
+assert_contains "$out" "# ---- /etc/containers/systemd/tk8s/tk8s.network" "dry-run prints the network unit"
+assert_contains "$out" "# ---- /etc/containers/systemd/tk8s/tk8s-worker2.container" "dry-run prints node units"
+assert_contains "$out" "kubernetesVersion: 1.37.0" "dry-run prints the kubeadm config"
+if [ -d "$TMP/clusters/tk8s" ]; then echo "FAIL  dry-run leaves no state directory"; FAILURES=$((FAILURES+1)); else echo "PASS  dry-run leaves no state directory"; fi
+mkdir -p "$TMP/clusters/taken"; touch "$TMP/clusters/taken/.create-complete"; printf 'metadata: {name: taken}\nspec: {network: {index: 5}, nodes: []}\n' > "$TMP/clusters/taken/cluster.yaml"
+out=$($T create cluster taken --dry-run 2>&1); rc=$?
+assert_eq "1" "$rc" "existing cluster is refused"
+assert_contains "$out" "already exists" "existing cluster message"
 out=$($T create cluster demo --control-planes 3 --workers 4 --cpu 4 --memory 8G --k8s 1.36.4 --dry-run 2>&1)
 assert_contains "$out" "name: demo-control-plane3" "control-planes flag"
 assert_contains "$out" "name: demo-worker4" "workers flag"
