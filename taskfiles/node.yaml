@@ -22,11 +22,12 @@ tasks:
         last=$(grep -oE '\bip: *172\.22\.[0-9]+\.[0-9]+' $f | awk -F. '{print $4}' | sort -n | tail -1)
         ip=$((last + 1)); [ $ip -eq 100 ] && ip=101
         [ $ip -le 199 ] || { echo "no free node address left in 172.22.$idx.0/24 (.200-.219 is the LB pool)" >&2; exit 1; }
-        if [ "{{ .ROLE }}" = control-plane ]; then
-          n=$(grep -c 'role: control-plane' $f); name="{{ .NAME }}-control-plane$((n + 1))"
-        else
-          n=$(grep -c 'role: worker' $f); name="{{ .NAME }}-worker$((n + 1))"
-        fi
+        # Number past the highest existing suffix, not by count: a deleted node must not
+        # have its name reused while a higher-numbered node still exists.
+        if [ "{{ .ROLE }}" = control-plane ]; then base="{{ .NAME }}-control-plane"; else base="{{ .NAME }}-worker"; fi
+        n=$(grep -oE "name: ${base}[0-9]*$" $f | sed -E "s/name: ${base}//; s/^$/1/" | sort -n | tail -1)
+        name="${base}$(( ${n:-0} + 1 ))"
+        if grep -q "name: ${name}$" $f; then echo "node ${name} already exists in cluster {{ .NAME }}" >&2; exit 1; fi
         cpu="{{ .CPU }}"; mem="{{ .MEMORY }}"
         if [ -z "$cpu" ] || [ -z "$mem" ]; then
           blk=$(awk '/role: {{ .ROLE }}/{f=1} f&&/cpu:/{c=$2} f&&/memory:/{m=$2; print c, m; exit}' $f)

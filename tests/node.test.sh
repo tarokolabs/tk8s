@@ -53,6 +53,16 @@ task node:remove-entry NAME=demo NODE=demo-worker2 >/dev/null
 assert_eq "2" "$(grep -c 'role:' "$TMP/clusters/demo/cluster.yaml")" "node entry removed"
 assert_contains "$(cat "$TMP/clusters/demo/cluster.yaml")" "name: demo-worker1" "other nodes survive removal"
 assert_contains "$(cat "$TMP/clusters/demo/cluster.yaml")" "lb_range: 172.22.3.200-172.22.3.219" "network block survives removal"
+# A removed node must not have its name reused while a higher-numbered node still exists.
+task node:append NAME=demo ROLE=worker NODE=demo-worker2 IP=172.22.3.3 CPU=2 MEMORY=4g JOIN=true >/dev/null
+task node:append NAME=demo ROLE=worker NODE=demo-worker3 IP=172.22.3.4 CPU=2 MEMORY=4g JOIN=true >/dev/null
+task node:remove-entry NAME=demo NODE=demo-worker2 >/dev/null
+out=$(task node:plan-add NAME=demo ROLE=worker 2>&1)
+assert_contains "$out" "name=demo-worker4 ip=172.22.3.5" "plan-add names past the highest existing suffix, not by count"
+task node:append NAME=demo ROLE=control-plane NODE=demo-control-plane3 IP=172.22.3.6 CPU=2 MEMORY=4g JOIN=true >/dev/null
+out=$(task node:plan-add NAME=demo ROLE=control-plane 2>&1)
+assert_contains "$out" "name=demo-control-plane4" "control-plane name past the highest existing suffix"
+task node:remove-entry NAME=demo NODE=demo-control-plane3 >/dev/null; task node:remove-entry NAME=demo NODE=demo-worker3 >/dev/null
 out=$(task node:remove-entry NAME=demo NODE=demo-control-plane 2>&1); rc=$?
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "cannot remove the first control plane"
 assert_contains "$out" "cannot be deleted" "first control plane message"
