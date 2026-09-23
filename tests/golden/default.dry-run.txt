@@ -60,7 +60,12 @@ IP=172.22.0.1
 Environment=TZ=Asia/Taipei
 Volume=<TMP>/cni:/opt/cni/bin
 Volume=/lib/modules:/lib/modules:ro
+# Quadlet recreates the container on every start (--rm --replace). Everything the node
+# must keep across restarts and reboots lives in named volumes; podman copies the image
+# content into an empty volume on first use.
 Volume=tk8s-control-plane-var:/var:suid,exec,dev,rbind
+Volume=tk8s-control-plane-etc:/etc
+Volume=tk8s-control-plane-usr-local-bin:/usr/local/bin
 Volume=<TMP>/clusters/tk8s:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 StopTimeout=60
@@ -91,7 +96,12 @@ IP=172.22.0.2
 Environment=TZ=Asia/Taipei
 Volume=<TMP>/cni:/opt/cni/bin
 Volume=/lib/modules:/lib/modules:ro
+# Quadlet recreates the container on every start (--rm --replace). Everything the node
+# must keep across restarts and reboots lives in named volumes; podman copies the image
+# content into an empty volume on first use.
 Volume=tk8s-worker1-var:/var:suid,exec,dev,rbind
+Volume=tk8s-worker1-etc:/etc
+Volume=tk8s-worker1-usr-local-bin:/usr/local/bin
 Volume=<TMP>/clusters/tk8s:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 StopTimeout=60
@@ -122,7 +132,12 @@ IP=172.22.0.3
 Environment=TZ=Asia/Taipei
 Volume=<TMP>/cni:/opt/cni/bin
 Volume=/lib/modules:/lib/modules:ro
+# Quadlet recreates the container on every start (--rm --replace). Everything the node
+# must keep across restarts and reboots lives in named volumes; podman copies the image
+# content into an empty volume on first use.
 Volume=tk8s-worker2-var:/var:suid,exec,dev,rbind
+Volume=tk8s-worker2-etc:/etc
+Volume=tk8s-worker2-usr-local-bin:/usr/local/bin
 Volume=<TMP>/clusters/tk8s:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 StopTimeout=60

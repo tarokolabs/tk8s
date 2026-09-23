@@ -162,7 +162,7 @@ tasks:
         systemctl list-units --all --no-legend "{{ .NODE }}.service" | grep -q . && step "stop {{ .NODE }}.service" sudo systemctl stop {{ .NODE }}.service
         step "remove unit" sudo rm -f /etc/containers/systemd/{{ .NAME }}/{{ .NODE }}.container
         sudo podman container exists {{ .NODE }} 2>/dev/null && step "remove container" sudo podman rm -f {{ .NODE }}
-        sudo podman volume exists {{ .NODE }}-var 2>/dev/null && step "remove volume" sudo podman volume rm -f {{ .NODE }}-var
+        for v in {{ .NODE }}-var {{ .NODE }}-etc {{ .NODE }}-usr-local-bin; do sudo podman volume exists $v 2>/dev/null && step "remove volume $v" sudo podman volume rm -f $v; done
         step "update cluster.yaml" task --silent -d {{ .TK_HOME }} node:remove-entry NAME={{ .NAME }} NODE={{ .NODE }}
         step "re-render target" task --silent -d {{ .TK_HOME }} nodes:render NAME={{ .NAME }}
         step "daemon-reload" sudo systemctl daemon-reload

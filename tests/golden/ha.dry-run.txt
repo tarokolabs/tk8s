@@ -73,7 +73,12 @@ IP=172.22.0.1
 Environment=TZ=Asia/Taipei
 Volume=<TMP>/cni:/opt/cni/bin
 Volume=/lib/modules:/lib/modules:ro
+# Quadlet recreates the container on every start (--rm --replace). Everything the node
+# must keep across restarts and reboots lives in named volumes; podman copies the image
+# content into an empty volume on first use.
 Volume=ha-control-plane-var:/var:suid,exec,dev,rbind
+Volume=ha-control-plane-etc:/etc
+Volume=ha-control-plane-usr-local-bin:/usr/local/bin
 Volume=<TMP>/clusters/ha:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 StopTimeout=60
@@ -104,7 +109,12 @@ IP=172.22.0.2
 Environment=TZ=Asia/Taipei
 Volume=<TMP>/cni:/opt/cni/bin
 Volume=/lib/modules:/lib/modules:ro
+# Quadlet recreates the container on every start (--rm --replace). Everything the node
+# must keep across restarts and reboots lives in named volumes; podman copies the image
+# content into an empty volume on first use.
 Volume=ha-control-plane2-var:/var:suid,exec,dev,rbind
+Volume=ha-control-plane2-etc:/etc
+Volume=ha-control-plane2-usr-local-bin:/usr/local/bin
 Volume=<TMP>/clusters/ha:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 StopTimeout=60
@@ -135,7 +145,12 @@ IP=172.22.0.3
 Environment=TZ=Asia/Taipei
 Volume=<TMP>/cni:/opt/cni/bin
 Volume=/lib/modules:/lib/modules:ro
+# Quadlet recreates the container on every start (--rm --replace). Everything the node
+# must keep across restarts and reboots lives in named volumes; podman copies the image
+# content into an empty volume on first use.
 Volume=ha-control-plane3-var:/var:suid,exec,dev,rbind
+Volume=ha-control-plane3-etc:/etc
+Volume=ha-control-plane3-usr-local-bin:/usr/local/bin
 Volume=<TMP>/clusters/ha:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 StopTimeout=60
@@ -166,7 +181,12 @@ IP=172.22.0.4
 Environment=TZ=Asia/Taipei
 Volume=<TMP>/cni:/opt/cni/bin
 Volume=/lib/modules:/lib/modules:ro
+# Quadlet recreates the container on every start (--rm --replace). Everything the node
+# must keep across restarts and reboots lives in named volumes; podman copies the image
+# content into an empty volume on first use.
 Volume=ha-worker1-var:/var:suid,exec,dev,rbind
+Volume=ha-worker1-etc:/etc
+Volume=ha-worker1-usr-local-bin:/usr/local/bin
 Volume=<TMP>/clusters/ha:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 StopTimeout=60
@@ -197,7 +217,12 @@ IP=172.22.0.5
 Environment=TZ=Asia/Taipei
 Volume=<TMP>/cni:/opt/cni/bin
 Volume=/lib/modules:/lib/modules:ro
+# Quadlet recreates the container on every start (--rm --replace). Everything the node
+# must keep across restarts and reboots lives in named volumes; podman copies the image
+# content into an empty volume on first use.
 Volume=ha-worker2-var:/var:suid,exec,dev,rbind
+Volume=ha-worker2-etc:/etc
+Volume=ha-worker2-usr-local-bin:/usr/local/bin
 Volume=<TMP>/clusters/ha:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 StopTimeout=60

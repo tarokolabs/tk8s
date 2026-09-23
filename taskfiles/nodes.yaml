@@ -46,7 +46,12 @@ tasks:
         Environment=TZ=Asia/Taipei
         Volume={{ $.CNI_DIR }}:/opt/cni/bin
         Volume=/lib/modules:/lib/modules:ro
+        # Quadlet recreates the container on every start (--rm --replace). Everything the node
+        # must keep across restarts and reboots lives in named volumes; podman copies the image
+        # content into an empty volume on first use.
         Volume={{ .name }}-var:/var:suid,exec,dev,rbind
+        Volume={{ .name }}-etc:/etc
+        Volume={{ .name }}-usr-local-bin:/usr/local/bin
         Volume={{ $.CLUSTERS_DIR }}/{{ $.NAME }}:/opt/taroko
         Volume={{ $.WULIN_DIR }}:/opt/taroko/wulin
         StopTimeout=60
@@ -123,8 +128,10 @@ tasks:
         # A leftover <node>-var volume from an earlier cluster carries old kubelet/etcd
         # state and makes kubeadm preflight fail. Drop it when the node container is new.
         {{ range .NODES }}
-        if ! sudo podman container exists {{ .name }} 2>/dev/null && sudo podman volume exists {{ .name }}-var 2>/dev/null; then
-          sudo podman volume rm -f {{ .name }}-var >/dev/null && echo "removed stale volume {{ .name }}-var"
+        if ! sudo podman container exists {{ .name }} 2>/dev/null && [ ! -f {{ $.CLUSTERS_DIR }}/{{ $.NAME }}/kubeconfig ]; then
+          for v in {{ .name }}-var {{ .name }}-etc {{ .name }}-usr-local-bin; do
+            sudo podman volume exists $v 2>/dev/null && sudo podman volume rm -f $v >/dev/null && echo "removed stale volume $v"
+          done
         fi
         {{ end }}
       - sudo systemctl daemon-reload

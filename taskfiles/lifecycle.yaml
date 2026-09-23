@@ -116,7 +116,7 @@ tasks:
         sudo systemctl reset-failed "{{ .NAME }}*" 2>/dev/null || true
         {{ range .C.spec.nodes }}
         sudo podman container exists {{ .name }} 2>/dev/null && step "remove container {{ .name }}" sudo podman rm -f {{ .name }}
-        sudo podman volume exists {{ .name }}-var 2>/dev/null && step "remove volume {{ .name }}-var" sudo podman volume rm -f {{ .name }}-var
+        for v in {{ .name }}-var {{ .name }}-etc {{ .name }}-usr-local-bin; do sudo podman volume exists $v 2>/dev/null && step "remove volume $v" sudo podman volume rm -f $v; done
         {{ end }}
         sudo podman network exists {{ .NAME }} 2>/dev/null && step "remove network {{ .NAME }}" sudo podman network rm -f {{ .NAME }}
         {{ if .C.spec.network }}
