@@ -17,6 +17,8 @@ jobs:
       - name: shellcheck
         run: sudo apt-get install -y shellcheck >/dev/null && shellcheck -S warning bin/tkctl tests/*.sh
       - name: yamllint
-        run: pip install --quiet yamllint && yamllint -d '{extends: relaxed, rules: {line-length: disable}}' Taskfile.yaml taskfiles versions.yaml
+        run: |
+          pip install --quiet yamllint
+          yamllint -d '{extends: relaxed, rules: {line-length: disable}}' Taskfile.yaml taskfiles versions.yaml .github/workflows
       - name: Unit tests
         run: tests/run.sh
