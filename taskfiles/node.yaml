@@ -86,8 +86,8 @@ tasks:
     cmds:
       - task: append
         vars: { NAME: '{{ .NAME }}', ROLE: '{{ .ROLE }}', NODE: '{{ .NODE }}', IP: '{{ .IP }}', CPU: '{{ .NCPU }}', MEMORY: '{{ .NMEM }}', JOIN: '{{ .DOJOIN }}' }
-      - task: nodes:render
-        vars: { NAME: '{{ .NAME }}' }
+      # Cross-namespace task references resolve inside this include, so call task explicitly.
+      - task --silent -d {{ .TK_HOME }} nodes:render NAME={{ .NAME }}
       - sudo systemctl daemon-reload && sudo systemctl start {{ .NODE }}.service
       - |
         for i in $(seq 1 90); do s=$(sudo podman exec {{ .NODE }} systemctl is-system-running 2>/dev/null || true); case "$s" in running|degraded) break;; esac; sleep 2; done
