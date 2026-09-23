@@ -11,6 +11,7 @@ Taroko 平台的統一命令入口是 `tkctl <名詞> <動詞> [參數…]`。�
 ```bash
 tkctl cluster create tk8s 1.37.0   # 建三節點叢集（約 8 分鐘）
 tkctl cluster list                 # 看狀態
+tkctl cluster verify tk8s          # 驗證平台元件都健康（約 30 秒）
 tkctl cluster stop tk8s            # 下班
 tkctl cluster start tk8s           # 上班
 tkctl cluster delete tk8s          # 拆掉
@@ -24,6 +25,7 @@ tkctl cluster delete tk8s          # 拆掉
 | `tkctl cluster delete <叢集名>` | 刪除叢集（節點容器＋網路） |
 | `tkctl cluster stop <叢集名>` / `start <叢集名>` | 停止／啟動叢集容器，狀態保留 |
 | `tkctl cluster list` | 列出叢集狀態、pods 與既有備份 |
+| `tkctl cluster verify <叢集名>` | 平台元件健康驗證，每項印 `PASS`／`FAIL`／`SKIP`，任一 FAIL 結束碼 1：節點 Ready → 系統 pod 與 cilium → metrics-server → local-path 寫入落主機 → RuntimeClass crun／gvisor（含沙箱網路；netkit datapath 下 gvisor 為 SKIP）→ Gateway API（GatewayClass、HTTPRoute／TCPRoute 從叢集外打通、X-Forwarded-For）→ tkadm／dkreg（教材在場才測）。測試資源建在 namespace `tk-verify`，結束時刪除。`VERIFY_TIMEOUT` 調每項等待秒數（預設 180）。也是 #57 叢集 E2E 的斷言集 |
 | `tkctl cluster switch <叢集名>` | 把 `~/.kube/config` 切到指定叢集（多叢集並存時用） |
 | `tkctl cluster backup <叢集名>` | **叢集級**備份：每個節點 `podman commit` 成 image tar ＋ volume tar，存於 `clusters/<叢集名>-bak-<版本>/` |
 | `tkctl cluster restore <叢集名> <版本>` | 從上述備份完整還原 |

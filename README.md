@@ -100,8 +100,8 @@ tkctl cluster create tk8s 1.37.0
 ### 6. 驗證
 
 ```bash
-kubectl get nodes        # 三個節點 Ready
-tkctl cluster list       # 叢集狀態總覽
+tkctl cluster verify tk8s   # 逐項驗證平台元件（節點、cilium、Gateway API、儲存、RuntimeClass…），約 30 秒
+tkctl cluster list          # 叢集狀態總覽
 ```
 
 之後的日常操作見[使用](#使用)與 [docs/commands.md](docs/commands.md)。
