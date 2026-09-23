@@ -1,0 +1,18 @@
+version: '3'
+tasks:
+  check:
+    desc: Verify host prerequisites (podman >= 5.4, systemd, cgroup v2, swap off, sudo)
+    cmds:
+      - |
+        set -e
+        fail() { echo "preflight: $1" >&2; exit 1; }
+        command -v podman >/dev/null || fail "podman not found (podman >= 5.4 is required)"
+        v=$(podman --version | awk '{print $3}'); maj=${v%%.*}; min=${v#*.}; min=${min%%.*}
+        [ "$maj" -gt 5 ] || { [ "$maj" -eq 5 ] && [ "$min" -ge 4 ]; } || fail "podman $v is too old (>= 5.4 required)"
+        [ -d /run/systemd/system ] || fail "systemd is not running (tk8s v2 supports systemd hosts only)"
+        [ "$(stat -fc %T /sys/fs/cgroup)" == "cgroup2fs" ] || fail "cgroup v2 is required"
+        [ -z "$(swapon --show --noheadings 2>/dev/null)" ] || fail "swap is enabled; run: sudo swapoff -a and comment the swap line in /etc/fstab"
+        sudo -n true 2>/dev/null || fail "sudo without a password prompt is required for podman and systemd operations"
+        command -v curl >/dev/null || fail "curl not found"
+        lsmod | grep -q br_netfilter || sudo modprobe br_netfilter || fail "cannot load br_netfilter"
+        echo "preflight ok: podman $v, systemd, cgroup v2, swap off"

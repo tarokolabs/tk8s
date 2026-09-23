@@ -1,0 +1,9 @@
+# Single source of truth for pinned component versions.
+# Read by the Taskfile (fromYaml), install.sh, and the release workflow.
+kubernetes:
+  default: "1.37.0"
+  previous: "1.36.4"
+cilium: "1.20.2"
+gateway_api: "v1.6.1"
+kube_vip: "v1.0.1"
+task: "v3.53.1"

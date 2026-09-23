@@ -1,0 +1,22 @@
+version: '3'
+# tk8s orchestration. Every task is readable shell; `task --list` is the flow.
+# The user-facing entry point is bin/tkctl, which translates flags into a
+# cluster.yaml and calls these tasks with CLUSTER_FILE set.
+includes:
+  preflight: ./taskfiles/preflight.yaml
+vars:
+  TK_HOME:
+    sh: pwd
+  TAROKO_HOME: '{{ .TAROKO_HOME | default "/opt/taroko" }}'
+  CLUSTERS_DIR: '{{ .TAROKO_HOME }}/clusters'
+  CNI_DIR: '{{ .TAROKO_HOME }}/cni'
+  WULIN_DIR: '{{ .WULIN_DIR | default (print .TAROKO_HOME "/wulin") }}'
+  VERSIONS_RAW:
+    sh: cat {{ .TK_HOME }}/versions.yaml
+  VERSIONS:
+    ref: fromYaml .VERSIONS_RAW
+tasks:
+  default:
+    desc: List tasks
+    cmds:
+      - task --list
