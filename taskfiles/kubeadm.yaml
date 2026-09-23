@@ -105,7 +105,10 @@ tasks:
       - |
         [ -n "{{ .VIP }}" ] || exit 0
         # Every control plane runs kube-vip so the VIP fails over when one of them is down.
-        sed -e 's/\$KUBEVIP/{{ .VIP }}/' -e 's#ghcr.io/kube-vip/kube-vip:v[0-9.]*#ghcr.io/kube-vip/kube-vip:{{ .VERSIONS.kube_vip }}#' {{ .TK_HOME }}/manifests/kube-vip.yaml \
+        # kubeadm >= 1.29: the init node must use super-admin.conf (admin.conf has no rights until
+        # RBAC is bootstrapped); joined control planes only have admin.conf.
+        kc=super-admin.conf; [ "{{ .TARGET }}" = "{{ .NAME }}-control-plane" ] || kc=admin.conf
+        sed -e 's/\$KUBEVIP/{{ .VIP }}/' -e 's#ghcr.io/kube-vip/kube-vip:v[0-9.]*#ghcr.io/kube-vip/kube-vip:{{ .VERSIONS.kube_vip }}#' -e "s#path: /etc/kubernetes/super-admin.conf#path: /etc/kubernetes/$kc#" {{ .TK_HOME }}/manifests/kube-vip.yaml \
           | sudo podman exec -i {{ .TARGET }} sh -c 'mkdir -p /etc/kubernetes/manifests && cat > /etc/kubernetes/manifests/kube-vip.yaml'
         echo "kube-vip {{ .VERSIONS.kube_vip }} static pod placed on {{ .TARGET }} (vip {{ .VIP }})"
 
