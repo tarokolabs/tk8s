@@ -42,7 +42,7 @@ tasks:
         set -e
         {{ if eq .DRY_RUN "1" }}
         tmp=$(mktemp -d)
-        task --silent -d {{ .TK_HOME }} plan:resolve CLUSTER_FILE={{ .CLUSTER_FILE }} ALLOW_OVERLAP={{ .ALLOW_OVERLAP }} CLUSTERS_DIR=$tmp/clusters DRY_RUN=0
+        task --silent -d {{ .TK_HOME }} plan:resolve CLUSTER_FILE={{ .CLUSTER_FILE }} ALLOW_OVERLAP={{ .ALLOW_OVERLAP }} OUT_ROOT=$tmp/clusters DRY_RUN=0
         echo "# ---- $tmp/clusters/{{ .NAME }}/cluster.yaml"; cat $tmp/clusters/{{ .NAME }}/cluster.yaml; echo
         task --silent -d {{ .TK_HOME }} nodes:render NAME={{ .NAME }} DRY_RUN=1 CLUSTERS_DIR=$tmp/clusters
         task --silent -d {{ .TK_HOME }} kubeadm:render NAME={{ .NAME }} DRY_RUN=1 CLUSTERS_DIR=$tmp/clusters

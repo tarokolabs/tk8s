@@ -18,6 +18,15 @@ mkdir -p "$TMP/clusters/taken"; touch "$TMP/clusters/taken/.create-complete"; pr
 out=$($T create cluster taken --dry-run 2>&1); rc=$?
 assert_eq "1" "$rc" "existing cluster is refused"
 assert_contains "$out" "already exists" "existing cluster message"
+# dry-run allocates against the real clusters dir, so it shows what the real run would do.
+mkdir -p "$TMP/clusters/first"; touch "$TMP/clusters/first/.create-complete"; printf 'metadata: {name: first}\nspec: {network: {index: 0}, nodes: []}\n' > "$TMP/clusters/first/cluster.yaml"
+out=$($T create cluster --dry-run 2>&1)
+assert_contains "$out" "index: 1" "dry-run skips the index used by an existing cluster"
+printf 'metadata: {name: clash}\nspec:\n  network: {nodes: 172.22.0.0/24}\n  nodes: [{role: control-plane}]\n' > "$TMP/clash.yaml"
+out=$($T create cluster -f "$TMP/clash.yaml" --dry-run 2>&1); rc=$?
+assert_eq "1" "$rc" "dry-run rejects an explicit subnet that overlaps an existing cluster"
+assert_contains "$out" "already used" "dry-run overlap message"
+rm -rf "$TMP/clusters/first"
 out=$($T create cluster demo --control-planes 3 --workers 4 --cpu 4 --memory 8G --k8s 1.36.4 --dry-run 2>&1)
 assert_contains "$out" "name: demo-control-plane3" "control-planes flag"
 assert_contains "$out" "name: demo-worker4" "workers flag"

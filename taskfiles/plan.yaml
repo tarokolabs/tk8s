@@ -43,7 +43,9 @@ tasks:
         sh: |
           [ -f "{{ .EXISTING }}" ] && { echo no; exit 0; }
           grep -hsoE 'index: *[0-9]+' {{ .CLUSTERS_DIR }}/*/cluster.yaml 2>/dev/null | awk '{print $2}' | grep -qx "{{ .INDEX }}" && echo yes || echo no
-      OUT_DIR: '{{ .CLUSTERS_DIR }}/{{ .NAME }}'
+      # Where the resolved file goes; dry-run points OUT_ROOT at a temp dir while the
+      # index and overlap scans above keep reading the real CLUSTERS_DIR.
+      OUT_DIR: '{{ .OUT_ROOT | default .CLUSTERS_DIR }}/{{ .NAME }}'
       # First problem found in the input, or empty. A -f file gets the same rules and
       # messages as the flags bin/tkctl validates; podman and kubeadm errors come late
       # and read badly.
