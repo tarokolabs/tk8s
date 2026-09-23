@@ -71,9 +71,8 @@ tasks:
         {{ end }}
       - |
         set -e
-        # Route the pod and service subnets from the host through the first control plane.
-        sudo ip route replace {{ .C.spec.network.pods }} via {{ .CP_IP }}
-        sudo ip route replace {{ .C.spec.network.services }} via {{ .CP_IP }}
+        # Host routes to the pod and service subnets are the {{ .NAME }}-routes.service unit,
+        # started with the cluster target by nodes:up.
         for i in $(seq 1 60); do
           nr=$(kubectl get nodes --no-headers | awk '$2!="Ready"' | wc -l)
           if [ "$nr" -eq 0 ]; then break; fi

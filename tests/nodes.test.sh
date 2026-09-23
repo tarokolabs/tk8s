@@ -31,7 +31,16 @@ assert_contains "$out" "Volume=demo-worker1-etc:/etc" "per-node /etc volume (kub
 assert_contains "$out" "Volume=demo-worker1-usr-local-bin:/usr/local/bin" "per-node /usr/local/bin volume (installed runtimes survive restarts)"
 assert_contains "$out" "Volume=$TMP/clusters/demo:/opt/taroko" "state dir mounted as /opt/taroko"
 assert_contains "$out" "# ---- /etc/systemd/system/demo.target" "target path"
-assert_contains "$out" "Wants=demo-control-plane.service demo-worker1.service" "target wants every node"
+assert_contains "$out" "Wants=demo-control-plane.service demo-worker1.service demo-routes.service" "target wants every node and the routes unit"
+# Host routes to the pod and service subnets live in a unit so they come back after a reboot.
+routes=$(echo "$out" | sed -n '/demo-routes.service/,$p')
+assert_contains "$out" "# ---- /etc/systemd/system/demo-routes.service" "routes unit path"
+assert_contains "$routes" "ExecStart=ip route replace 10.244.24.0/21 via 172.22.3.1" "pod subnet routed via the first control plane"
+assert_contains "$routes" "ExecStart=ip route replace 10.98.3.0/24 via 172.22.3.1" "service subnet routed via the first control plane"
+assert_contains "$routes" "ExecStop=-ip route del 10.244.24.0/21" "routes removed when the cluster stops"
+assert_contains "$routes" "After=demo-control-plane.service" "routes wait for the control plane (its bridge address)"
+assert_contains "$routes" "PartOf=demo.target" "routes unit belongs to the cluster target"
+assert_contains "$routes" "RemainAfterExit=yes" "oneshot stays active so stop runs ExecStop"
 cp_unit=$(echo "$out" | sed -n '/demo-control-plane.container/,/demo-worker1.container/p')
 if [[ "$cp_unit" == *"After=demo-control-plane.service"* ]]; then echo "FAIL  control plane must not wait for itself"; FAILURES=$((FAILURES+1)); else echo "PASS  control plane has no After on itself"; fi
 rm -rf "$TMP"; finish

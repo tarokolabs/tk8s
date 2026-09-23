@@ -36,7 +36,7 @@ case "$1 $2" in "route show") exit 0;; *) exit 0;; esac
 SH
 cat > "$STUB/rm" <<'SH'
 #!/usr/bin/env bash
-exec /bin/rm "$@"
+echo "rm $*" >> "$STUB_LOG"; exec /bin/rm "$@"
 SH
 chmod +x "$STUB"/*; export STUB_LOG="$TMP/podman.log"; : > "$STUB_LOG"
 out=$(PATH="$STUB:$PATH" task lifecycle:delete NAME=demo FORCE=1 2>&1); rc=$?
@@ -45,6 +45,7 @@ assert_contains "$out" "remove volume demo-control-plane-var" "first node volume
 assert_contains "$out" "remove volume demo-worker1-var" "second node volume removed (loop did not abort)"
 assert_contains "$out" "remove network demo" "network removed after the volume loop"
 assert_contains "$out" "remove state" "state directory removed"
+assert_contains "$(cat "$STUB_LOG")" "/etc/systemd/system/demo-routes.service" "routes unit removed with the other units"
 assert_contains "$out" "cluster demo deleted" "final message"
 if [ -d "$TMP/clusters/demo" ]; then echo "FAIL  state dir gone"; FAILURES=$((FAILURES+1)); else echo "PASS  state dir gone"; fi
 rm -rf "$TMP"; finish

@@ -157,6 +157,7 @@ tkctl create cluster -f tkdt.yaml
 /opt/taroko/cni/                 # CNI plugins，所有叢集共用
 /etc/containers/systemd/<名稱>/  # Quadlet unit：<名稱>.network、每個節點一個 .container
 /etc/systemd/system/<名稱>.target
+/etc/systemd/system/<名稱>-routes.service   # 主機到 pod 與 service 網段的路由，跟 target 一起啟停
 ```
 
 節點容器是 Quadlet 管的，每次啟停會重建；節點必須保留的 `/var`、`/etc`、`/usr/local/bin` 放在每節點的 named volume（`<節點>-var`、`-etc`、`-usr-local-bin`），`delete` 會一起清掉。
