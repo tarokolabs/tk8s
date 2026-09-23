@@ -138,11 +138,19 @@ tasks:
       - sudo systemctl reset-failed "{{ .NAME }}*" 2>/dev/null || true
       - sudo systemctl enable --now --quiet {{ .NAME }}.target
       - |
+        # Wait for systemd inside each node, then for the container runtime: kubeadm preflight
+        # fails if the CRI socket is not up yet (the first start also copies /etc into its volume).
+        cri={{ if eq .C.spec.runtime "crio" }}crio{{ else }}containerd{{ end }}
         for n in {{ range .NODES }}{{ .name }} {{ end }}; do
           for i in $(seq 1 90); do
             s=$(sudo podman exec "$n" systemctl is-system-running 2>/dev/null || true)
-            case "$s" in running|degraded) echo "$n: systemd $s"; break ;; esac
+            case "$s" in running|degraded) break ;; esac
             [ $i -eq 90 ] && { echo "$n did not reach a running systemd state (journalctl -u $n)" >&2; exit 1; }
+            sleep 2
+          done
+          for i in $(seq 1 60); do
+            if sudo podman exec "$n" systemctl is-active --quiet $cri 2>/dev/null; then echo "$n: systemd $s, $cri active"; break; fi
+            [ $i -eq 60 ] && { echo "$n: $cri did not become active (podman exec $n journalctl -u $cri)" >&2; exit 1; }
             sleep 2
           done
         done
