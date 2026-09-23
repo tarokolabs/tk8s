@@ -72,13 +72,17 @@ tasks:
     silent: true
     deps: [{ task: _exists, vars: { NAME: '{{ .NAME }}' } }]
     cmds:
-      - sudo systemctl start {{ .NAME }}.target
       - |
+        since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        sudo systemctl start {{ .NAME }}.target
         export KUBECONFIG={{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig
+        # Node objects keep their last status for a while after a stop; require a Ready
+        # condition whose heartbeat is newer than this start.
         for i in $(seq 1 90); do
+          fresh=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name} {range .status.conditions[?(@.type=="Ready")]}{.status} {.lastHeartbeatTime}{end}{"\n"}{end}' 2>/dev/null | awk -v s="$since" '$2=="True" && $3 > s' | wc -l)
           total=$(kubectl get nodes --no-headers 2>/dev/null | wc -l)
-          nr=$(kubectl get nodes --no-headers 2>/dev/null | awk '$2!="Ready"' | wc -l)
-          [ "$total" -gt 0 ] && [ "$nr" -eq 0 ] && break; sleep 5
+          if [ "$total" -gt 0 ] && [ "$fresh" -eq "$total" ]; then break; fi
+          sleep 5
         done
         kubectl get nodes --no-headers | awk '{print "  "$1, $2}'
 
