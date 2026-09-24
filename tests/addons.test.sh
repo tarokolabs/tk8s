@@ -73,7 +73,7 @@ assert_eq "0" "$rc" "runtimeclass (containerd) exits 0"
 assert_contains "$(log)" "containers/crun/releases/download/$(v crun)/crun-$(v crun)-linux-amd64" "crun downloaded at the pinned version"
 assert_contains "$(log)" "podman cp $TMP/cache/crun-$(v crun) demo-worker1:/usr/local/bin/crun" "crun copied into every node"
 assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/containerd/config.toml")" 'runtimes.crun]' "crun runtime table appended to config.toml"
-assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/containerd/config.toml")" 'SystemdCgroup = true' "crun uses the systemd cgroup driver like kind's runc"
+assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/containerd/config.toml")" 'SystemdCgroup = false' "crun uses cgroupfs: its systemd mode needs a D-Bus socket the kind image lacks"
 assert_contains "$(log)" "podman exec demo-worker1 systemctl restart containerd" "containerd restarted after the config change"
 run addons:runtimeclass
 assert_eq "1" "$(grep -c 'runtimes.crun]' "$TMP/nodefs/demo-worker1/etc/containerd/config.toml")" "second run does not append a duplicate runtime table"

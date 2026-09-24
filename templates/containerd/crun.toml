@@ -1,7 +1,9 @@
 # Appended to /etc/containerd/config.toml by addons:runtimeclass (config version 2, as kind ships it).
+# crun's systemd cgroup mode opens the D-Bus system socket, which the kind-based containerd image
+# does not have (the crio image gets dbus with the cri-o package), so crun uses cgroupfs here.
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.crun]
   runtime_type = "io.containerd.runc.v2"
   base_runtime_spec = "/etc/containerd/cri-base.json"
   [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.crun.options]
     BinaryName = "/usr/local/bin/crun"
-    SystemdCgroup = true
+    SystemdCgroup = false
