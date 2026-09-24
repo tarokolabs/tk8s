@@ -41,7 +41,10 @@ case "$*" in
      n=$(cat "$STUB/pods-calls" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB/pods-calls"
      if [ "$n" -lt 2 ]; then printf 'coredns-1 0/1 ContainerCreating 0 1m\ncilium-1 0/1 PodInitializing 0 1m\n'; else printf 'coredns-1 1/1 Running 0 1m\ncilium-1 1/1 Running 0 1m\n'; fi ;;
   *"get cm cilium-config"*) echo "veth" ;;
-  *"top nodes"*) [ ! -f "$STUB/no-metrics" ] ;;
+  *"top nodes"*)
+     # metrics-server answers only after its first scrape cycle; fail the first two calls.
+     [ -f "$STUB/no-metrics" ] && exit 1
+     n=$(cat "$STUB/top-calls" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB/top-calls"; [ "$n" -ge 2 ] ;;
   *"logs -n tk-verify writer"*) echo "verify-ok" ;;
   *"get pvc -n tk-verify pvc -o jsonpath"*) echo "pvc-1234" ;;
   *"get runtimeclass crun"*) exit 0 ;;
@@ -52,14 +55,14 @@ case "$*" in
 esac
 SH
 chmod +x "$STUB"/*
-run() { rm -f "$STUB/pods-calls"; out=$(PATH="$STUB:$PATH" task verify:cluster CLUSTER=demo 2>&1); rc=$?; }
+run() { rm -f "$STUB/pods-calls" "$STUB/top-calls"; out=$(PATH="$STUB:$PATH" task verify:cluster CLUSTER=demo 2>&1); rc=$?; }
 
 run
 assert_eq "0" "$rc" "all healthy: exit 0"
 assert_contains "$out" "PASS  nodes: 2/2 Ready" "nodes section"
 assert_contains "$out" "PASS  kube-system pods all Running" "system pods (waited for pods still starting after a boot)"
 assert_contains "$out" "PASS  cilium status" "cilium status"
-assert_contains "$out" "PASS  kubectl top nodes" "metrics-server"
+assert_contains "$out" "PASS  kubectl top nodes" "metrics-server (retried until the first scrape landed)"
 assert_contains "$out" "PASS  PVC bound and pod wrote data" "local-path write"
 assert_contains "$out" "PASS  PV data on host" "local-path data on host"
 assert_contains "$out" "PASS  RuntimeClass crun (kernel 6.12.0)" "runtimeclass crun"

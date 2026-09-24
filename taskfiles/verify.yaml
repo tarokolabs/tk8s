@@ -77,7 +77,12 @@ tasks:
         kubectl create ns $NS >/dev/null 2>&1 || { ng "create namespace $NS"; echo; echo "PASS $PASS  FAIL $FAIL  SKIP $SKIP"; exit 1; }
 
         sect metrics-server
-        if kubectl top nodes >/dev/null 2>&1; then ok "kubectl top nodes"; else ng "kubectl top nodes" "metrics-server not ready"; fi
+        # metrics-server serves data only after its first scrape; right after a boot that takes a minute.
+        for i in $(seq 1 $((T/5))); do
+          if kubectl top nodes >/dev/null 2>&1; then top=ok; break; fi
+          top=""; sleep 5
+        done
+        if [ "$top" = ok ]; then ok "kubectl top nodes"; else ng "kubectl top nodes" "metrics-server not ready"; fi
 
         sect local-path
         kubectl apply -n $NS -f - >/dev/null 2>&1 <<YAML
