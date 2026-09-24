@@ -19,7 +19,7 @@
 | Gateway API | cilium 內建 controller，GatewayClass `cilium`，Gateway API v1.6.1 CRD（experimental channel，含 TCPRoute、UDPRoute） |
 | 高可用 | `--control-planes 3` 以上自動配 kube-vip VIP；多出來的 control plane 可以先不加入，留給練習 |
 | 節點生命週期 | Podman Quadlet 加 systemd：主機重開機叢集自動回來 |
-| RuntimeClass | `crun`（兩種 runtime 都有）；`--gvisor` 的叢集多一個 `gvisor`（handler `runsc`） |
+| RuntimeClass | `crun`（兩種 runtime 都有）；`--gvisor` 的叢集多一個 `gvisor`（handler `runsc`）。containerd 上的 `crun` 目前用 cgroupfs（image 沒有 D-Bus），這類 pod 不在 kubelet 的 pod 層級資源統計內 |
 | gVisor（選配） | `--gvisor` 時建叢集當場裝進每個節點，不烤在 image；需要 veth datapath，會自動選 |
 | 監控與儲存 | metrics-server（`kubectl top`）、local-path-provisioner（PVC 資料落在 `/opt/taroko/clusters/<名稱>/storage/`） |
 
