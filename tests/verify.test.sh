@@ -36,7 +36,10 @@ cat > "$STUB/kubectl" <<'SH'
 case "$*" in
   *"get nodes --no-headers"*) printf 'demo-control-plane Ready control-plane 1m v1.37.0\ndemo-worker1 Ready <none> 1m v1.37.0\n' ;;
   *"get nodes -o custom-columns"*) echo "  demo-control-plane v1.37.0 cri-o://1.37.0 6.12" ;;
-  *"get pods -n kube-system --no-headers"*) printf 'coredns-1 1/1 Running 0 1m\ncilium-1 1/1 Running 0 1m\n' ;;
+  *"get pods -n kube-system --no-headers"*)
+     # Right after a boot the system pods are still starting; the first answer is not Running.
+     n=$(cat "$STUB/pods-calls" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB/pods-calls"
+     if [ "$n" -lt 2 ]; then printf 'coredns-1 0/1 ContainerCreating 0 1m\ncilium-1 0/1 PodInitializing 0 1m\n'; else printf 'coredns-1 1/1 Running 0 1m\ncilium-1 1/1 Running 0 1m\n'; fi ;;
   *"get cm cilium-config"*) echo "veth" ;;
   *"top nodes"*) [ ! -f "$STUB/no-metrics" ] ;;
   *"logs -n tk-verify writer"*) echo "verify-ok" ;;
@@ -49,12 +52,12 @@ case "$*" in
 esac
 SH
 chmod +x "$STUB"/*
-run() { out=$(PATH="$STUB:$PATH" task verify:cluster CLUSTER=demo 2>&1); rc=$?; }
+run() { rm -f "$STUB/pods-calls"; out=$(PATH="$STUB:$PATH" task verify:cluster CLUSTER=demo 2>&1); rc=$?; }
 
 run
 assert_eq "0" "$rc" "all healthy: exit 0"
 assert_contains "$out" "PASS  nodes: 2/2 Ready" "nodes section"
-assert_contains "$out" "PASS  kube-system pods all Running" "system pods"
+assert_contains "$out" "PASS  kube-system pods all Running" "system pods (waited for pods still starting after a boot)"
 assert_contains "$out" "PASS  cilium status" "cilium status"
 assert_contains "$out" "PASS  kubectl top nodes" "metrics-server"
 assert_contains "$out" "PASS  PVC bound and pod wrote data" "local-path write"

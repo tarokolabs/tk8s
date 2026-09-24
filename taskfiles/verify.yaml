@@ -57,7 +57,12 @@ tasks:
         fi
 
         sect system
-        notrun=$(kubectl get pods -n kube-system --no-headers 2>/dev/null | awk '$3!="Running" && $3!="Completed"{print $1"("$3")"}' | paste -sd' ' -)
+        # Right after a boot or start the system pods are still coming up; give them the same wait as the nodes.
+        for i in $(seq 1 $((T/5))); do
+          notrun=$(kubectl get pods -n kube-system --no-headers 2>/dev/null | awk '$3!="Running" && $3!="Completed"{print $1"("$3")"}' | paste -sd' ' -)
+          if [ -z "$notrun" ]; then break; fi
+          sleep 5
+        done
         if [ -z "$notrun" ]; then ok "kube-system pods all Running"; else ng "kube-system pods" "$notrun"; fi
         {{ if eq .DEF.spec.cni "cilium" }}
         if command -v cilium >/dev/null 2>&1; then
