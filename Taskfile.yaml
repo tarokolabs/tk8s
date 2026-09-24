@@ -11,6 +11,7 @@ includes:
   addons: ./taskfiles/addons.yaml
   lifecycle: ./taskfiles/lifecycle.yaml
   node: ./taskfiles/node.yaml
+  verify: ./taskfiles/verify.yaml
 vars:
   TK_HOME:
     sh: pwd

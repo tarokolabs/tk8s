@@ -1,0 +1,208 @@
+version: '3'
+# Platform health checks, one PASS/FAIL/SKIP line each, exit 1 on any FAIL. Test resources live
+# in namespace tk-verify and are removed at the end, including on interruption. Shared by people
+# and the L3 CI. TK_VERIFY_TIMEOUT is the per-check wait in seconds (default 180).
+tasks:
+  cluster:
+    desc: Verify a cluster (nodes, system pods, metrics-server, local-path, RuntimeClass, Gateway API)
+    silent: true
+    requires: { vars: [CLUSTER] }
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
+      DEF_RAW: { sh: 'cat {{ .CLUSTER_YAML }} 2>/dev/null || printf "metadata: {name: %s}\nspec: {nodes: []}\n" {{ .CLUSTER }}' }
+      DEF: { ref: fromYaml .DEF_RAW }
+      NODE_COUNT: '{{ len .DEF.spec.nodes }}'
+      GVISOR: '{{ if eq (toString .DEF.spec.gvisor) "true" }}true{{ else }}false{{ end }}'
+      DATAPATH: '{{ .DEF.spec.datapath_resolved | default .DEF.spec.datapath }}'
+    env:
+      KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig'
+    preconditions:
+      - sh: 'test -f {{ .CLUSTER_YAML }}'
+        msg: "cluster {{ .CLUSTER }} not found under {{ .CLUSTERS_DIR }} (tkctl get clusters)"
+      - sh: 'test -f {{ .STATE_DIR }}/.create-complete'
+        msg: "cluster {{ .CLUSTER }} is not fully created; rerun tkctl create cluster {{ .CLUSTER }}"
+      - sh: 'systemctl is-active --quiet {{ .CLUSTER }}.target'
+        msg: "cluster {{ .CLUSTER }} is not running (tkctl start cluster {{ .CLUSTER }})"
+    cmds:
+      - |
+        NS=tk-verify
+        T=${TK_VERIFY_TIMEOUT:-180}
+        BUSYBOX=docker.io/library/busybox
+        ALPINE=docker.io/library/alpine
+        ECHO_IMG=registry.k8s.io/e2e-test-images/agnhost:2.53
+        HOST_IP={{ .DEF.spec.network.gateway }}   # the host's address on the node network: the client IP seen by a Gateway
+        PASS=0; FAIL=0; SKIP=0
+        ok()   { echo "PASS  $1"; PASS=$((PASS+1)); }
+        ng()   { echo "FAIL  $1${2:+ — $2}"; FAIL=$((FAIL+1)); }
+        skip() { echo "SKIP  $1 — $2"; SKIP=$((SKIP+1)); }
+        sect() { echo; echo "[$1]"; }
+        cleanup() { kubectl delete ns $NS --ignore-not-found --wait=false >/dev/null 2>&1; }
+        trap cleanup EXIT
+        echo "verify {{ .CLUSTER }} ({{ .DEF.spec.runtime }}/{{ .DEF.spec.cni }}, {{ .NODE_COUNT }} nodes, timeout ${T}s)"
+
+        sect nodes
+        for i in $(seq 1 $((T/5))); do
+          ready=$(kubectl get nodes --no-headers 2>/dev/null | awk '$2=="Ready"' | wc -l | tr -d ' ')
+          if [ "$ready" = "{{ .NODE_COUNT }}" ]; then break; fi
+          sleep 5
+        done
+        if [ "$ready" = "{{ .NODE_COUNT }}" ]; then
+          ok "nodes: {{ .NODE_COUNT }}/{{ .NODE_COUNT }} Ready"
+          kubectl get nodes -o custom-columns='NODE:.metadata.name,K8S:.status.nodeInfo.kubeletVersion,RUNTIME:.status.nodeInfo.containerRuntimeVersion,KERNEL:.status.nodeInfo.kernelVersion' --no-headers | sed 's/^/  /'
+        else
+          ng "nodes: ${ready:-0}/{{ .NODE_COUNT }} Ready" "$(kubectl get nodes --no-headers 2>/dev/null | awk '$2!="Ready"{print $1}' | paste -sd' ' -)"
+        fi
+
+        sect system
+        notrun=$(kubectl get pods -n kube-system --no-headers 2>/dev/null | awk '$3!="Running" && $3!="Completed"{print $1"("$3")"}' | paste -sd' ' -)
+        if [ -z "$notrun" ]; then ok "kube-system pods all Running"; else ng "kube-system pods" "$notrun"; fi
+        {{ if eq .DEF.spec.cni "cilium" }}
+        if command -v cilium >/dev/null 2>&1; then
+          if cilium status --wait --wait-duration ${T}s >/tmp/{{ .CLUSTER }}-verify-cilium.out 2>&1; then ok "cilium status"; else ng "cilium status" "see /tmp/{{ .CLUSTER }}-verify-cilium.out"; fi
+        else
+          skip "cilium status" "cilium CLI not on the host"
+        fi
+        echo "  datapath: $(kubectl -n kube-system get cm cilium-config -o jsonpath='{.data.datapath-mode}' 2>/dev/null || echo unknown)"
+        {{ end }}
+
+        kubectl delete ns $NS --ignore-not-found --wait=true --timeout=60s >/dev/null 2>&1
+        kubectl create ns $NS >/dev/null 2>&1 || { ng "create namespace $NS"; echo; echo "PASS $PASS  FAIL $FAIL  SKIP $SKIP"; exit 1; }
+
+        sect metrics-server
+        if kubectl top nodes >/dev/null 2>&1; then ok "kubectl top nodes"; else ng "kubectl top nodes" "metrics-server not ready"; fi
+
+        sect local-path
+        kubectl apply -n $NS -f - >/dev/null 2>&1 <<YAML
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata: {name: pvc}
+        spec:
+          accessModes: [ReadWriteOnce]
+          storageClassName: local-path
+          resources: {requests: {storage: 100Mi}}
+        ---
+        apiVersion: v1
+        kind: Pod
+        metadata: {name: writer}
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: w
+            image: $BUSYBOX
+            command: ["sh","-c","echo verify-ok > /data/f && cat /data/f"]
+            volumeMounts: [{name: d, mountPath: /data}]
+          volumes: [{name: d, persistentVolumeClaim: {claimName: pvc}}]
+        YAML
+        if kubectl wait -n $NS pod/writer --for=jsonpath='{.status.phase}'=Succeeded --timeout=${T}s >/dev/null 2>&1 \
+           && [ "$(kubectl logs -n $NS writer 2>/dev/null)" = "verify-ok" ]; then
+          ok "PVC bound and pod wrote data"
+          pv=$(kubectl get pvc -n $NS pvc -o jsonpath='{.spec.volumeName}')
+          if sudo ls -d {{ .STATE_DIR }}/storage/${pv}_* >/dev/null 2>&1; then ok "PV data on host ({{ .STATE_DIR }}/storage)"; else ng "PV data on host" "no {{ .STATE_DIR }}/storage/${pv}_*"; fi
+        else
+          ng "PVC / writer pod" "$(kubectl get pvc -n $NS pvc --no-headers 2>/dev/null | awk '{print "pvc "$2}'); $(kubectl get pod -n $NS writer -o jsonpath='{.status.phase}' 2>/dev/null)"
+        fi
+
+        sect runtimeclass
+        run_rc() {  # runtimeclass pod-name command: prints the pod's output
+          local rc=$1 name=$2; shift 2
+          kubectl run -n $NS $name --image=$ALPINE --restart=Never --pod-running-timeout=${T}s \
+            --overrides="{\"spec\":{\"runtimeClassName\":\"$rc\"}}" -- sh -c "$*" >/dev/null 2>&1
+          kubectl wait -n $NS pod/$name --for=jsonpath='{.status.phase}'=Succeeded --timeout=${T}s >/dev/null 2>&1
+          kubectl logs -n $NS $name 2>/dev/null
+        }
+        if kubectl get runtimeclass crun >/dev/null 2>&1; then
+          out=$(run_rc crun rc-crun 'uname -r')
+          if [ -n "$out" ]; then ok "RuntimeClass crun (kernel $out)"; else ng "RuntimeClass crun" "pod did not succeed"; fi
+        else
+          ng "RuntimeClass crun" "missing"
+        fi
+        {{ if eq .GVISOR "true" }}
+        if kubectl get runtimeclass gvisor >/dev/null 2>&1; then
+          out=$(run_rc gvisor rc-gvisor 'uname -r; wget -qO- -T 10 --no-check-certificate https://kubernetes.default.svc/version 2>/dev/null | grep -o gitVersion')
+          if echo "$out" | grep -q gvisor; then ok "RuntimeClass gvisor (kernel $(echo "$out" | head -1))"; else ng "RuntimeClass gvisor" "pod did not succeed or kernel is not gVisor: $(echo $out | head -c 80)"; fi
+          if echo "$out" | grep -q gitVersion; then ok "gvisor sandbox network (kubernetes API reachable)"; else ng "gvisor sandbox network" "kubernetes.default.svc unreachable from the sandbox (datapath {{ .DATAPATH }})"; fi
+        else
+          ng "RuntimeClass gvisor" "missing although the cluster was created with --gvisor"
+        fi
+        {{ else }}
+        skip "RuntimeClass gvisor" "not enabled (create the cluster with --gvisor)"
+        {{ end }}
+
+        sect gateway-api
+        {{ if ne .DEF.spec.cni "cilium" }}
+        skip "Gateway API" "cni {{ .DEF.spec.cni }} (only the cilium path provides it)"
+        {{ else }}
+        if kubectl wait gatewayclass cilium --for=condition=Accepted --timeout=60s >/dev/null 2>&1; then ok "GatewayClass cilium Accepted"; else ng "GatewayClass cilium" "not Accepted"; fi
+        kubectl apply -n $NS -f - >/dev/null 2>&1 <<YAML
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata: {name: echo}
+        spec:
+          replicas: 2
+          selector: {matchLabels: {app: echo}}
+          template:
+            metadata: {labels: {app: echo}}
+            spec:
+              containers:
+              - name: echo
+                image: $ECHO_IMG
+                args: ["netexec", "--http-port=8080"]
+        ---
+        apiVersion: v1
+        kind: Service
+        metadata: {name: echo}
+        spec:
+          selector: {app: echo}
+          ports: [{name: http, port: 8080}]
+        ---
+        apiVersion: gateway.networking.k8s.io/v1
+        kind: Gateway
+        metadata: {name: gw}
+        spec:
+          gatewayClassName: cilium
+          listeners:
+          - {name: http, protocol: HTTP, port: 80}
+          - {name: tcp, protocol: TCP, port: 9000, allowedRoutes: {kinds: [{kind: TCPRoute}]}}
+        ---
+        apiVersion: gateway.networking.k8s.io/v1
+        kind: HTTPRoute
+        metadata: {name: http}
+        spec:
+          parentRefs: [{name: gw, sectionName: http}]
+          hostnames: ["verify.{{ .CLUSTER }}.test"]
+          rules:
+          - matches: [{path: {type: PathPrefix, value: /}}]
+            backendRefs: [{name: echo, port: 8080}]
+        ---
+        apiVersion: gateway.networking.k8s.io/v1
+        kind: TCPRoute
+        metadata: {name: tcp}
+        spec:
+          parentRefs: [{name: gw, sectionName: tcp}]
+          rules:
+          - backendRefs: [{name: echo, port: 8080}]
+        YAML
+        kubectl rollout status -n $NS deploy/echo --timeout=${T}s >/dev/null 2>&1 || ng "echo backend rollout" "pods not ready"
+        for i in $(seq 1 $((T/5))); do
+          GWIP=$(kubectl get gateway -n $NS gw -o jsonpath='{.status.addresses[0].value}' 2>/dev/null); if [ -n "$GWIP" ]; then break; fi; sleep 5
+        done
+        if [ -z "$GWIP" ]; then
+          ng "Gateway address" "LB-IPAM assigned no IP"
+        else
+          ok "Gateway programmed ($GWIP)"
+          sleep 5
+          for i in 1 2 3 4 5 6; do
+            host=$(curl -s -m 8 -H "Host: verify.{{ .CLUSTER }}.test" "http://$GWIP/hostname"); if [ -n "$host" ]; then break; fi; sleep 5
+          done
+          if [ -n "$host" ]; then ok "HTTPRoute reachable from host (backend $host)"; else ng "HTTPRoute from host" "no response from http://$GWIP/"; fi
+          xff=$(curl -s -m 8 -H "Host: verify.{{ .CLUSTER }}.test" "http://$GWIP/header?key=X-Forwarded-For")
+          if [ "$xff" = "$HOST_IP" ]; then ok "X-Forwarded-For carries the client IP ($xff)"; else ng "X-Forwarded-For" "got '$xff', expected $HOST_IP"; fi
+          tcp=$(curl -s -m 8 "http://$GWIP:9000/hostname")
+          if [ -n "$tcp" ]; then ok "TCPRoute reachable from host (backend $tcp)"; else ng "TCPRoute from host" "no response from $GWIP:9000"; fi
+        fi
+        {{ end }}
+
+        echo
+        echo "PASS $PASS  FAIL $FAIL  SKIP $SKIP"
+        [ "$FAIL" = 0 ]

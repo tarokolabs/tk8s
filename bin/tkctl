@@ -47,6 +47,7 @@ Environment:
   TK_WULIN_DIR           teaching materials mounted into every node (default TK_DATA_DIR/wulin)
   TK_ASSUME_YES=1        skip confirmation prompts (same as --yes)
   TK_TASK                path to the go-task binary (default: task from PATH)
+  TK_VERIFY_TIMEOUT      seconds to wait for each verify check (default 180)
 USAGE
 }
 
