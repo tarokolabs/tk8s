@@ -50,6 +50,25 @@ assert_contains "$out" "Addons:" "describe has an Addons section"
 assert_contains "$out" "unavailable (cluster is not running)" "addon versions are skipped on a stopped cluster instead of timing out"
 assert_contains "$out" "Access:" "describe has an Access section"
 assert_contains "$out" "ip route add 172.22.3.0/24 via " "describe prints the route another machine needs to reach LB IPs and ClusterIPs"
+# Running cluster: addon versions come from kubectl with the cluster's kubeconfig; kubectl errors must not abort describe.
+STUB="$TMP/stub"; mkdir -p "$STUB"
+printf '#!/usr/bin/env bash\n[ "$1" = is-active ]\n' > "$STUB/systemctl"
+cat > "$STUB/kubectl" <<'SH'
+#!/usr/bin/env bash
+echo "kubeconfig=$KUBECONFIG" >> "$STUB_LOG"
+case "$*" in
+  *"get deploy metrics-server"*) [ -f "$STUB/ms" ] && echo "registry.k8s.io/metrics-server/metrics-server:v0.9.0" || exit 1 ;;
+  *) exit 1 ;;
+esac
+SH
+chmod +x "$STUB"/*; export STUB STUB_LOG="$TMP/stub.log"; : > "$STUB_LOG"
+out=$(KUBECONFIG=/nonexistent/other-cluster PATH="$STUB:$PATH" task lifecycle:describe CLUSTER=demo 2>&1); rc=$?
+assert_eq "0" "$rc" "describe on a running cluster exits 0 even when kubectl fails"
+assert_contains "$out" "runtimeclass    none" "kubectl failure shows as none, not an abort"
+assert_contains "$out" "Paths:" "describe continues past the Addons section"
+assert_contains "$(cat "$STUB_LOG")" "kubeconfig=$TMP/clusters/demo/kubeconfig" "kubectl uses the cluster kubeconfig, not the caller's KUBECONFIG"
+touch "$STUB/ms"; out=$(PATH="$STUB:$PATH" task lifecycle:describe CLUSTER=demo 2>&1)
+assert_contains "$out" "metrics-server  v0.9.0" "installed addon shows its version"
 out=$(task lifecycle:describe CLUSTER=demo OUTPUT=yaml 2>&1)
 assert_contains "$out" "apiVersion" "describe -o yaml prints cluster.yaml"
 assert_fails "describe unknown cluster fails" task lifecycle:describe CLUSTER=nope

@@ -43,6 +43,7 @@ tasks:
       DEF_RAW: { sh: 'cat {{ .CLUSTER_YAML }} 2>/dev/null || printf "metadata: {name: %s}\nspec: {nodes: []}\n" {{ .CLUSTER }}' }
       DEF: { ref: fromYaml .DEF_RAW }
       KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig'
+    env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
     cmds:
       - |
         {{ if eq .OUTPUT "yaml" }}cat {{ .CLUSTER_YAML }}{{ else }}
@@ -59,7 +60,8 @@ tasks:
         {{- end }}
         echo "Addons:"
         if [ "$state" = Running ]; then
-          k() { kubectl --request-timeout=5s "$@" 2>/dev/null; }
+          # go-task's shell stops at the first failing statement, so a missing addon must not fail k.
+          k() { kubectl --request-timeout=5s "$@" 2>/dev/null || true; }
           ms=$(k -n kube-system get deploy metrics-server -o jsonpath='{.spec.template.spec.containers[0].image}' | sed 's/.*://'); echo "  metrics-server  ${ms:-not installed}"
           lp=$(k -n local-path-storage get deploy local-path-provisioner -o jsonpath='{.spec.template.spec.containers[0].image}' | sed 's/.*://'); echo "  local-path      ${lp:-not installed}"
           rc=$(k get runtimeclass -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}'); echo "  runtimeclass    ${rc:-none}"

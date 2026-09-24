@@ -7,6 +7,9 @@ set -euo pipefail
 TK_HOME="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
 export TK_HOME
 TK_TASK="${TK_TASK:-task}"  # path to the go-task binary
+# A task's env: (KUBECONFIG of the cluster being operated on) must beat the caller's shell; go-task
+# gives the OS environment precedence unless this experiment is on (.taskrc.yml covers direct task use).
+export TASK_X_ENV_PRECEDENCE=1
 
 usage() {
   cat <<'USAGE'

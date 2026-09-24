@@ -1,0 +1,5 @@
+# go-task settings for this repo. ENV_PRECEDENCE makes a task's env: (e.g. KUBECONFIG pointing at the
+# cluster being operated on) win over the caller's shell environment; bin/tkctl sets the same
+# via TASK_X_ENV_PRECEDENCE=1 because this file is only read from the current directory.
+experiments:
+  ENV_PRECEDENCE: 1
