@@ -27,7 +27,8 @@ tasks:
       K8S: '{{ .DEF.spec.kubernetes | default .VERSIONS.kubernetes.default }}'
       RUNTIME: '{{ .DEF.spec.runtime | default "crio" }}'
       CNI: '{{ .DEF.spec.cni | default "cilium" }}'
-      DATAPATH: '{{ .DEF.spec.datapath | default "auto" }}'
+      # gVisor sandboxes have no network under netkit, so gvisor picks veth unless the file says otherwise.
+      DATAPATH: '{{ .DEF.spec.datapath | default (ternary "veth" "auto" (eq (toString .DEF.spec.gvisor) "true")) }}'
       GVISOR: '{{ if eq (toString .DEF.spec.gvisor) "true" }}true{{ else }}false{{ end }}'
       NODES:
         ref: .DEF.spec.nodes

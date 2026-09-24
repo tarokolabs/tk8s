@@ -76,6 +76,9 @@ bad "worker listed first" '  nodes: [{role: worker}, {role: control-plane}]' "fi
 bad "even control-plane count" '  nodes: [{role: control-plane, count: 2}]' "odd"
 bad "gvisor with netkit" '  gvisor: true\n  datapath: netkit\n  nodes: [{role: control-plane}]' "netkit"
 bad "unknown runtime" '  runtime: docker\n  nodes: [{role: control-plane}]' "runtime"
+printf 'metadata: {name: gv}\nspec:\n  gvisor: true\n  nodes: [{role: control-plane}]\n' > "$TMP/gv.yaml"
+out=$(task plan:resolve CLUSTER_FILE="$TMP/gv.yaml" DRY_RUN=true 2>&1)
+assert_contains "$out" "datapath: veth" "gvisor without an explicit datapath resolves to veth (sandboxes have no network under netkit)"
 printf 'metadata: {name: good}\nspec:\n  nodes: [{role: control-plane, memory: 4096M}, {role: worker, name: good-big, cpu: 8}]\n' > "$TMP/good.yaml"
 out=$(task plan:resolve CLUSTER_FILE="$TMP/good.yaml" DRY_RUN=true 2>&1); rc=$?
 assert_eq "0" "$rc" "valid -f input passes validation"

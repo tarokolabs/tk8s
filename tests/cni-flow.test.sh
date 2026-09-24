@@ -53,6 +53,7 @@ assert_contains "$out" "Ready" "nodes never Ready: message says so"
 rm -f "$STUB/nodes-notready"; run
 assert_eq "0" "$rc" "healthy path exits 0"
 assert_contains "$out" "cilium $(v cilium) ok (install)" "healthy path reports cilium"
+assert_contains "$(cat "$STUB_LOG")" "--set bpf.lbExternalClusterIP=true" "ClusterIPs are reachable from the host and routed machines"
 assert_contains "$(cat "$STUB_LOG")" "cilium-cli/releases/download/$(v cilium_cli)/cilium-linux-amd64.tar.gz" "cilium CLI downloaded at the pinned version"
 assert_contains "$(cat "$TMP/clusters/demo/cluster.yaml")" "datapath_resolved: veth" "datapath_resolved recorded"
 run  # second run on the same file must not duplicate the key

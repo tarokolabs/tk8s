@@ -52,6 +52,7 @@ tasks:
           --set l2announcements.enabled=true \
           --set routingMode=native --set autoDirectNodeRoutes=true --set ipv4NativeRoutingCIDR={{ .DEF.spec.network.pods }} \
           --set bpf.masquerade=true \
+          --set bpf.lbExternalClusterIP=true \
           --set gatewayAPI.enabled=true --set gatewayAPI.externalTrafficPolicy=Local >/tmp/{{ .CLUSTER }}-cilium.out 2>&1
         # errexit ignores a failing left side of &&, so every wait fails explicitly.
         cilium status --wait --wait-duration 5m >/tmp/{{ .CLUSTER }}-cilium-status.out 2>&1 || {
