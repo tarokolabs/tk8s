@@ -76,4 +76,31 @@ assert_contains "$(log)" "podman exec demo-worker1 systemctl restart containerd"
 run addons:runtimeclass
 assert_eq "1" "$(grep -c 'runtimes.crun]' "$TMP/nodefs/demo-worker1/etc/containerd/config.toml")" "second run does not append a duplicate runtime table"
 if grep -q "curl " "$STUB_LOG"; then echo "FAIL  second run does not download again"; FAILURES=$((FAILURES+1)); else echo "PASS  second run does not download again"; fi
+# ---- gvisor disabled: nothing installed, no RuntimeClass gvisor
+fixture crio false; rm -rf "$TMP/nodefs"; mkdir -p "$TMP/nodefs"; run addons:gvisor
+assert_eq "0" "$rc" "gvisor disabled exits 0"
+assert_contains "$out" "not enabled" "gvisor disabled says so"
+if grep -q "gvisor" "$STUB_LOG"; then echo "FAIL  gvisor disabled touches nothing"; FAILURES=$((FAILURES+1)); else echo "PASS  gvisor disabled touches nothing"; fi
+# ---- gvisor on crio: tarball verified on the host, extracted in every node, handler conf written, crio restarted
+fixture crio true; run addons:gvisor
+assert_eq "0" "$rc" "gvisor (crio) exits 0"
+assert_contains "$(log)" "gvisor/releases/release/$(v gvisor)/x86_64/gvisor.tar.zstd.sha512" "gvisor checksum downloaded at the pinned release"
+assert_contains "$(log)" "podman cp $TMP/cache/gvisor-$(v gvisor).tar.zstd demo-worker1:/tmp/gvisor.tar.zstd" "tarball copied into every node"
+assert_contains "$(log)" "podman exec demo-worker1 tar --zstd -xf /tmp/gvisor.tar.zstd -C /usr/local/bin" "extracted into the persisted /usr/local/bin"
+assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/crio/crio.conf.d/20-gvisor.conf")" 'runtime_type = "vm"' "CRI-O handler conf written into the node"
+assert_contains "$(log)" "podman exec demo-worker1 systemctl restart crio" "crio restarted"
+assert_contains "$(log)" "kubectl apply -f -" "RuntimeClass gvisor applied"
+# ---- gvisor on containerd: shim table appended once
+fixture containerd true; rm -rf "$TMP/nodefs"; mkdir -p "$TMP/nodefs"; run addons:gvisor
+assert_eq "0" "$rc" "gvisor (containerd) exits 0"
+assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/containerd/config.toml")" 'runtimes.runsc]' "runsc runtime table appended"
+assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/containerd/runsc.toml")" 'systemd-cgroup = "true"' "runsc told to use systemd cgroups"
+assert_contains "$(log)" "podman exec demo-worker1 systemctl restart containerd" "containerd restarted for runsc"
+run addons:gvisor
+assert_eq "1" "$(grep -c 'runtimes.runsc]' "$TMP/nodefs/demo-worker1/etc/containerd/config.toml")" "second run does not duplicate the runsc table"
+# ---- old image with runsc baked in: no download, conf still written
+fixture crio true; rm -rf "$TMP/nodefs"; mkdir -p "$TMP/nodefs/demo-control-plane/usr/local/bin" "$TMP/nodefs/demo-worker1/usr/local/bin"
+touch "$TMP/nodefs/demo-control-plane/usr/local/bin/runsc" "$TMP/nodefs/demo-worker1/usr/local/bin/runsc"; rm -rf "$TMP/cache"; run addons:gvisor
+if grep -q "curl " "$STUB_LOG"; then echo "FAIL  runsc already present: no download"; FAILURES=$((FAILURES+1)); else echo "PASS  runsc already present: no download"; fi
+assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/crio/crio.conf.d/20-gvisor.conf")" 'runtime_type = "vm"' "handler conf still written when the binary was baked in"
 rm -rf "$TMP"; finish

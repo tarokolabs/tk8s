@@ -37,3 +37,63 @@ tasks:
         {{ end }}
         kubectl apply -f {{ .TK_HOME }}/manifests/runtimeclass.yaml >/dev/null
         echo "RuntimeClass crun ok"
+
+  gvisor:
+    desc: 'Install gVisor into every node and create RuntimeClass gvisor (only when spec.gvisor is true)'
+    silent: true
+    requires: { vars: [CLUSTER] }
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
+      DEF_RAW: { sh: 'cat {{ .CLUSTER_YAML }}' }
+      DEF: { ref: fromYaml .DEF_RAW }
+      CACHE: '{{ .TK_DATA_DIR }}/cache'
+      TARBALL: 'gvisor-{{ .VERSIONS.gvisor }}.tar.zstd'
+      URL: 'https://storage.googleapis.com/gvisor/releases/release/{{ .VERSIONS.gvisor }}/x86_64'
+    env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
+    cmds:
+      - |
+        set -e
+        {{ if ne (toString .DEF.spec.gvisor) "true" }}
+        echo "gVisor not enabled (create with --gvisor)"; exit 0
+        {{ end }}
+        # Download and verify once on the host; each node extracts its own copy into /usr/local/bin.
+        need=0
+        {{ range .DEF.spec.nodes }}if ! sudo podman exec {{ .name }} test -x /usr/local/bin/runsc; then need=1; fi
+        {{ end }}
+        if [ $need -eq 1 ] && [ ! -f {{ .CACHE }}/{{ .TARBALL }} ]; then
+          mkdir -p {{ .CACHE }} 2>/dev/null || { sudo mkdir -p {{ .CACHE }} && sudo chown "$(id -u):$(id -g)" {{ .CACHE }}; }
+          curl -fsSL -o {{ .CACHE }}/gvisor.tar.zstd {{ .URL }}/gvisor.tar.zstd
+          curl -fsSL -o {{ .CACHE }}/gvisor.tar.zstd.sha512 {{ .URL }}/gvisor.tar.zstd.sha512
+          (cd {{ .CACHE }} && sha512sum -c gvisor.tar.zstd.sha512 >/dev/null) || { rm -f {{ .CACHE }}/gvisor.tar.zstd*; echo "gvisor.tar.zstd checksum mismatch" >&2; exit 1; }
+          mv {{ .CACHE }}/gvisor.tar.zstd {{ .CACHE }}/{{ .TARBALL }}; rm -f {{ .CACHE }}/gvisor.tar.zstd.sha512
+        fi
+        {{ range .DEF.spec.nodes }}
+        if ! sudo podman exec {{ .name }} test -x /usr/local/bin/runsc; then
+          sudo podman cp {{ $.CACHE }}/{{ $.TARBALL }} {{ .name }}:/tmp/gvisor.tar.zstd
+          sudo podman exec {{ .name }} tar --zstd -xf /tmp/gvisor.tar.zstd -C /usr/local/bin
+          sudo podman exec {{ .name }} rm -f /tmp/gvisor.tar.zstd
+        fi
+        {{ if eq $.DEF.spec.runtime "crio" }}
+        if ! sudo podman exec {{ .name }} test -e /etc/crio/crio.conf.d/20-gvisor.conf; then
+          sudo podman cp {{ $.TK_HOME }}/templates/crio/20-gvisor.conf {{ .name }}:/etc/crio/crio.conf.d/20-gvisor.conf
+          sudo podman exec {{ .name }} systemctl restart crio
+          echo "{{ .name }}: gVisor {{ $.VERSIONS.gvisor }} handler runsc, crio restarted"
+        fi
+        {{ else }}
+        if ! sudo podman exec {{ .name }} grep -q 'runtimes.runsc]' /etc/containerd/config.toml; then
+          sudo podman cp {{ $.TK_HOME }}/templates/containerd/runsc-config.toml {{ .name }}:/etc/containerd/runsc.toml
+          sudo podman exec -i {{ .name }} sh -c 'cat >> /etc/containerd/config.toml' < {{ $.TK_HOME }}/templates/containerd/runsc.toml
+          sudo podman exec {{ .name }} systemctl restart containerd
+          echo "{{ .name }}: gVisor {{ $.VERSIONS.gvisor }} shim runsc, containerd restarted"
+        fi
+        {{ end }}
+        {{ end }}
+        kubectl apply -f - >/dev/null <<'YAML'
+        apiVersion: node.k8s.io/v1
+        kind: RuntimeClass
+        metadata:
+          name: gvisor
+        handler: runsc
+        YAML
+        echo "RuntimeClass gvisor ok (gVisor {{ .VERSIONS.gvisor }}; datapath must be veth, see --gvisor)"

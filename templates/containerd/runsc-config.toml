@@ -1,0 +1,3 @@
+# runsc options for the containerd shim; kind's containerd uses the systemd cgroup driver.
+[runsc_config]
+  systemd-cgroup = "true"

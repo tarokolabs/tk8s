@@ -4,8 +4,6 @@ FROM docker.io/kindest/node:v${VER}
 # FROM 之後要重新宣告才拿得到 build-arg
 ARG VER
 ARG CRIO_CHANNEL=stable
-# gVisor 發佈版（https://gvisor.dev/docs/user_guide/install/）；官方以單一 gvisor.tar.zstd 發佈
-ARG GVISOR_REL=20260914.0
 # 2026-07 起 pkgs.k8s.io 的 addons:/cri-o 路徑回 403（2026-08 複驗仍然如此），
 # CRI-O deb 目前只剩上游 openSUSE Build Service 這個來源。做成 build-arg，
 # 日後 pkgs.k8s.io 恢復時以 --build-arg CRIO_REPO=https://pkgs.k8s.io/addons:/cri-o 切回
@@ -31,16 +29,8 @@ RUN set -eux; \
       -o Dpkg::Options::=--force-confnew cri-o; \
     rm -rf /var/lib/apt/lists/*
 
-# gVisor（runsc + containerd-shim-runsc-v1 + gvisor-bin/）烤進 image：CRI-O 1.37 起支援以
-# runtime_type = "vm" 掛 containerd-shim-runsc-v1（cri-o/cri-o#9974），handler 設定見 crio.conf.d/20-gvisor.conf。
-# 注意：gVisor 沙箱的網路在 cilium netkit datapath 下不通，建叢集需 CILIUM_DATAPATH=veth（見 README）
-RUN set -eux; cd /tmp; \
-    URL="https://storage.googleapis.com/gvisor/releases/release/${GVISOR_REL}/$(uname -m)"; \
-    wget -q "${URL}/gvisor.tar.zstd" "${URL}/gvisor.tar.zstd.sha512"; \
-    sha512sum -c gvisor.tar.zstd.sha512; \
-    tar --zstd -xf gvisor.tar.zstd -C /usr/local/bin; \
-    rm -f gvisor.tar.zstd gvisor.tar.zstd.sha512; \
-    runsc --version
+# gVisor is not baked in; addons:gvisor installs it into the node's persisted /usr/local/bin
+# when the cluster is created with --gvisor.
 
 # 節點 container 內 inotify 上限
 RUN printf 'fs.inotify.max_user_instances=8192\nfs.inotify.max_user_watches=524288\n' \
