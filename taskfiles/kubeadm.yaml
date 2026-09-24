@@ -130,7 +130,7 @@ tasks:
       DEF: { ref: fromYaml .DEF_RAW }
       VIP: '{{ .DEF.spec.network.vip | default "" }}'
     status:
-      - test -f {{ .STATE_DIR }}/kubeconfig
+      - test -s {{ .STATE_DIR }}/kubeconfig
     cmds:
       - |
         set -e
@@ -151,9 +151,12 @@ tasks:
           fi
           echo "$cp initialized"
         fi
-        # Create the kubeconfig 0600 before any content lands in it.
-        install -m 600 /dev/null {{ .STATE_DIR }}/kubeconfig
-        sudo podman exec $cp cat /etc/kubernetes/admin.conf > {{ .STATE_DIR }}/kubeconfig
+        # Write the kubeconfig 0600 through a temp file: a failed read must not leave an empty
+        # file behind, or the status check above would skip init on the next run.
+        install -m 600 /dev/null {{ .STATE_DIR }}/kubeconfig.tmp
+        sudo podman exec $cp cat /etc/kubernetes/admin.conf > {{ .STATE_DIR }}/kubeconfig.tmp || {
+          rm -f {{ .STATE_DIR }}/kubeconfig.tmp; echo "could not read /etc/kubernetes/admin.conf from $cp" >&2; exit 1; }
+        mv {{ .STATE_DIR }}/kubeconfig.tmp {{ .STATE_DIR }}/kubeconfig
 
   join-plan:
     desc: Print how each node other than the first control plane is handled (join or skip)
