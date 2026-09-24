@@ -1,0 +1,39 @@
+version: '3'
+# Cluster addons. Each task is idempotent (status: or in-node markers) so an interrupted
+# create resumes without redoing work. Anything installed into a node lives under
+# /usr/local/bin or /etc, the paths kept in named volumes across restarts and reboots.
+tasks:
+  runtimeclass:
+    desc: RuntimeClass crun (CRI-O ships crun; containerd nodes get the binary and runtime table)
+    silent: true
+    requires: { vars: [CLUSTER] }
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
+      DEF_RAW: { sh: 'cat {{ .CLUSTER_YAML }}' }
+      DEF: { ref: fromYaml .DEF_RAW }
+      CACHE: '{{ .TK_DATA_DIR }}/cache'
+      CRUN: 'crun-{{ .VERSIONS.crun }}'
+    env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
+    cmds:
+      - |
+        set -e
+        {{ if eq .DEF.spec.runtime "containerd" }}
+        mkdir -p {{ .CACHE }} 2>/dev/null || { sudo mkdir -p {{ .CACHE }} && sudo chown "$(id -u):$(id -g)" {{ .CACHE }}; }
+        [ -x {{ .CACHE }}/{{ .CRUN }} ] || {
+          curl -fsSL -o {{ .CACHE }}/{{ .CRUN }} https://github.com/containers/crun/releases/download/{{ .VERSIONS.crun }}/{{ .CRUN }}-linux-amd64
+          chmod +x {{ .CACHE }}/{{ .CRUN }}; }
+        {{ range .DEF.spec.nodes }}
+        if ! sudo podman exec {{ .name }} test -x /usr/local/bin/crun; then
+          sudo podman cp {{ $.CACHE }}/{{ $.CRUN }} {{ .name }}:/usr/local/bin/crun
+        fi
+        # Append the runtime table once; containerd refuses to start on a duplicate key.
+        if ! sudo podman exec {{ .name }} grep -q 'runtimes.crun]' /etc/containerd/config.toml; then
+          sudo podman exec -i {{ .name }} sh -c 'cat >> /etc/containerd/config.toml' < {{ $.TK_HOME }}/templates/containerd/crun.toml
+          sudo podman exec {{ .name }} systemctl restart containerd
+          echo "{{ .name }}: crun {{ $.VERSIONS.crun }} installed, containerd restarted"
+        fi
+        {{ end }}
+        {{ end }}
+        kubectl apply -f {{ .TK_HOME }}/manifests/runtimeclass.yaml >/dev/null
+        echo "RuntimeClass crun ok"

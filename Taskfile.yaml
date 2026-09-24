@@ -8,6 +8,7 @@ includes:
   nodes: ./taskfiles/nodes.yaml
   kubeadm: ./taskfiles/kubeadm.yaml
   cni: ./taskfiles/cni.yaml
+  addons: ./taskfiles/addons.yaml
   lifecycle: ./taskfiles/lifecycle.yaml
   node: ./taskfiles/node.yaml
 vars:

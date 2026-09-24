@@ -1,16 +1,8 @@
-# 平台提供的 RuntimeClass，兩種 container runtime 共用同一份（handler 名稱一致）：
-# - crun：CRI-O 路徑由 cri-o 套件自帶；containerd 路徑由 deploy-rc.sh 安裝
-# - gvisor（handler runsc）：CRI-O 路徑烤在節點 image（crio.conf.d/20-gvisor.conf，runtime_type=vm）；
-#   containerd 路徑由 deploy-rc.sh 安裝 + templates/containerd/ 的 runsc 設定
-#   注意：gVisor 沙箱的網路在 cilium netkit datapath 下不通，需 CILIUM_DATAPATH=veth
+# RuntimeClass crun. CRI-O ships crun (default_runtime in crio.conf.d/10-taroko.conf);
+# containerd nodes get the binary and runtime table from addons:runtimeclass.
+# RuntimeClass gvisor is created by addons:gvisor only when the cluster was created with --gvisor.
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
 metadata:
   name: crun
 handler: crun
----
-apiVersion: node.k8s.io/v1
-kind: RuntimeClass
-metadata:
-  name: gvisor
-handler: runsc
