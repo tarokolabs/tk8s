@@ -71,7 +71,8 @@ tasks:
         {{ range .DEF.spec.nodes }}
         if ! sudo podman exec {{ .name }} test -x /usr/local/bin/runsc; then
           # Node images published before zstd was added to the recipe cannot unpack the tarball.
-          if ! sudo podman exec {{ .name }} command -v zstd >/dev/null 2>&1; then
+          # podman exec runs no shell, so test the binary rather than `command -v`.
+          if ! sudo podman exec {{ .name }} test -x /usr/bin/zstd; then
             sudo podman exec {{ .name }} sh -c 'apt-get update -qq >/dev/null && apt-get install -y -qq zstd >/dev/null'
           fi
           sudo podman cp {{ $.CACHE }}/{{ $.TARBALL }} {{ .name }}:/tmp/gvisor.tar.zstd
@@ -110,14 +111,17 @@ tasks:
       STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
     env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
     status:
-      - kubectl get deploy -n kube-system metrics-server >/dev/null 2>&1
+      # Done means deployed AND patched: an interrupted create must not skip the patch on rerun.
+      - kubectl get deploy -n kube-system metrics-server -o jsonpath='{.spec.template.spec.containers[0].args}' 2>/dev/null | grep -q kubelet-insecure-tls
     cmds:
       - |
         set -e
         kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/{{ .VERSIONS.metrics_server }}/components.yaml >/dev/null
         # Node kubelet certs are self-signed in kind images; patch instead of sed on the upstream text.
-        kubectl -n kube-system patch deploy metrics-server --type=json \
-          -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]' >/dev/null
+        if ! kubectl get deploy -n kube-system metrics-server -o jsonpath='{.spec.template.spec.containers[0].args}' | grep -q kubelet-insecure-tls; then
+          kubectl -n kube-system patch deploy metrics-server --type=json \
+            -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]' >/dev/null
+        fi
         kubectl rollout status -n kube-system deploy/metrics-server --timeout=300s >/dev/null || {
           echo "metrics-server did not become ready (kubectl -n kube-system describe deploy metrics-server)" >&2; exit 1; }
         echo "metrics-server {{ .VERSIONS.metrics_server }} ok"

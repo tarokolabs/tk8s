@@ -38,7 +38,6 @@ case "$1" in
         case "$*" in
           "test -e "*|"test -x "*) [ -e "$root/$node${3}" ] ;;
           "grep -q "*) grep -q -- "$3" "$root/$node$4" 2>/dev/null ;;
-          "command -v zstd") [ -e "$root/$node/usr/bin/zstd" ] ;;
           *"apt-get install"*zstd*) mkdir -p "$root/$node/usr/bin"; touch "$root/$node/usr/bin/zstd" ;;
           "sh -c cat >> "*) f=$(echo "$*" | sed -E 's/^sh -c cat >> ([^ ]+).*/\1/'); mkdir -p "$(dirname "$root/$node$f")"; cat >> "$root/$node$f" ;;
           *) exit 0 ;;
@@ -51,6 +50,7 @@ cat > "$STUB/kubectl" <<'SH'
 #!/usr/bin/env bash
 echo "kubectl $*" >> "$STUB_LOG"
 case "$*" in
+  *"get deploy -n kube-system metrics-server -o jsonpath"*) [ -f "$STUB/ms-exists" ] || exit 1; if [ -f "$STUB/ms-patched" ]; then echo '["--secure-port=10250","--kubelet-insecure-tls"]'; else echo '["--secure-port=10250"]'; fi ;;
   *"get deploy -n kube-system metrics-server"*|*"get deployment -n kube-system metrics-server"*) [ -f "$STUB/ms-exists" ] ;;
   *"get runtimeclass "*) [ -f "$STUB/rc-exists" ] ;;
   *"get deploy"*|*"get deployment"*|*"get ns "*|*"get storageclass"*) exit 1 ;;
@@ -114,9 +114,13 @@ assert_eq "0" "$rc" "metrics-server exits 0"
 assert_contains "$(log)" "metrics-server/releases/download/$(v metrics_server)/components.yaml" "metrics-server manifest at the pinned version"
 assert_contains "$(log)" '"--kubelet-insecure-tls"' "kubelet-insecure-tls added (kind nodes have self-signed kubelet certs)"
 assert_contains "$(log)" "rollout status -n kube-system deploy/metrics-server" "waits for the rollout"
+# Deployed but the patch never landed (interrupted create): the rerun must patch, not skip.
 touch "$STUB/ms-exists"; run addons:metrics-server
-if grep -q "components.yaml" "$STUB_LOG"; then echo "FAIL  metrics-server already installed is skipped"; FAILURES=$((FAILURES+1)); else echo "PASS  metrics-server already installed is skipped"; fi
-rm -f "$STUB/ms-exists"
+assert_eq "0" "$rc" "metrics-server deployed but unpatched: exits 0"
+assert_contains "$(log)" '"--kubelet-insecure-tls"' "metrics-server deployed but unpatched: rerun applies the patch"
+touch "$STUB/ms-patched"; run addons:metrics-server
+if grep -qE "components.yaml|patch deploy" "$STUB_LOG"; then echo "FAIL  metrics-server fully installed is skipped"; FAILURES=$((FAILURES+1)); else echo "PASS  metrics-server fully installed is skipped"; fi
+rm -f "$STUB/ms-exists" "$STUB/ms-patched"
 # ---- local-path: checked-in manifest for the pinned version
 run addons:local-path
 assert_eq "0" "$rc" "local-path exits 0"
