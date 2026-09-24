@@ -106,12 +106,16 @@ tasks:
   delete:
     desc: 'Delete a cluster: units, containers, volumes, network, routes, state (asks for confirmation)'
     silent: true
-    deps: [{ task: _exists, vars: { CLUSTER: '{{ .CLUSTER }}' } }]
+    requires: { vars: [CLUSTER] }
     vars:
       STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
       CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
+      # A half-created or hand-cleaned cluster may have lost cluster.yaml; delete what is left.
       DEF_RAW: { sh: 'cat {{ .CLUSTER_YAML }} 2>/dev/null || printf "metadata: {name: %s}\nspec: {nodes: []}\n" {{ .CLUSTER }}' }
       DEF: { ref: fromYaml .DEF_RAW }
+    preconditions:
+      - sh: 'test -d {{ .STATE_DIR }} || test -d /etc/containers/systemd/{{ .CLUSTER }} || test -f /etc/systemd/system/{{ .CLUSTER }}.target || sudo podman network exists {{ .CLUSTER }} 2>/dev/null'
+        msg: "cluster {{ .CLUSTER }} not found: no state under {{ .CLUSTERS_DIR }}, no units, no network (tkctl get clusters)"
     cmds:
       - |
         if [ "${TK_ASSUME_YES:-}" != "1" ]; then

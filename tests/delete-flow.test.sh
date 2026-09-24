@@ -22,13 +22,13 @@ cat > "$STUB/podman" <<'SH'
 case "$1 $2" in
   "volume exists") case "$3" in *-var) exit 0;; *) exit 1;; esac ;;
   "container exists") exit 1 ;;
-  "network exists") exit 0 ;;
+  "network exists") [ "$3" = demo ] ;;
   *) echo "podman $*" >> "$STUB_LOG"; exit 0 ;;
 esac
 SH
 cat > "$STUB/systemctl" <<'SH'
 #!/usr/bin/env bash
-case "$1" in list-units) echo "demo.target loaded active active";; esac; exit 0
+case "$1" in list-units) case "$*" in *demo*) echo "demo.target loaded active active";; esac;; esac; exit 0
 SH
 cat > "$STUB/ip" <<'SH'
 #!/usr/bin/env bash
@@ -48,4 +48,13 @@ assert_contains "$out" "remove state" "state directory removed"
 assert_contains "$(cat "$STUB_LOG")" "/etc/systemd/system/demo-routes.service" "routes unit removed with the other units"
 assert_contains "$out" "cluster demo deleted" "final message"
 if [ -d "$TMP/clusters/demo" ]; then echo "FAIL  state dir gone"; FAILURES=$((FAILURES+1)); else echo "PASS  state dir gone"; fi
+# A cluster whose cluster.yaml is gone (interrupted create, manual cleanup) must still be deletable.
+mkdir -p "$TMP/clusters/demo"; : > "$STUB_LOG"
+out=$(PATH="$STUB:$PATH" TK_ASSUME_YES=1 task lifecycle:delete CLUSTER=demo 2>&1); rc=$?
+assert_eq "0" "$rc" "delete without cluster.yaml exits 0"
+assert_contains "$out" "remove units" "delete without cluster.yaml still removes units"
+if [ -d "$TMP/clusters/demo" ]; then echo "FAIL  state dir without cluster.yaml gone"; FAILURES=$((FAILURES+1)); else echo "PASS  state dir without cluster.yaml gone"; fi
+out=$(PATH="$STUB:$PATH" TK_ASSUME_YES=1 task lifecycle:delete CLUSTER=nothing 2>&1); rc=$?
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "delete of a cluster with no trace at all still fails"
+assert_contains "$out" "cluster nothing not found" "no-trace message names the cluster"
 rm -rf "$TMP"; finish
