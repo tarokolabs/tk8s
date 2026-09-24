@@ -67,4 +67,22 @@ out=$(task node:remove-entry CLUSTER=demo NODE=demo-control-plane 2>&1); rc=$?
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "cannot remove the first control plane"
 assert_contains "$out" "cannot be deleted" "first control plane message"
 out=$(task node:remove-entry CLUSTER=demo NODE=demo-nope 2>&1); assert_contains "$out" "not found" "remove unknown node message"
+# node:add must give the new node the same per-node addons create gave the others (crun on containerd, runsc on --gvisor).
+STUB="$TMP/stub"; mkdir -p "$STUB"; export STUB STUB_LOG="$TMP/stub.log"; : > "$STUB_LOG"
+printf '#!/usr/bin/env bash\nexec "$@"\n' > "$STUB/sudo"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/systemctl"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/sleep"
+printf '#!/usr/bin/env bash\ncase "$*" in *is-system-running*) echo running;; esac; exit 0\n' > "$STUB/podman"
+REAL_TASK=$(command -v task)
+cat > "$STUB/task" <<SH
+#!/usr/bin/env bash
+# Pure cluster.yaml edits run for real; everything that needs a host is logged.
+case "\$*" in *plan-add*|*append*|*remove-entry*|*mark-joined*) exec "$REAL_TASK" "\$@" ;; *) echo "task \$*" >> "\$STUB_LOG" ;; esac
+SH
+chmod +x "$STUB"/*
+out=$(PATH="$STUB:$PATH" "$REAL_TASK" node:add CLUSTER=demo ROLE=worker JOIN=false 2>&1); rc=$?
+assert_eq "0" "$rc" "node:add (stubbed host) exits 0"
+assert_contains "$(cat "$STUB_LOG")" "addons:runtimeclass CLUSTER=demo" "node:add installs crun where the runtime needs it"
+assert_contains "$(cat "$STUB_LOG")" "addons:gvisor CLUSTER=demo" "node:add installs gVisor on --gvisor clusters"
+if [ "$(grep -n 'nodes:render' "$STUB_LOG" | head -1 | cut -d: -f1)" -lt "$(grep -n 'addons:runtimeclass' "$STUB_LOG" | head -1 | cut -d: -f1)" ]; then echo "PASS  addons run after the node is up"; else echo "FAIL  addons run after the node is up"; FAILURES=$((FAILURES+1)); fi
 rm -rf "$TMP"; finish

@@ -107,6 +107,10 @@ tasks:
       - |
         for i in $(seq 1 90); do s=$(sudo podman exec {{ .NODE }} systemctl is-system-running 2>/dev/null || true); case "$s" in running|degraded) break;; esac; sleep 2; done
         echo "{{ .NODE }} running at {{ .IP }} ({{ .NODE_CPU }} cpu, {{ .NODE_MEMORY }})"
+      # Per-node addons (crun on containerd, runsc on --gvisor clusters) are idempotent over all nodes;
+      # running them here gives the new node what create gave the others, before it joins.
+      - task --silent -d {{ .TK_HOME }} addons:runtimeclass CLUSTER={{ .CLUSTER }}
+      - task --silent -d {{ .TK_HOME }} addons:gvisor CLUSTER={{ .CLUSTER }}
       - '{{ if eq .JOIN "true" }}task --silent -d {{ .TK_HOME }} node:join CLUSTER={{ .CLUSTER }} NODE={{ .NODE }}{{ else }}echo "{{ .NODE }} left unjoined; join with: tkctl join node {{ .CLUSTER }} {{ .NODE }}"{{ end }}'
 
   join:
