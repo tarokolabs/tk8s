@@ -32,7 +32,7 @@ tasks:
     silent: true
     requires: { vars: [CLUSTER_FILE] }
     vars:
-      CLUSTER: { sh: "sed -nE 's/^\\s*name:\\s*\"?([^\" }]+)\"?.*$/\\1/p; s/.*\\{\\s*name:\\s*\"?([^\" ,}]+)\"?.*/\\1/p' {{ .CLUSTER_FILE }} | head -1" }
+      CLUSTER: { sh: 'task --silent -d {{ .TK_HOME }} plan:cluster-name CLUSTER_FILE={{ .CLUSTER_FILE }}' }
       STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
     preconditions:
       - sh: '[ ! -f {{ .STATE_DIR }}/.create-complete ]'

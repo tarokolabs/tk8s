@@ -106,7 +106,8 @@ cmd_create() {
     [ -f "$file" ] || die "file not found: $file"
     [ -z "$name" ] || die "the cluster name comes from metadata.name in $file"
     cp "$file" "$tmp"
-    name=$(sed -nE 's/^\s*name:\s*"?([^" }]+)"?.*$/\1/p; s/.*\{\s*name:\s*"?([^" ,}]+)"?.*/\1/p' "$tmp" | head -1)
+    # go-task parses the YAML; a grep for the first name: line would pick a node's name.
+    name=$("$TK_TASK" --silent -d "$TK_HOME" plan:cluster-name CLUSTER_FILE="$tmp") || die "cannot parse $file"
     [ -n "$name" ] || die "metadata.name is missing in $file"
     validate_name "$name"
     # Flags that are not about topology still apply on top of the file.

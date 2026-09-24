@@ -2,6 +2,16 @@ version: '3'
 # Resolve a cluster.yaml: fill defaults, allocate subnets, expand node groups.
 # The output is the canonical cluster.yaml every other task reads.
 tasks:
+  cluster-name:
+    desc: Print metadata.name from CLUSTER_FILE (the one YAML parser tkctl and the Taskfile share)
+    silent: true
+    requires: { vars: [CLUSTER_FILE] }
+    vars:
+      DEF_RAW: { sh: 'cat {{ .CLUSTER_FILE }}' }
+      DEF: { ref: fromYaml .DEF_RAW }
+    cmds:
+      - echo "{{ if .DEF.metadata }}{{ .DEF.metadata.name | default "" }}{{ end }}"
+
   resolve:
     desc: Resolve cluster.yaml (defaults, subnet allocation, node expansion)
     silent: true

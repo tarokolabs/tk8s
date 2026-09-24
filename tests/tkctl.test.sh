@@ -59,6 +59,10 @@ YAML
 out=$($T create cluster -f "$TMP/c.yaml" --dry-run 2>&1)
 assert_contains "$out" "name: fromfile-big" "per-node name from -f"
 assert_contains "$out" "memory: 16g" "per-node memory from -f"
+printf 'spec:\n  nodes:\n    - role: control-plane\n    - role: worker\n      name: later-big\nmetadata:\n  name: later\n' > "$TMP/later.yaml"
+out=$($T create cluster -f "$TMP/later.yaml" --dry-run 2>&1); rc=$?
+assert_eq "0" "$rc" "-f with spec before metadata is accepted"
+assert_contains "$out" "/clusters/later/cluster.yaml" "cluster name comes from metadata.name, not the first name: line"
 assert_fails "-f combined with topology flags is rejected" $T create cluster -f "$TMP/c.yaml" --workers 3 --dry-run
 out=$($T version 2>&1); assert_contains "$out" "kubernetes default 1.37.0" "version shows default kubernetes"
 rm -rf "$TMP"; finish
