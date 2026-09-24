@@ -103,4 +103,23 @@ fixture crio true; rm -rf "$TMP/nodefs"; mkdir -p "$TMP/nodefs/demo-control-plan
 touch "$TMP/nodefs/demo-control-plane/usr/local/bin/runsc" "$TMP/nodefs/demo-worker1/usr/local/bin/runsc"; rm -rf "$TMP/cache"; run addons:gvisor
 if grep -q "curl " "$STUB_LOG"; then echo "FAIL  runsc already present: no download"; FAILURES=$((FAILURES+1)); else echo "PASS  runsc already present: no download"; fi
 assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/crio/crio.conf.d/20-gvisor.conf")" 'runtime_type = "vm"' "handler conf still written when the binary was baked in"
+# ---- metrics-server: pinned manifest, kubelet-insecure-tls via a JSON patch, rollout waited
+fixture crio false; run addons:metrics-server
+assert_eq "0" "$rc" "metrics-server exits 0"
+assert_contains "$(log)" "metrics-server/releases/download/$(v metrics_server)/components.yaml" "metrics-server manifest at the pinned version"
+assert_contains "$(log)" '"--kubelet-insecure-tls"' "kubelet-insecure-tls added (kind nodes have self-signed kubelet certs)"
+assert_contains "$(log)" "rollout status -n kube-system deploy/metrics-server" "waits for the rollout"
+touch "$STUB/ms-exists"; run addons:metrics-server
+if grep -q "components.yaml" "$STUB_LOG"; then echo "FAIL  metrics-server already installed is skipped"; FAILURES=$((FAILURES+1)); else echo "PASS  metrics-server already installed is skipped"; fi
+rm -f "$STUB/ms-exists"
+# ---- local-path: checked-in manifest for the pinned version
+run addons:local-path
+assert_eq "0" "$rc" "local-path exits 0"
+assert_contains "$(log)" "kubectl apply -f $PWD/manifests/local-path-storage.${lpv#v}.yaml" "local-path manifest applied"
+assert_contains "$(log)" "rollout status -n local-path-storage deploy/local-path-provisioner" "waits for the provisioner"
+# ---- install runs all four in order and is safe to rerun
+run addons:install
+assert_eq "0" "$rc" "addons:install exits 0"
+order=$(echo "$out" | grep -oE 'RuntimeClass crun ok|gVisor not enabled|metrics-server [^ ]+ ok|local-path [^ ]+ ok' | paste -sd, -)
+assert_eq "RuntimeClass crun ok,gVisor not enabled,metrics-server $(v metrics_server) ok,local-path $(v local_path_provisioner) ok" "$order" "install runs runtimeclass, gvisor, metrics-server, local-path in order"
 rm -rf "$TMP"; finish

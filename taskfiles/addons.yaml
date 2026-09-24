@@ -97,3 +97,58 @@ tasks:
         handler: runsc
         YAML
         echo "RuntimeClass gvisor ok (gVisor {{ .VERSIONS.gvisor }}; datapath must be veth, see --gvisor)"
+
+  metrics-server:
+    desc: metrics-server (kubectl top) with --kubelet-insecure-tls for kind-style nodes
+    silent: true
+    requires: { vars: [CLUSTER] }
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+    env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
+    status:
+      - kubectl get deploy -n kube-system metrics-server >/dev/null 2>&1
+    cmds:
+      - |
+        set -e
+        kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/{{ .VERSIONS.metrics_server }}/components.yaml >/dev/null
+        # Node kubelet certs are self-signed in kind images; patch instead of sed on the upstream text.
+        kubectl -n kube-system patch deploy metrics-server --type=json \
+          -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]' >/dev/null
+        kubectl rollout status -n kube-system deploy/metrics-server --timeout=300s >/dev/null || {
+          echo "metrics-server did not become ready (kubectl -n kube-system describe deploy metrics-server)" >&2; exit 1; }
+        echo "metrics-server {{ .VERSIONS.metrics_server }} ok"
+
+  local-path:
+    desc: local-path-provisioner with PV data under the cluster state dir (storage/)
+    silent: true
+    requires: { vars: [CLUSTER] }
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      MANIFEST: '{{ .TK_HOME }}/manifests/local-path-storage.{{ .VERSIONS.local_path_provisioner | trimPrefix "v" }}.yaml'
+    env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
+    preconditions:
+      - sh: 'test -f {{ .MANIFEST }}'
+        msg: "{{ .MANIFEST }} is missing; versions.yaml pins local_path_provisioner {{ .VERSIONS.local_path_provisioner }} but the customized manifest was not updated"
+    status:
+      - kubectl get storageclass local-path >/dev/null 2>&1
+    cmds:
+      - |
+        set -e
+        kubectl apply -f {{ .MANIFEST }} >/dev/null
+        kubectl rollout status -n local-path-storage deploy/local-path-provisioner --timeout=300s >/dev/null || {
+          echo "local-path-provisioner did not become ready (kubectl -n local-path-storage get pods)" >&2; exit 1; }
+        echo "local-path {{ .VERSIONS.local_path_provisioner }} ok (PV data under {{ .STATE_DIR }}/storage)"
+
+  install:
+    desc: Install every addon (RuntimeClass crun, optional gVisor, metrics-server, local-path)
+    silent: true
+    requires: { vars: [CLUSTER] }
+    cmds:
+      - task: runtimeclass
+        vars: { CLUSTER: '{{ .CLUSTER }}' }
+      - task: gvisor
+        vars: { CLUSTER: '{{ .CLUSTER }}' }
+      - task: metrics-server
+        vars: { CLUSTER: '{{ .CLUSTER }}' }
+      - task: local-path
+        vars: { CLUSTER: '{{ .CLUSTER }}' }

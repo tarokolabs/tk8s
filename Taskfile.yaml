@@ -54,6 +54,7 @@ tasks:
         task --silent -d {{ .TK_HOME }} nodes:up CLUSTER={{ .CLUSTER }}
         task --silent -d {{ .TK_HOME }} kubeadm:bootstrap CLUSTER={{ .CLUSTER }}
         task --silent -d {{ .TK_HOME }} cni:install CLUSTER={{ .CLUSTER }}
+        task --silent -d {{ .TK_HOME }} addons:install CLUSTER={{ .CLUSTER }}
         touch {{ .STATE_DIR }}/.create-complete
         echo
         echo "cluster {{ .CLUSTER }} is ready"
