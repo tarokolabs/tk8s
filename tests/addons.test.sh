@@ -38,6 +38,8 @@ case "$1" in
         case "$*" in
           "test -e "*|"test -x "*) [ -e "$root/$node${3}" ] ;;
           "grep -q "*) grep -q -- "$3" "$root/$node$4" 2>/dev/null ;;
+          "command -v zstd") [ -e "$root/$node/usr/bin/zstd" ] ;;
+          *"apt-get install"*zstd*) mkdir -p "$root/$node/usr/bin"; touch "$root/$node/usr/bin/zstd" ;;
           "sh -c cat >> "*) f=$(echo "$*" | sed -E 's/^sh -c cat >> ([^ ]+).*/\1/'); mkdir -p "$(dirname "$root/$node$f")"; cat >> "$root/$node$f" ;;
           *) exit 0 ;;
         esac ;;
@@ -82,7 +84,8 @@ assert_eq "0" "$rc" "gvisor disabled exits 0"
 assert_contains "$out" "not enabled" "gvisor disabled says so"
 if grep -q "gvisor" "$STUB_LOG"; then echo "FAIL  gvisor disabled touches nothing"; FAILURES=$((FAILURES+1)); else echo "PASS  gvisor disabled touches nothing"; fi
 # ---- gvisor on crio: tarball verified on the host, extracted in every node, handler conf written, crio restarted
-fixture crio true; run addons:gvisor
+fixture crio true; mkdir -p "$TMP/nodefs/demo-control-plane/usr/bin" "$TMP/nodefs/demo-worker1/usr/bin"; touch "$TMP/nodefs/demo-control-plane/usr/bin/zstd" "$TMP/nodefs/demo-worker1/usr/bin/zstd"; run addons:gvisor
+if grep -q "apt-get" "$STUB_LOG"; then echo "FAIL  node with zstd: no apt-get"; FAILURES=$((FAILURES+1)); else echo "PASS  node with zstd: no apt-get"; fi
 assert_eq "0" "$rc" "gvisor (crio) exits 0"
 assert_contains "$(log)" "gvisor/releases/release/$(v gvisor)/x86_64/gvisor.tar.zstd.sha512" "gvisor checksum downloaded at the pinned release"
 assert_contains "$(log)" "podman cp $TMP/cache/gvisor-$(v gvisor).tar.zstd demo-worker1:/tmp/gvisor.tar.zstd" "tarball copied into every node"
@@ -93,6 +96,8 @@ assert_contains "$(log)" "kubectl apply -f -" "RuntimeClass gvisor applied"
 # ---- gvisor on containerd: shim table appended once
 fixture containerd true; rm -rf "$TMP/nodefs"; mkdir -p "$TMP/nodefs"; run addons:gvisor
 assert_eq "0" "$rc" "gvisor (containerd) exits 0"
+assert_contains "$(log)" "apt-get install -y -qq zstd" "zstd installed into a node whose image lacks it (published containerd image)"
+if [ "$(grep -n 'apt-get install' "$STUB_LOG" | head -1 | cut -d: -f1)" -lt "$(grep -n 'tar --zstd' "$STUB_LOG" | head -1 | cut -d: -f1)" ]; then echo "PASS  zstd installed before extraction"; else echo "FAIL  zstd installed before extraction"; FAILURES=$((FAILURES+1)); fi
 assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/containerd/config.toml")" 'runtimes.runsc]' "runsc runtime table appended"
 assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/containerd/runsc.toml")" 'systemd-cgroup = "true"' "runsc told to use systemd cgroups"
 assert_contains "$(log)" "podman exec demo-worker1 systemctl restart containerd" "containerd restarted for runsc"

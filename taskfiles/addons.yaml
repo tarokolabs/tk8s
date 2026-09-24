@@ -70,6 +70,10 @@ tasks:
         fi
         {{ range .DEF.spec.nodes }}
         if ! sudo podman exec {{ .name }} test -x /usr/local/bin/runsc; then
+          # Node images published before zstd was added to the recipe cannot unpack the tarball.
+          if ! sudo podman exec {{ .name }} command -v zstd >/dev/null 2>&1; then
+            sudo podman exec {{ .name }} sh -c 'apt-get update -qq >/dev/null && apt-get install -y -qq zstd >/dev/null'
+          fi
           sudo podman cp {{ $.CACHE }}/{{ $.TARBALL }} {{ .name }}:/tmp/gvisor.tar.zstd
           sudo podman exec {{ .name }} tar --zstd -xf /tmp/gvisor.tar.zstd -C /usr/local/bin
           sudo podman exec {{ .name }} rm -f /tmp/gvisor.tar.zstd
