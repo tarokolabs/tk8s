@@ -19,8 +19,11 @@
 | Gateway API | cilium 內建 controller，GatewayClass `cilium`，Gateway API v1.6.1 CRD（experimental channel，含 TCPRoute、UDPRoute） |
 | 高可用 | `--control-planes 3` 以上自動配 kube-vip VIP；多出來的 control plane 可以先不加入，留給練習 |
 | 節點生命週期 | Podman Quadlet 加 systemd：主機重開機叢集自動回來 |
+| RuntimeClass | `crun`（兩種 runtime 都有）；`--gvisor` 的叢集多一個 `gvisor`（handler `runsc`） |
+| gVisor（選配） | `--gvisor` 時建叢集當場裝進每個節點，不烤在 image；需要 veth datapath，會自動選 |
+| 監控與儲存 | metrics-server（`kubectl top`）、local-path-provisioner（PVC 資料落在 `/opt/taroko/clusters/<名稱>/storage/`） |
 
-RuntimeClass、metrics-server、local-path 儲存、選配的 gVisor、管理主機與私有 registry（偵測到教材時部署）會在後續的 v2 任務加回來。
+管理主機與私有 registry（偵測到教材時部署）與備份還原在 Plan 2b 加回來。
 
 ## 架構
 
@@ -91,6 +94,7 @@ tkctl describe cluster <名稱> [-o yaml]
 tkctl stop cluster <名稱>              # 停下所有節點，狀態與資料保留
 tkctl start cluster <名稱>             # 拉起來，等到節點以新的心跳回報 Ready
 tkctl use cluster <名稱>               # 切 ~/.kube/config（原檔留在 ~/.kube/config.bak）
+tkctl verify cluster <名稱>            # 逐項 PASS/FAIL/SKIP，任一 FAIL 結束碼 1
 tkctl add node <叢集> --role worker|control-plane [--cpu N] [--memory SIZE] [--no-join]
 tkctl join node <叢集> <節點>          # 對建了但沒加入的節點執行 kubeadm join
 tkctl delete node <叢集> <節點> [--yes]
@@ -163,6 +167,19 @@ tkctl create cluster -f tkdt.yaml
 環境變數一律 `TK_` 前綴：`TK_DATA_DIR` 換掉 `/opt/taroko`、`TK_WULIN_DIR` 指定教材位置、`TK_ASSUME_YES=1` 等同 `--yes`、`TK_TASK` 指定 go-task 執行檔。`tkctl --help` 有完整清單。
 
 節點容器是 Quadlet 管的，每次啟停會重建；節點必須保留的 `/var`、`/etc`、`/usr/local/bin` 放在每節點的 named volume（`<節點>-var`、`-etc`、`-usr-local-bin`），`delete` 會一起清掉。
+
+## 從主機與其他機器連進叢集
+
+- **主機上**：LoadBalancer IP（`.200`–`.219`）與 ClusterIP 直接可達，不用 port-forward。cilium 以 `bpf.lbExternalClusterIP` 讓節點以外的來源也能打 ClusterIP。
+- **其他機器**（同一個區網的筆電、或跑叢集的 VM 之外的宿主機）：加一條到節點網段的路由就好，主機會轉送：
+
+  ```bash
+  sudo ip route add 172.22.N.0/24 via <主機 IP>     # LoadBalancer IP
+  sudo ip route add 10.98.N.0/24 via <主機 IP>      # ClusterIP（選用）
+  ```
+
+  `tkctl describe cluster <名稱>` 的 `Access:` 會印出填好的指令。macOS 用 `sudo route -n add 172.22.N.0/24 <主機 IP>`，Windows 用 `route add 172.22.N.0 mask 255.255.255.0 <主機 IP>`。
+- 不再有 v1 的 `tkport` 註解與 DNAT 腳本；教材一律用 `type: LoadBalancer` 或 Gateway 曝露服務。
 
 ## 支援的 K8s 版本
 

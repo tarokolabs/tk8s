@@ -57,6 +57,21 @@ tasks:
         j="{{ if eq (toString .join) "false" }}not joined{{ else }}joined{{ end }}"
         printf '  %-24s %-14s %-14s %-14s %s\n' "{{ .name }}" "{{ .role }}" "{{ .ip }}" "{{ .cpu }} cpu, {{ .memory }}" "$j"
         {{- end }}
+        echo "Addons:"
+        if [ "$state" = Running ]; then
+          k() { kubectl --request-timeout=5s "$@" 2>/dev/null; }
+          ms=$(k -n kube-system get deploy metrics-server -o jsonpath='{.spec.template.spec.containers[0].image}' | sed 's/.*://'); echo "  metrics-server  ${ms:-not installed}"
+          lp=$(k -n local-path-storage get deploy local-path-provisioner -o jsonpath='{.spec.template.spec.containers[0].image}' | sed 's/.*://'); echo "  local-path      ${lp:-not installed}"
+          rc=$(k get runtimeclass -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}'); echo "  runtimeclass    ${rc:-none}"
+        else
+          echo "  unavailable (cluster is not running)"
+        fi
+        {{- if .DEF.spec.network }}
+        hostip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") print $(i+1)}' | head -1)
+        echo "Access:"
+        echo "  from this host:       LoadBalancer IPs ({{ .DEF.spec.network.lb_range }}) and ClusterIPs ({{ .DEF.spec.network.services }}) are routed"
+        echo "  from another machine: sudo ip route add {{ .DEF.spec.network.nodes }} via ${hostip:-<host-ip>}   (and {{ .DEF.spec.network.services }} for ClusterIPs)"
+        {{- end }}
         echo "Paths:"
         echo "  state:      {{ .STATE_DIR }}/"
         echo "  kubeconfig: {{ .KUBECONFIG }}"

@@ -46,6 +46,10 @@ assert_contains "$out" "172.22.3.2" "describe lists node ip"
 assert_contains "$out" "/etc/containers/systemd/demo" "describe shows unit dir"
 assert_contains "$out" "datapath: netkit" "describe shows resolved datapath"
 assert_contains "$out" "joined" "describe shows join state"
+assert_contains "$out" "Addons:" "describe has an Addons section"
+assert_contains "$out" "unavailable (cluster is not running)" "addon versions are skipped on a stopped cluster instead of timing out"
+assert_contains "$out" "Access:" "describe has an Access section"
+assert_contains "$out" "ip route add 172.22.3.0/24 via " "describe prints the route another machine needs to reach LB IPs and ClusterIPs"
 out=$(task lifecycle:describe CLUSTER=demo OUTPUT=yaml 2>&1)
 assert_contains "$out" "apiVersion" "describe -o yaml prints cluster.yaml"
 assert_fails "describe unknown cluster fails" task lifecycle:describe CLUSTER=nope
