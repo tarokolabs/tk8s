@@ -26,6 +26,8 @@ tasks:
         msg: "cluster {{ .CLUSTER }} is not running (tkctl start cluster {{ .CLUSTER }})"
     cmds:
       - |
+        # go-task runs commands with errexit; a check script must keep going after a failed command.
+        set +e
         NS=tk-verify
         T=${TK_VERIFY_TIMEOUT:-180}
         BUSYBOX=docker.io/library/busybox

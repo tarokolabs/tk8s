@@ -43,7 +43,7 @@ case "$*" in
   *"get pvc -n tk-verify pvc -o jsonpath"*) echo "pvc-1234" ;;
   *"get runtimeclass crun"*) exit 0 ;;
   *"get runtimeclass gvisor"*) exit 1 ;;
-  *"logs -n tk-verify rc-crun"*) echo "6.12.0" ;;
+  *"logs -n tk-verify rc-crun"*) [ -f "$STUB/crun-bad" ] && exit 1; echo "6.12.0" ;;
   *"get gateway -n tk-verify gw -o jsonpath"*) echo "172.22.0.200" ;;
   *) exit 0 ;;
 esac
@@ -72,6 +72,13 @@ assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "one broken component: exit 1"
 assert_contains "$out" "FAIL  kubectl top nodes — metrics-server not ready" "the broken component is named"
 assert_contains "$out" "FAIL 1" "summary counts one failure"
 rm -f "$STUB/no-metrics"
+# A failing command inside a check must produce a FAIL line, not abort the script (go-task runs with errexit).
+touch "$STUB/crun-bad"; run
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "failing crun pod: exit 1"
+assert_contains "$out" "FAIL  RuntimeClass crun — pod did not succeed" "failing crun pod is reported"
+assert_contains "$out" "[gateway-api]" "checks after a failure still run"
+assert_contains "$out" "FAIL 1" "summary counts exactly the crun failure"
+rm -f "$STUB/crun-bad"
 touch "$STUB/stopped"; run
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "stopped cluster: refused"
 assert_contains "$out" "cluster demo is not running" "stopped cluster message"
