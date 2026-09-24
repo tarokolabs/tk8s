@@ -3,7 +3,7 @@
 # one broken component turns into exactly one FAIL and exit 1; a stopped cluster is refused by name.
 source "$(dirname "$0")/lib.sh"
 cd "$(dirname "$0")/.." || exit 1
-TMP=$(mktemp -d); export TK_DATA_DIR="$TMP" TK_VERIFY_TIMEOUT=5
+TMP=$(mktemp -d); export TK_DATA_DIR="$TMP" TK_VERIFY_TIMEOUT=15  # three poll rounds; sleep is stubbed
 STUB="$TMP/bin"; mkdir -p "$STUB" "$TMP/clusters/demo/storage/pvc-1234_tk-verify_pvc"; export STUB
 touch "$TMP/clusters/demo/.create-complete"
 cat > "$TMP/clusters/demo/cluster.yaml" <<'YAML'
