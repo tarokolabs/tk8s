@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 source "$(dirname "$0")/lib.sh"
-TMP=$(mktemp -d); export TAROKO_HOME="$TMP"
+TMP=$(mktemp -d); export TK_DATA_DIR="$TMP"
 mkdir -p "$TMP/clusters/demo"; touch "$TMP/clusters/demo/.create-complete"
 cat > "$TMP/clusters/demo/cluster.yaml" <<'YAML'
 apiVersion: taroko.io/v1alpha1
@@ -40,20 +40,20 @@ assert_contains "$out" "demo" "list shows cluster"
 assert_contains "$out" "1+1" "list shows control-planes+workers"
 assert_contains "$out" "172.22.3.0/24" "list shows subnet"
 assert_contains "$out" "netkit" "list shows resolved datapath"
-out=$(task lifecycle:describe NAME=demo 2>&1)
+out=$(task lifecycle:describe CLUSTER=demo 2>&1)
 assert_contains "$out" "demo-worker1" "describe lists nodes"
 assert_contains "$out" "172.22.3.2" "describe lists node ip"
 assert_contains "$out" "/etc/containers/systemd/demo" "describe shows unit dir"
 assert_contains "$out" "datapath: netkit" "describe shows resolved datapath"
 assert_contains "$out" "joined" "describe shows join state"
-out=$(task lifecycle:describe NAME=demo OUTPUT=yaml 2>&1)
+out=$(task lifecycle:describe CLUSTER=demo OUTPUT=yaml 2>&1)
 assert_contains "$out" "apiVersion" "describe -o yaml prints cluster.yaml"
-assert_fails "describe unknown cluster fails" task lifecycle:describe NAME=nope
-assert_fails "stop unknown cluster fails" task lifecycle:stop NAME=nope
-out=$(task lifecycle:delete NAME=nope FORCE=1 2>&1); rc=$?
+assert_fails "describe unknown cluster fails" task lifecycle:describe CLUSTER=nope
+assert_fails "stop unknown cluster fails" task lifecycle:stop CLUSTER=nope
+out=$(TK_ASSUME_YES=1 task lifecycle:delete CLUSTER=nope 2>&1); rc=$?
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "delete unknown cluster exits non-zero"
 assert_contains "$out" "cluster nope not found" "delete unknown cluster names the cluster"
-out=$(task lifecycle:delete NAME=demo 2>&1 </dev/null); rc=$?
+out=$(task lifecycle:delete CLUSTER=demo 2>&1 </dev/null); rc=$?
 assert_contains "$out" "aborted" "delete without confirmation aborts"
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "aborted delete exits non-zero"
 if [ -f "$TMP/clusters/demo/cluster.yaml" ]; then echo "PASS  aborted delete keeps the state directory"; else echo "FAIL  aborted delete keeps the state directory"; FAILURES=$((FAILURES+1)); fi

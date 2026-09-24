@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 source "$(dirname "$0")/lib.sh"
-TMP=$(mktemp -d); export TAROKO_HOME="$TMP"
+TMP=$(mktemp -d); export TK_DATA_DIR="$TMP"
 mkdir -p "$TMP/clusters/existing"
 cat > "$TMP/clusters/existing/cluster.yaml" <<'YAML'
 metadata: {name: existing}
@@ -17,7 +17,7 @@ spec:
     - {role: control-plane, cpu: 2, memory: 4G}
     - {role: worker, count: 2, cpu: 2, memory: 4G}
 YAML
-out=$(task plan:resolve CLUSTER_FILE="$TMP/in.yaml" DRY_RUN=1 2>&1)
+out=$(task plan:resolve CLUSTER_FILE="$TMP/in.yaml" DRY_RUN=true 2>&1)
 assert_contains "$out" "index: 1" "skips index 0 used by existing cluster"
 assert_contains "$out" "nodes: 172.22.1.0/24" "node subnet from index"
 assert_contains "$out" "pods: 10.244.8.0/21" "pod subnet = 10.244.(8N).0/21"
@@ -32,7 +32,7 @@ assert_contains "$out" "runtime: crio" "default runtime"
 assert_contains "$out" "join: true" "join defaults to true"
 # HA
 sed -i.bak 's/role: control-plane, cpu: 2/role: control-plane, count: 3, cpu: 2/' "$TMP/in.yaml"
-out=$(task plan:resolve CLUSTER_FILE="$TMP/in.yaml" DRY_RUN=1 2>&1)
+out=$(task plan:resolve CLUSTER_FILE="$TMP/in.yaml" DRY_RUN=true 2>&1)
 assert_contains "$out" "vip: 172.22.1.100" "vip when control-planes > 1"
 assert_contains "$out" "name: demo-control-plane3" "third control plane name"
 # deferred join carried per node
@@ -41,11 +41,11 @@ metadata: {name: defer}
 spec:
   nodes: [{role: control-plane}, {role: control-plane, count: 2, join: false}]
 YAML
-out=$(task plan:resolve CLUSTER_FILE="$TMP/in3.yaml" DRY_RUN=1 2>&1)
+out=$(task plan:resolve CLUSTER_FILE="$TMP/in3.yaml" DRY_RUN=true 2>&1)
 assert_eq "2" "$(echo "$out" | grep -c "join: false")" "join: false carried per node"
 # resume keeps index
 mkdir -p "$TMP/clusters/demo"; printf 'metadata: {name: demo}\nspec:\n  network: {index: 7}\n  nodes: []\n' > "$TMP/clusters/demo/cluster.yaml"
-out=$(task plan:resolve CLUSTER_FILE="$TMP/in.yaml" DRY_RUN=1 2>&1)
+out=$(task plan:resolve CLUSTER_FILE="$TMP/in.yaml" DRY_RUN=true 2>&1)
 assert_contains "$out" "index: 7" "resume keeps the existing index"
 rm -rf "$TMP/clusters/demo"
 # overlap
@@ -55,13 +55,13 @@ spec:
   network: {nodes: 172.22.0.0/24}
   nodes: [{role: control-plane}]
 YAML
-assert_fails "explicit overlapping subnet is rejected" task plan:resolve CLUSTER_FILE="$TMP/in2.yaml" DRY_RUN=1
-out=$(task plan:resolve CLUSTER_FILE="$TMP/in2.yaml" DRY_RUN=1 ALLOW_OVERLAP=1 2>&1)
-assert_contains "$out" "nodes: 172.22.0.0/24" "overlap allowed with ALLOW_OVERLAP=1"
+assert_fails "explicit overlapping subnet is rejected" task plan:resolve CLUSTER_FILE="$TMP/in2.yaml" DRY_RUN=true
+out=$(task plan:resolve CLUSTER_FILE="$TMP/in2.yaml" DRY_RUN=true ALLOW_OVERLAP=true 2>&1)
+assert_contains "$out" "nodes: 172.22.0.0/24" "overlap allowed with ALLOW_OVERLAP=true"
 # -f input is validated with the same rules bin/tkctl applies to flags.
 bad() {  # label spec-body expected-message
   printf 'metadata: {name: bad}\nspec:\n%b\n' "$2" > "$TMP/bad.yaml"
-  out=$(task plan:resolve CLUSTER_FILE="$TMP/bad.yaml" DRY_RUN=1 2>&1); rc=$?
+  out=$(task plan:resolve CLUSTER_FILE="$TMP/bad.yaml" DRY_RUN=true 2>&1); rc=$?
   assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "$1 is rejected"
   assert_contains "$out" "$3" "$1 message"
 }
@@ -77,7 +77,7 @@ bad "even control-plane count" '  nodes: [{role: control-plane, count: 2}]' "odd
 bad "gvisor with netkit" '  gvisor: true\n  datapath: netkit\n  nodes: [{role: control-plane}]' "netkit"
 bad "unknown runtime" '  runtime: docker\n  nodes: [{role: control-plane}]' "runtime"
 printf 'metadata: {name: good}\nspec:\n  nodes: [{role: control-plane, memory: 4096M}, {role: worker, name: good-big, cpu: 8}]\n' > "$TMP/good.yaml"
-out=$(task plan:resolve CLUSTER_FILE="$TMP/good.yaml" DRY_RUN=1 2>&1); rc=$?
+out=$(task plan:resolve CLUSTER_FILE="$TMP/good.yaml" DRY_RUN=true 2>&1); rc=$?
 assert_eq "0" "$rc" "valid -f input passes validation"
 assert_contains "$out" "memory: 4096m" "explicit memory lower-cased"
 rm -rf "$TMP"; finish

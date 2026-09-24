@@ -2,7 +2,7 @@
 # Runs lifecycle:delete against stubbed sudo/podman/systemctl/ip so the whole flow
 # can be exercised without a host. Regression for: a missing volume aborted the loop.
 source "$(dirname "$0")/lib.sh"
-TMP=$(mktemp -d); export TAROKO_HOME="$TMP"
+TMP=$(mktemp -d); export TK_DATA_DIR="$TMP"
 STUB="$TMP/bin"; mkdir -p "$STUB" "$TMP/clusters/demo"; touch "$TMP/clusters/demo/.create-complete"
 cat > "$TMP/clusters/demo/cluster.yaml" <<'YAML'
 metadata: {name: demo}
@@ -39,7 +39,7 @@ cat > "$STUB/rm" <<'SH'
 echo "rm $*" >> "$STUB_LOG"; exec /bin/rm "$@"
 SH
 chmod +x "$STUB"/*; export STUB_LOG="$TMP/podman.log"; : > "$STUB_LOG"
-out=$(PATH="$STUB:$PATH" task lifecycle:delete NAME=demo FORCE=1 2>&1); rc=$?
+out=$(PATH="$STUB:$PATH" TK_ASSUME_YES=1 task lifecycle:delete CLUSTER=demo 2>&1); rc=$?
 assert_eq "0" "$rc" "delete exits 0 when some volumes are already gone"
 assert_contains "$out" "remove volume demo-control-plane-var" "first node volume removed"
 assert_contains "$out" "remove volume demo-worker1-var" "second node volume removed (loop did not abort)"

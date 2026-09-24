@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Every external component version lives in versions.yaml; nothing downloads "latest".
 source "$(dirname "$0")/lib.sh"
-TMP=$(mktemp -d); export TAROKO_HOME="$TMP"
+TMP=$(mktemp -d); export TK_DATA_DIR="$TMP"
 cd "$(dirname "$0")/.." || exit 1
 v() { sed -nE "s/^$1: *\"?([^\"]+)\"?.*/\1/p" versions.yaml; }
 hits=$(grep -nE 'releases/latest|api\.github\.com|calico/v[0-9]' Taskfile.yaml taskfiles/*.yaml || true)

@@ -3,7 +3,7 @@
 # Regenerate deliberately with: UPDATE_GOLDEN=1 tests/run.sh
 source "$(dirname "$0")/lib.sh"
 T="$(dirname "$0")/../bin/tkctl"; G="$(dirname "$0")/golden"
-TMP=$(mktemp -d); export TAROKO_HOME="$TMP"
+TMP=$(mktemp -d); export TK_DATA_DIR="$TMP"
 norm() { sed -E "s#$TMP#<TMP>#g; s#/(private/)?(tmp|var/folders)/[A-Za-z0-9._/-]+/clusters#<TMP>/clusters#g"; }
 out=$($T create cluster --dry-run 2>&1 | norm)
 [ "${UPDATE_GOLDEN:-}" == 1 ] && echo "$out" > "$G/default.dry-run.txt"

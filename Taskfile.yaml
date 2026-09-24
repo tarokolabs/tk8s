@@ -13,10 +13,10 @@ includes:
 vars:
   TK_HOME:
     sh: pwd
-  TAROKO_HOME: '{{ .TAROKO_HOME | default "/opt/taroko" }}'
-  CLUSTERS_DIR: '{{ .TAROKO_HOME }}/clusters'
-  CNI_DIR: '{{ .TAROKO_HOME }}/cni'
-  WULIN_DIR: '{{ .WULIN_DIR | default (print .TAROKO_HOME "/wulin") }}'
+  TK_DATA_DIR: '{{ .TK_DATA_DIR | default "/opt/taroko" }}'
+  CLUSTERS_DIR: '{{ .TK_DATA_DIR }}/clusters'
+  CNI_DIR: '{{ .TK_DATA_DIR }}/cni'
+  TK_WULIN_DIR: '{{ .TK_WULIN_DIR | default (print .TK_DATA_DIR "/wulin") }}'
   VERSIONS_RAW:
     sh: cat {{ .TK_HOME }}/versions.yaml
   VERSIONS:
@@ -32,31 +32,31 @@ tasks:
     silent: true
     requires: { vars: [CLUSTER_FILE] }
     vars:
-      NAME: { sh: "sed -nE 's/^\\s*name:\\s*\"?([^\" }]+)\"?.*$/\\1/p; s/.*\\{\\s*name:\\s*\"?([^\" ,}]+)\"?.*/\\1/p' {{ .CLUSTER_FILE }} | head -1" }
-      STATE: '{{ .CLUSTERS_DIR }}/{{ .NAME }}'
+      CLUSTER: { sh: "sed -nE 's/^\\s*name:\\s*\"?([^\" }]+)\"?.*$/\\1/p; s/.*\\{\\s*name:\\s*\"?([^\" ,}]+)\"?.*/\\1/p' {{ .CLUSTER_FILE }} | head -1" }
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
     preconditions:
-      - sh: '[ ! -f {{ .STATE }}/.create-complete ]'
-        msg: "cluster {{ .NAME }} already exists; delete it first or pick another name"
+      - sh: '[ ! -f {{ .STATE_DIR }}/.create-complete ]'
+        msg: "cluster {{ .CLUSTER }} already exists; delete it first or pick another name"
     cmds:
       - |
         set -e
-        {{ if eq .DRY_RUN "1" }}
+        {{ if eq .DRY_RUN "true" }}
         tmp=$(mktemp -d)
-        task --silent -d {{ .TK_HOME }} plan:resolve CLUSTER_FILE={{ .CLUSTER_FILE }} ALLOW_OVERLAP={{ .ALLOW_OVERLAP }} OUT_ROOT=$tmp/clusters DRY_RUN=0
-        echo "# ---- $tmp/clusters/{{ .NAME }}/cluster.yaml"; cat $tmp/clusters/{{ .NAME }}/cluster.yaml; echo
-        task --silent -d {{ .TK_HOME }} nodes:render NAME={{ .NAME }} DRY_RUN=1 CLUSTERS_DIR=$tmp/clusters
-        task --silent -d {{ .TK_HOME }} kubeadm:render NAME={{ .NAME }} DRY_RUN=1 CLUSTERS_DIR=$tmp/clusters
+        task --silent -d {{ .TK_HOME }} plan:resolve CLUSTER_FILE={{ .CLUSTER_FILE }} ALLOW_OVERLAP={{ .ALLOW_OVERLAP }} OUT_ROOT=$tmp/clusters DRY_RUN=false
+        echo "# ---- $tmp/clusters/{{ .CLUSTER }}/cluster.yaml"; cat $tmp/clusters/{{ .CLUSTER }}/cluster.yaml; echo
+        task --silent -d {{ .TK_HOME }} nodes:render CLUSTER={{ .CLUSTER }} DRY_RUN=true CLUSTERS_DIR=$tmp/clusters
+        task --silent -d {{ .TK_HOME }} kubeadm:render CLUSTER={{ .CLUSTER }} DRY_RUN=true CLUSTERS_DIR=$tmp/clusters
         rm -rf $tmp
         {{ else }}
         task --silent -d {{ .TK_HOME }} plan:resolve CLUSTER_FILE={{ .CLUSTER_FILE }} ALLOW_OVERLAP={{ .ALLOW_OVERLAP }}
         task --silent -d {{ .TK_HOME }} preflight:check
-        task --silent -d {{ .TK_HOME }} nodes:up NAME={{ .NAME }}
-        task --silent -d {{ .TK_HOME }} kubeadm:bootstrap NAME={{ .NAME }}
-        task --silent -d {{ .TK_HOME }} cni:install NAME={{ .NAME }}
-        touch {{ .STATE }}/.create-complete
+        task --silent -d {{ .TK_HOME }} nodes:up CLUSTER={{ .CLUSTER }}
+        task --silent -d {{ .TK_HOME }} kubeadm:bootstrap CLUSTER={{ .CLUSTER }}
+        task --silent -d {{ .TK_HOME }} cni:install CLUSTER={{ .CLUSTER }}
+        touch {{ .STATE_DIR }}/.create-complete
         echo
-        echo "cluster {{ .NAME }} is ready"
-        echo "  kubeconfig: {{ .STATE }}/kubeconfig   (tkctl use cluster {{ .NAME }})"
-        echo "  units:      /etc/containers/systemd/{{ .NAME }}/   target: {{ .NAME }}.target"
-        echo "  describe:   tkctl describe cluster {{ .NAME }}"
+        echo "cluster {{ .CLUSTER }} is ready"
+        echo "  kubeconfig: {{ .STATE_DIR }}/kubeconfig   (tkctl use cluster {{ .CLUSTER }})"
+        echo "  units:      /etc/containers/systemd/{{ .CLUSTER }}/   target: {{ .CLUSTER }}.target"
+        echo "  describe:   tkctl describe cluster {{ .CLUSTER }}"
         {{ end }}

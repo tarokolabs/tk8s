@@ -6,7 +6,7 @@ set -euo pipefail
 
 TK_HOME="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
 export TK_HOME
-TASK_BIN="${TASK_BIN:-task}"
+TK_TASK="${TK_TASK:-task}"  # path to the go-task binary
 
 usage() {
   cat <<'USAGE'
@@ -41,12 +41,18 @@ Create flags:
   --dry-run              print the resolved cluster.yaml and generated units without changing the host
 
 NAME must match ^[a-z][a-z0-9-]{0,15}$ (it becomes the DNS domain NAME.k8s).
+
+Environment:
+  TK_DATA_DIR            where clusters, CNI plugins and materials live (default /opt/taroko)
+  TK_WULIN_DIR           teaching materials mounted into every node (default TK_DATA_DIR/wulin)
+  TK_ASSUME_YES=1        skip confirmation prompts (same as --yes)
+  TK_TASK                path to the go-task binary (default: task from PATH)
 USAGE
 }
 
 die() { echo "tkctl: $*" >&2; exit 1; }
 
-run_task() { "$TASK_BIN" --silent -d "$TK_HOME" "$@" || exit 1; }  # normalize go-task exit codes (e.g. 201) to 1
+run_task() { "$TK_TASK" --silent -d "$TK_HOME" "$@" || exit 1; }  # normalize go-task exit codes (e.g. 201) to 1
 
 validate_name() {
   [[ "$1" =~ ^[a-z][a-z0-9-]{0,15}$ ]] || die "invalid cluster name '$1': use lowercase letters, digits and '-', start with a letter, max 16 characters"
@@ -58,7 +64,7 @@ normalize_memory() {  # 4G|4g|4096M|4096m -> lower-case podman format
 }
 
 cmd_create() {
-  local name="" cps=1 workers=2 cpu=2 memory="4G" k8s="" gvisor=false datapath="" file="" dry=0 overlap=0 topo_flags=0 defer=0
+  local name="" cps=1 workers=2 cpu=2 memory="4G" k8s="" gvisor=false datapath="" file="" dry=false overlap=false topo_flags=0 defer=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --control-planes) cps=${2:-}; topo_flags=1; shift 2 ;;
@@ -70,8 +76,8 @@ cmd_create() {
       --datapath) datapath=${2:-}; shift 2 ;;
       --defer-join) defer=1; shift ;;
       -f) file=${2:-}; shift 2 ;;
-      --dry-run) dry=1; shift ;;
-      --allow-overlap) overlap=1; shift ;;
+      --dry-run) dry=true; shift ;;
+      --allow-overlap) overlap=true; shift ;;
       -h|--help) usage; exit 0 ;;
       -*) die "unknown flag '$1' (see tkctl --help)" ;;
       *) [ -z "$name" ] || die "unexpected argument '$1'"; name=$1; shift ;;
@@ -129,7 +135,7 @@ cmd_named() {  # verb task NAME [extra task vars...]
   [ "${1:-}" == cluster ] || die "usage: tkctl $verb cluster NAME"
   local name=${2:-}; [ -n "$name" ] || die "usage: tkctl $verb cluster NAME"
   validate_name "$name"; shift 2
-  run_task "$task" NAME="$name" "$@"
+  run_task "$task" CLUSTER="$name" "$@"
 }
 
 cmd_add_node() {
@@ -146,7 +152,7 @@ cmd_add_node() {
     esac
   done
   case "$role" in worker|control-plane) ;; *) die "--role must be worker or control-plane" ;; esac
-  run_task node:add NAME="$cl" ROLE="$role" CPU="$ncpu" MEMORY="$nmem" JOIN="$njoin"
+  run_task node:add CLUSTER="$cl" ROLE="$role" CPU="$ncpu" MEMORY="$nmem" JOIN="$njoin"
 }
 
 main() {
@@ -155,9 +161,9 @@ main() {
     create)   shift; [ "${1:-}" == cluster ] || die "usage: tkctl create cluster [NAME] [flags]"; shift; cmd_create "$@" ;;
     delete)   shift
               case "${1:-}" in
-                cluster) local yes=0; [ "${3:-}" == --yes ] && yes=1; cmd_named delete lifecycle:delete "$1" "${2:-}" FORCE="$yes" ;;
+                cluster) [ "${3:-}" != --yes ] || export TK_ASSUME_YES=1; cmd_named delete lifecycle:delete "$1" "${2:-}" ;;
                 node) [ -n "${2:-}" ] && [ -n "${3:-}" ] || die "usage: tkctl delete node CLUSTER NODE [--yes]"; validate_name "$2"
-                      run_task node:delete NAME="$2" NODE="$3" FORCE="$([ "${4:-}" == --yes ] && echo 1 || echo 0)" ;;
+                      [ "${4:-}" != --yes ] || export TK_ASSUME_YES=1; run_task node:delete CLUSTER="$2" NODE="$3" ;;
                 *) die "usage: tkctl delete cluster NAME | tkctl delete node CLUSTER NODE" ;;
               esac ;;
     stop)     shift; cmd_named stop lifecycle:stop "$@" ;;
@@ -167,12 +173,12 @@ main() {
     describe) shift; [ "${1:-}" == cluster ] || die "usage: tkctl describe cluster NAME [-o yaml]"; shift
               local name=${1:-}; [ -n "$name" ] || die "usage: tkctl describe cluster NAME [-o yaml]"; validate_name "$name"; shift
               local fmt=""; [ "${1:-}" == "-o" ] && fmt=${2:-}
-              run_task lifecycle:describe NAME="$name" OUTPUT="$fmt" ;;
+              run_task lifecycle:describe CLUSTER="$name" OUTPUT="$fmt" ;;
     get)      shift; [ "${1:-}" == clusters ] || die "usage: tkctl get clusters"; run_task lifecycle:list ;;
     add)      shift; cmd_add_node "$@" ;;
     join)     shift; [ "${1:-}" == node ] || die "usage: tkctl join node CLUSTER NODE"
               [ -n "${2:-}" ] && [ -n "${3:-}" ] || die "usage: tkctl join node CLUSTER NODE"; validate_name "$2"
-              run_task node:join NAME="$2" NODE="$3" ;;
+              run_task node:join CLUSTER="$2" NODE="$3" ;;
     version)  echo "tkctl $(git -C "$TK_HOME" describe --tags --always 2>/dev/null || echo dev)"
               echo "kubernetes default $(sed -nE 's/^\s+default:\s*"([^"]+)"/\1/p' "$TK_HOME/versions.yaml")" ;;
     -h|--help|help) usage ;;

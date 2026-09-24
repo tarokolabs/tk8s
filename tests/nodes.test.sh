@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 source "$(dirname "$0")/lib.sh"
-TMP=$(mktemp -d); export TAROKO_HOME="$TMP"
+TMP=$(mktemp -d); export TK_DATA_DIR="$TMP"
 mkdir -p "$TMP/clusters/demo"
 cat > "$TMP/clusters/demo/cluster.yaml" <<'YAML'
 apiVersion: taroko.io/v1alpha1
@@ -14,7 +14,7 @@ spec:
     - {role: control-plane, name: demo-control-plane, ip: 172.22.3.1, cpu: 2, memory: 4g, join: true}
     - {role: worker, name: demo-worker1, ip: 172.22.3.2, cpu: 4, memory: 8g, join: true}
 YAML
-out=$(task nodes:render NAME=demo DRY_RUN=1 2>&1)
+out=$(task nodes:render CLUSTER=demo DRY_RUN=true 2>&1)
 assert_contains "$out" "# ---- /etc/containers/systemd/demo/demo.network" "network unit path"
 assert_contains "$out" "Subnet=172.22.3.0/24" "network subnet"
 assert_contains "$out" "Gateway=172.22.3.254" "network gateway"

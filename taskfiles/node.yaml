@@ -7,16 +7,17 @@ tasks:
   plan-add:
     desc: 'Compute name, ip and resources for a new node (prints name=... ip=... cpu=... memory=...)'
     silent: true
-    requires: { vars: [NAME, ROLE] }
+    requires: { vars: [CLUSTER, ROLE] }
     vars:
-      F: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml'
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
     cmds:
       - |
         set -e
-        f={{ .F }}
+        f={{ .CLUSTER_YAML }}
         idx=$(grep -oE 'index: *[0-9]+' $f | head -1 | awk '{print $2}')
         if [ "{{ .ROLE }}" = control-plane ] && ! grep -qE '^ +vip:' $f; then
-          echo "cluster {{ .NAME }} has no VIP (controlPlaneEndpoint); kubeadm cannot add control planes to it. Create HA clusters with --control-planes 3 (use --defer-join to add them by hand later)." >&2; exit 1
+          echo "cluster {{ .CLUSTER }} has no VIP (controlPlaneEndpoint); kubeadm cannot add control planes to it. Create HA clusters with --control-planes 3 (use --defer-join to add them by hand later)." >&2; exit 1
         fi
         # \b keeps 'vip:' from matching 'ip:'.
         last=$(grep -oE '\bip: *172\.22\.[0-9]+\.[0-9]+' $f | awk -F. '{print $4}' | sort -n | tail -1)
@@ -24,10 +25,10 @@ tasks:
         [ $ip -le 199 ] || { echo "no free node address left in 172.22.$idx.0/24 (.200-.219 is the LB pool)" >&2; exit 1; }
         # Number past the highest existing suffix, not by count: a deleted node must not
         # have its name reused while a higher-numbered node still exists.
-        if [ "{{ .ROLE }}" = control-plane ]; then base="{{ .NAME }}-control-plane"; else base="{{ .NAME }}-worker"; fi
+        if [ "{{ .ROLE }}" = control-plane ]; then base="{{ .CLUSTER }}-control-plane"; else base="{{ .CLUSTER }}-worker"; fi
         n=$(grep -oE "name: ${base}[0-9]*$" $f | sed -E "s/name: ${base}//; s/^$/1/" | sort -n | tail -1)
         name="${base}$(( ${n:-0} + 1 ))"
-        if grep -q "name: ${name}$" $f; then echo "node ${name} already exists in cluster {{ .NAME }}" >&2; exit 1; fi
+        if grep -q "name: ${name}$" $f; then echo "node ${name} already exists in cluster {{ .CLUSTER }}" >&2; exit 1; fi
         cpu="{{ .CPU }}"; mem="{{ .MEMORY }}"
         if [ -z "$cpu" ] || [ -z "$mem" ]; then
           blk=$(awk '/role: {{ .ROLE }}/{f=1} f&&/cpu:/{c=$2} f&&/memory:/{m=$2; print c, m; exit}' $f)
@@ -38,33 +39,42 @@ tasks:
   append:
     desc: Append a node entry to cluster.yaml
     silent: true
-    requires: { vars: [NAME, ROLE, NODE, IP, CPU, MEMORY, JOIN] }
+    requires: { vars: [CLUSTER, ROLE, NODE, IP, CPU, MEMORY, JOIN] }
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
     cmds:
       - |
         printf '    - role: %s\n      name: %s\n      ip: %s\n      cpu: %s\n      memory: %s\n      join: %s\n' \
-          "{{ .ROLE }}" "{{ .NODE }}" "{{ .IP }}" "{{ .CPU }}" "{{ .MEMORY }}" "{{ .JOIN }}" >> {{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml
+          "{{ .ROLE }}" "{{ .NODE }}" "{{ .IP }}" "{{ .CPU }}" "{{ .MEMORY }}" "{{ .JOIN }}" >> {{ .CLUSTER_YAML }}
 
   mark-joined:
     desc: 'Set join: true for a node in cluster.yaml'
     silent: true
-    requires: { vars: [NAME, NODE] }
+    requires: { vars: [CLUSTER, NODE] }
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
     cmds:
       - |
-        f={{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml
+        f={{ .CLUSTER_YAML }}
         awk -v n="{{ .NODE }}" '/^ +name:/{cur=$2} /^ +join:/{ if (cur==n) $0="      join: true" } {print}' $f > $f.tmp && mv $f.tmp $f
 
   remove-entry:
     desc: Remove a node entry from cluster.yaml (refuses the first control plane)
     silent: true
-    requires: { vars: [NAME, NODE] }
+    requires: { vars: [CLUSTER, NODE] }
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
     preconditions:
-      - sh: '[ "{{ .NODE }}" != "{{ .NAME }}-control-plane" ]'
-        msg: "the first control plane {{ .NAME }}-control-plane cannot be deleted; delete the cluster instead"
-      - sh: 'grep -q "name: {{ .NODE }}$" {{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml'
-        msg: "node {{ .NODE }} not found in cluster {{ .NAME }}"
+      - sh: '[ "{{ .NODE }}" != "{{ .CLUSTER }}-control-plane" ]'
+        msg: "the first control plane {{ .CLUSTER }}-control-plane cannot be deleted; delete the cluster instead"
+      - sh: 'grep -q "name: {{ .NODE }}$" {{ .CLUSTER_YAML }}'
+        msg: "node {{ .NODE }} not found in cluster {{ .CLUSTER }}"
     cmds:
       - |
-        f={{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml
+        f={{ .CLUSTER_YAML }}
         # Drop the six-line block (role, name, ip, cpu, memory, join) whose name matches.
         awk -v n="{{ .NODE }}" '
           /^ +- role:/ { buf=$0; skip=0; inblk=1; next }
@@ -75,58 +85,59 @@ tasks:
           END { if (inblk && !skip) print buf }' $f > $f.tmp && mv $f.tmp $f
 
   add:
-    desc: 'Add a node to a running cluster (ROLE=worker|control-plane; optional CPU, MEMORY, JOIN=false)'
+    desc: 'Add a node to a running cluster (ROLE=worker|control-plane, JOIN=true|false; optional CPU, MEMORY)'
     silent: true
-    requires: { vars: [NAME, ROLE] }
+    requires: { vars: [CLUSTER, ROLE, JOIN] }
     vars:
-      PLAN: { sh: 'task --silent -d {{ .TK_HOME }} node:plan-add NAME={{ .NAME }} ROLE={{ .ROLE }} CPU="{{ .CPU }}" MEMORY="{{ .MEMORY }}"' }
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      PLAN: { sh: 'task --silent -d {{ .TK_HOME }} node:plan-add CLUSTER={{ .CLUSTER }} ROLE={{ .ROLE }} CPU="{{ .CPU }}" MEMORY="{{ .MEMORY }}"' }
       NODE: '{{ regexFind "name=[^ ]+" .PLAN | trimPrefix "name=" }}'
       IP: '{{ regexFind "ip=[^ ]+" .PLAN | trimPrefix "ip=" }}'
-      NCPU: '{{ regexFind "cpu=[^ ]+" .PLAN | trimPrefix "cpu=" }}'
-      NMEM: '{{ regexFind "memory=[^ ]+" .PLAN | trimPrefix "memory=" }}'
-      DOJOIN: '{{ if eq (toString .JOIN) "false" }}false{{ else }}true{{ end }}'
+      NODE_CPU: '{{ regexFind "cpu=[^ ]+" .PLAN | trimPrefix "cpu=" }}'
+      NODE_MEMORY: '{{ regexFind "memory=[^ ]+" .PLAN | trimPrefix "memory=" }}'
     preconditions:
-      - sh: 'test -f {{ .CLUSTERS_DIR }}/{{ .NAME }}/.create-complete'
-        msg: "cluster {{ .NAME }} is not fully created (tkctl get clusters)"
+      - sh: 'test -f {{ .STATE_DIR }}/.create-complete'
+        msg: "cluster {{ .CLUSTER }} is not fully created (tkctl get clusters)"
     cmds:
       - task: append
-        vars: { NAME: '{{ .NAME }}', ROLE: '{{ .ROLE }}', NODE: '{{ .NODE }}', IP: '{{ .IP }}', CPU: '{{ .NCPU }}', MEMORY: '{{ .NMEM }}', JOIN: '{{ .DOJOIN }}' }
+        vars: { CLUSTER: '{{ .CLUSTER }}', ROLE: '{{ .ROLE }}', NODE: '{{ .NODE }}', IP: '{{ .IP }}', CPU: '{{ .NODE_CPU }}', MEMORY: '{{ .NODE_MEMORY }}', JOIN: '{{ .JOIN }}' }
       # Cross-namespace task references resolve inside this include, so call task explicitly.
-      - task --silent -d {{ .TK_HOME }} nodes:render NAME={{ .NAME }}
+      - task --silent -d {{ .TK_HOME }} nodes:render CLUSTER={{ .CLUSTER }}
       - sudo systemctl daemon-reload && sudo systemctl start {{ .NODE }}.service
       - |
         for i in $(seq 1 90); do s=$(sudo podman exec {{ .NODE }} systemctl is-system-running 2>/dev/null || true); case "$s" in running|degraded) break;; esac; sleep 2; done
-        echo "{{ .NODE }} running at {{ .IP }} ({{ .NCPU }} cpu, {{ .NMEM }})"
-      - '{{ if eq .DOJOIN "true" }}task --silent -d {{ .TK_HOME }} node:join NAME={{ .NAME }} NODE={{ .NODE }}{{ else }}echo "{{ .NODE }} left unjoined; join with: tkctl join node {{ .NAME }} {{ .NODE }}"{{ end }}'
+        echo "{{ .NODE }} running at {{ .IP }} ({{ .NODE_CPU }} cpu, {{ .NODE_MEMORY }})"
+      - '{{ if eq .JOIN "true" }}task --silent -d {{ .TK_HOME }} node:join CLUSTER={{ .CLUSTER }} NODE={{ .NODE }}{{ else }}echo "{{ .NODE }} left unjoined; join with: tkctl join node {{ .CLUSTER }} {{ .NODE }}"{{ end }}'
 
   join:
     desc: kubeadm join an existing, running node
     silent: true
-    requires: { vars: [NAME, NODE] }
+    requires: { vars: [CLUSTER, NODE] }
     vars:
-      F: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml'
-      ROLE: { sh: "awk -v n={{ .NODE }} '/- role:/{r=$3} /name:/{if ($2==n) {print r; exit}}' {{ .F }} 2>/dev/null" }
-      IP: { sh: "awk -v n={{ .NODE }} '/name:/{f=($2==n)} f&&/ip:/{print $2; exit}' {{ .F }} 2>/dev/null" }
-    env: { KUBECONFIG: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig' }
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
+      ROLE: { sh: "awk -v n={{ .NODE }} '/- role:/{r=$3} /name:/{if ($2==n) {print r; exit}}' {{ .CLUSTER_YAML }} 2>/dev/null" }
+      IP: { sh: "awk -v n={{ .NODE }} '/name:/{f=($2==n)} f&&/ip:/{print $2; exit}' {{ .CLUSTER_YAML }} 2>/dev/null" }
+    env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
     preconditions:
       - sh: '[ -n "{{ .ROLE }}" ]'
-        msg: "node {{ .NODE }} not found in cluster {{ .NAME }}"
+        msg: "node {{ .NODE }} not found in cluster {{ .CLUSTER }}"
       - sh: 'systemctl is-active --quiet {{ .NODE }}.service'
         msg: "node {{ .NODE }} is not running (systemctl status {{ .NODE }})"
-      - sh: '[ "{{ .ROLE }}" != control-plane ] || grep -qE "^ +vip:" {{ .F }}'
-        msg: "cluster {{ .NAME }} has no VIP (controlPlaneEndpoint); kubeadm cannot add control planes to it"
+      - sh: '[ "{{ .ROLE }}" != control-plane ] || grep -qE "^ +vip:" {{ .CLUSTER_YAML }}'
+        msg: "cluster {{ .CLUSTER }} has no VIP (controlPlaneEndpoint); kubeadm cannot add control planes to it"
     cmds:
       - |
         set -e
         if kubectl get node {{ .NODE }} >/dev/null 2>&1; then echo "{{ .NODE }} already joined"; exit 0; fi
-        join=$(sudo podman exec {{ .NAME }}-control-plane kubeadm token create --print-join-command | tr -d '\r')
+        join=$(sudo podman exec {{ .CLUSTER }}-control-plane kubeadm token create --print-join-command | tr -d '\r')
         if [ "{{ .ROLE }}" = control-plane ]; then
           # Certificate keys expire after two hours; always upload a fresh one.
-          key=$(sudo podman exec {{ .NAME }}-control-plane kubeadm init phase upload-certs --upload-certs 2>/dev/null | tail -1)
-          [ -n "$key" ] || { echo "could not obtain a certificate key from {{ .NAME }}-control-plane" >&2; exit 1; }
-          install -m 600 /dev/null {{ .CLUSTERS_DIR }}/{{ .NAME }}/.certificate-key && printf '%s\n' "$key" > {{ .CLUSTERS_DIR }}/{{ .NAME }}/.certificate-key
+          key=$(sudo podman exec {{ .CLUSTER }}-control-plane kubeadm init phase upload-certs --upload-certs 2>/dev/null | tail -1)
+          [ -n "$key" ] || { echo "could not obtain a certificate key from {{ .CLUSTER }}-control-plane" >&2; exit 1; }
+          install -m 600 /dev/null {{ .STATE_DIR }}/.certificate-key && printf '%s\n' "$key" > {{ .STATE_DIR }}/.certificate-key
           sudo podman exec {{ .NODE }} bash -c "$join --control-plane --certificate-key $key --apiserver-advertise-address {{ .IP }} --ignore-preflight-errors=SystemVerification" >/tmp/{{ .NODE }}.join 2>&1 || { tail -20 /tmp/{{ .NODE }}.join >&2; exit 1; }
-          task --silent -d {{ .TK_HOME }} kubeadm:kube-vip NAME={{ .NAME }} NODE={{ .NODE }}
+          task --silent -d {{ .TK_HOME }} kubeadm:kube-vip CLUSTER={{ .CLUSTER }} NODE={{ .NODE }}
           kubectl taint node {{ .NODE }} node-role.kubernetes.io/control-plane:NoSchedule- >/dev/null 2>&1 || true
         else
           sudo podman exec {{ .NODE }} bash -c "$join --ignore-preflight-errors=SystemVerification" >/tmp/{{ .NODE }}.join 2>&1 || { tail -20 /tmp/{{ .NODE }}.join >&2; exit 1; }
@@ -134,25 +145,26 @@ tasks:
         for i in $(seq 1 60); do kubectl get node {{ .NODE }} --no-headers 2>/dev/null | awk '$2=="Ready"' | grep -q . && break; sleep 5; done
         echo "{{ .NODE }} joined ({{ .ROLE }})"
       - task: mark-joined
-        vars: { NAME: '{{ .NAME }}', NODE: '{{ .NODE }}' }
+        vars: { CLUSTER: '{{ .CLUSTER }}', NODE: '{{ .NODE }}' }
 
   delete:
     desc: 'Remove a node: drain, kubeadm reset, stop the unit, remove container and volume, update cluster.yaml'
     silent: true
-    requires: { vars: [NAME, NODE] }
+    requires: { vars: [CLUSTER, NODE] }
     vars:
-      F: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml'
-      ROLE: { sh: "awk -v n={{ .NODE }} '/- role:/{r=$3} /name:/{if ($2==n) {print r; exit}}' {{ .F }} 2>/dev/null" }
-    env: { KUBECONFIG: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig' }
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
+      ROLE: { sh: "awk -v n={{ .NODE }} '/- role:/{r=$3} /name:/{if ($2==n) {print r; exit}}' {{ .CLUSTER_YAML }} 2>/dev/null" }
+    env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
     preconditions:
-      - sh: '[ "{{ .NODE }}" != "{{ .NAME }}-control-plane" ]'
+      - sh: '[ "{{ .NODE }}" != "{{ .CLUSTER }}-control-plane" ]'
         msg: "the first control plane cannot be deleted; delete the cluster instead"
       - sh: '[ -n "{{ .ROLE }}" ]'
-        msg: "node {{ .NODE }} not found in cluster {{ .NAME }}"
+        msg: "node {{ .NODE }} not found in cluster {{ .CLUSTER }}"
     cmds:
       - |
-        if [ "{{ .FORCE }}" != "1" ] && [ "${TKCTL_ASSUME_YES:-}" != "1" ]; then
-          printf 'Delete node {{ .NODE }} from cluster {{ .NAME }}? [y/N] '; read -r a || a=""
+        if [ "${TK_ASSUME_YES:-}" != "1" ]; then
+          printf 'Delete node {{ .NODE }} from cluster {{ .CLUSTER }}? [y/N] '; read -r a || a=""
           case "$a" in y|Y) ;; *) echo aborted; exit 1 ;; esac
         fi
         errs=0; step() { echo "  $1"; shift; "$@" >/dev/null 2>&1 || { echo "    failed: $*"; errs=$((errs+1)); }; }
@@ -162,13 +174,13 @@ tasks:
           step "kubectl delete node {{ .NODE }}" kubectl delete node {{ .NODE }}
         fi
         if systemctl list-units --all --no-legend "{{ .NODE }}.service" | grep -q .; then step "stop {{ .NODE }}.service" sudo systemctl stop {{ .NODE }}.service; fi
-        step "remove unit" sudo rm -f /etc/containers/systemd/{{ .NAME }}/{{ .NODE }}.container
+        step "remove unit" sudo rm -f /etc/containers/systemd/{{ .CLUSTER }}/{{ .NODE }}.container
         if sudo podman container exists {{ .NODE }} 2>/dev/null; then step "remove container" sudo podman rm -f {{ .NODE }}; fi
         for v in {{ .NODE }}-var {{ .NODE }}-etc {{ .NODE }}-usr-local-bin; do
           if sudo podman volume exists $v 2>/dev/null; then step "remove volume $v" sudo podman volume rm -f $v; fi
         done
-        step "update cluster.yaml" task --silent -d {{ .TK_HOME }} node:remove-entry NAME={{ .NAME }} NODE={{ .NODE }}
-        step "re-render target" task --silent -d {{ .TK_HOME }} nodes:render NAME={{ .NAME }}
+        step "update cluster.yaml" task --silent -d {{ .TK_HOME }} node:remove-entry CLUSTER={{ .CLUSTER }} NODE={{ .NODE }}
+        step "re-render target" task --silent -d {{ .TK_HOME }} nodes:render CLUSTER={{ .CLUSTER }}
         step "daemon-reload" sudo systemctl daemon-reload
         sudo systemctl reset-failed "{{ .NODE }}.service" 2>/dev/null || true
         [ $errs -eq 0 ] && echo "node {{ .NODE }} removed" || { echo "node {{ .NODE }} removed with $errs failed step(s)" >&2; exit 1; }

@@ -160,6 +160,8 @@ tkctl create cluster -f tkdt.yaml
 /etc/systemd/system/<名稱>-routes.service   # 主機到 pod 與 service 網段的路由，跟 target 一起啟停
 ```
 
+環境變數一律 `TK_` 前綴：`TK_DATA_DIR` 換掉 `/opt/taroko`、`TK_WULIN_DIR` 指定教材位置、`TK_ASSUME_YES=1` 等同 `--yes`、`TK_TASK` 指定 go-task 執行檔。`tkctl --help` 有完整清單。
+
 節點容器是 Quadlet 管的，每次啟停會重建；節點必須保留的 `/var`、`/etc`、`/usr/local/bin` 放在每節點的 named volume（`<節點>-var`、`-etc`、`-usr-local-bin`），`delete` 會一起清掉。
 
 ## 支援的 K8s 版本

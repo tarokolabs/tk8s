@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 source "$(dirname "$0")/lib.sh"
-TMP=$(mktemp -d); export TAROKO_HOME="$TMP"
+TMP=$(mktemp -d); export TK_DATA_DIR="$TMP"
 mkdir -p "$TMP/clusters/demo"
 cat > "$TMP/clusters/demo/cluster.yaml" <<'YAML'
 metadata: {name: demo}
@@ -14,7 +14,7 @@ spec:
     - {role: control-plane, name: demo-control-plane3, ip: 172.22.3.3, join: false}
     - {role: worker, name: demo-worker1, ip: 172.22.3.4, join: true}
 YAML
-out=$(task kubeadm:render NAME=demo DRY_RUN=1 2>&1)
+out=$(task kubeadm:render CLUSTER=demo DRY_RUN=true 2>&1)
 assert_contains "$out" "kubernetesVersion: 1.37.0" "k8s version"
 assert_contains "$out" "advertiseAddress: 172.22.3.1" "first control plane ip"
 assert_contains "$out" "criSocket: unix:///var/run/crio/crio.sock" "crio socket for runtime crio"
@@ -24,12 +24,12 @@ assert_contains "$out" "serviceSubnet: 10.98.3.0/24" "service subnet"
 assert_contains "$out" "dnsDomain: demo.k8s" "dns domain from name"
 assert_contains "$out" "name: demo-control-plane" "node registration name"
 sed -i.bak 's/runtime: crio/runtime: containerd/; s/, vip: 172.22.3.100//' "$TMP/clusters/demo/cluster.yaml"
-out=$(task kubeadm:render NAME=demo DRY_RUN=1 2>&1)
+out=$(task kubeadm:render CLUSTER=demo DRY_RUN=true 2>&1)
 assert_contains "$out" "criSocket: unix:///run/containerd/containerd.sock" "containerd socket"
 if [[ "$out" == *controlPlaneEndpoint* ]]; then echo "FAIL  no controlPlaneEndpoint without vip"; FAILURES=$((FAILURES+1)); else echo "PASS  no controlPlaneEndpoint without vip"; fi
 # join plan: which nodes join and how (pure computation, no cluster needed); restore the vip first
 mv "$TMP/clusters/demo/cluster.yaml.bak" "$TMP/clusters/demo/cluster.yaml"
-out=$(task kubeadm:join-plan NAME=demo 2>&1)
+out=$(task kubeadm:join-plan CLUSTER=demo 2>&1)
 assert_contains "$out" "demo-control-plane2 control-plane join kube-vip" "extra control plane joins and gets kube-vip (cluster has a vip)"
 assert_contains "$out" "demo-control-plane3 control-plane skip" "join: false is skipped"
 assert_contains "$out" "demo-worker1 worker join" "worker joins"

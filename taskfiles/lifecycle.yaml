@@ -3,10 +3,13 @@ version: '3'
 tasks:
   _exists:
     internal: true
-    requires: { vars: [NAME] }
+    requires: { vars: [CLUSTER] }
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
     preconditions:
-      - sh: 'test -f {{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml'
-        msg: "cluster {{ .NAME }} not found under {{ .CLUSTERS_DIR }} (tkctl get clusters)"
+      - sh: 'test -f {{ .CLUSTER_YAML }}'
+        msg: "cluster {{ .CLUSTER }} not found under {{ .CLUSTERS_DIR }} (tkctl get clusters)"
 
   list:
     desc: List clusters
@@ -33,49 +36,52 @@ tasks:
   describe:
     desc: Describe a cluster (OUTPUT=yaml prints cluster.yaml)
     silent: true
-    deps: [{ task: _exists, vars: { NAME: '{{ .NAME }}' } }]
+    deps: [{ task: _exists, vars: { CLUSTER: '{{ .CLUSTER }}' } }]
     vars:
-      F: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml'
-      RAW: { sh: 'cat {{ .F }} 2>/dev/null || printf "metadata: {name: %s}\nspec: {nodes: []}\n" {{ .NAME }}' }
-      C: { ref: fromYaml .RAW }
-      KUBECONFIG: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig'
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
+      DEF_RAW: { sh: 'cat {{ .CLUSTER_YAML }} 2>/dev/null || printf "metadata: {name: %s}\nspec: {nodes: []}\n" {{ .CLUSTER }}' }
+      DEF: { ref: fromYaml .DEF_RAW }
+      KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig'
     cmds:
       - |
-        {{ if eq .OUTPUT "yaml" }}cat {{ .F }}{{ else }}
-        state=$( [ -f {{ .CLUSTERS_DIR }}/{{ .NAME }}/.create-complete ] && (systemctl is-active --quiet {{ .NAME }}.target && echo Running || echo Stopped) || echo Creating )
-        echo "Name:        {{ .NAME }}"
+        {{ if eq .OUTPUT "yaml" }}cat {{ .CLUSTER_YAML }}{{ else }}
+        state=$( [ -f {{ .STATE_DIR }}/.create-complete ] && (systemctl is-active --quiet {{ .CLUSTER }}.target && echo Running || echo Stopped) || echo Creating )
+        echo "Name:        {{ .CLUSTER }}"
         echo "State:       $state"
-        echo "Kubernetes:  {{ .C.spec.kubernetes }}   runtime: {{ .C.spec.runtime }}   cni: {{ .C.spec.cni }}   datapath: {{ .C.spec.datapath_resolved | default .C.spec.datapath }}   gvisor: {{ .C.spec.gvisor }}"
-        echo "Network:     nodes {{ .C.spec.network.nodes }} (gateway {{ .C.spec.network.gateway }})  pods {{ .C.spec.network.pods }}  services {{ .C.spec.network.services }}  lb {{ .C.spec.network.lb_range }}{{ if .C.spec.network.vip }}  vip {{ .C.spec.network.vip }}{{ end }}"
+        echo "Kubernetes:  {{ .DEF.spec.kubernetes }}   runtime: {{ .DEF.spec.runtime }}   cni: {{ .DEF.spec.cni }}   datapath: {{ .DEF.spec.datapath_resolved | default .DEF.spec.datapath }}   gvisor: {{ .DEF.spec.gvisor }}"
+        echo "Network:     nodes {{ .DEF.spec.network.nodes }} (gateway {{ .DEF.spec.network.gateway }})  pods {{ .DEF.spec.network.pods }}  services {{ .DEF.spec.network.services }}  lb {{ .DEF.spec.network.lb_range }}{{ if .DEF.spec.network.vip }}  vip {{ .DEF.spec.network.vip }}{{ end }}"
         echo "Nodes:"
         printf '  %-24s %-14s %-14s %-14s %s\n' NAME ROLE IP RESOURCES JOIN
-        {{ range .C.spec.nodes }}
+        {{ range .DEF.spec.nodes }}
         j="{{ if eq (toString .join) "false" }}not joined{{ else }}joined{{ end }}"
         printf '  %-24s %-14s %-14s %-14s %s\n' "{{ .name }}" "{{ .role }}" "{{ .ip }}" "{{ .cpu }} cpu, {{ .memory }}" "$j"
         {{- end }}
         echo "Paths:"
-        echo "  state:      {{ .CLUSTERS_DIR }}/{{ .NAME }}/"
+        echo "  state:      {{ .STATE_DIR }}/"
         echo "  kubeconfig: {{ .KUBECONFIG }}"
-        echo "  units:      /etc/containers/systemd/{{ .NAME }}/   target: /etc/systemd/system/{{ .NAME }}.target"
+        echo "  units:      /etc/containers/systemd/{{ .CLUSTER }}/   target: /etc/systemd/system/{{ .CLUSTER }}.target"
         {{ end }}
 
   stop:
     desc: Stop every node of a cluster (state and data are kept)
     silent: true
-    deps: [{ task: _exists, vars: { NAME: '{{ .NAME }}' } }]
+    deps: [{ task: _exists, vars: { CLUSTER: '{{ .CLUSTER }}' } }]
     cmds:
-      - sudo systemctl stop {{ .NAME }}.target
-      - echo "cluster {{ .NAME }} stopped"
+      - sudo systemctl stop {{ .CLUSTER }}.target
+      - echo "cluster {{ .CLUSTER }} stopped"
 
   start:
     desc: Start a stopped cluster and wait for its nodes to be Ready
     silent: true
-    deps: [{ task: _exists, vars: { NAME: '{{ .NAME }}' } }]
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+    deps: [{ task: _exists, vars: { CLUSTER: '{{ .CLUSTER }}' } }]
     cmds:
       - |
         since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-        sudo systemctl start {{ .NAME }}.target
-        export KUBECONFIG={{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig
+        sudo systemctl start {{ .CLUSTER }}.target
+        export KUBECONFIG={{ .STATE_DIR }}/kubeconfig
         # Node objects keep their last status for a while after a stop; require a Ready
         # condition whose heartbeat is newer than this start.
         for i in $(seq 1 90); do
@@ -89,46 +95,49 @@ tasks:
   use:
     desc: Point ~/.kube/config at a cluster (the previous file is kept as ~/.kube/config.bak)
     silent: true
-    deps: [{ task: _exists, vars: { NAME: '{{ .NAME }}' } }]
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+    deps: [{ task: _exists, vars: { CLUSTER: '{{ .CLUSTER }}' } }]
     cmds:
       - mkdir -p ~/.kube && { [ ! -f ~/.kube/config ] || cp ~/.kube/config ~/.kube/config.bak; }
-      - install -m 600 {{ .CLUSTERS_DIR }}/{{ .NAME }}/kubeconfig ~/.kube/config
-      - echo "~/.kube/config now points at {{ .NAME }}"
+      - install -m 600 {{ .STATE_DIR }}/kubeconfig ~/.kube/config
+      - echo "~/.kube/config now points at {{ .CLUSTER }}"
 
   delete:
     desc: 'Delete a cluster: units, containers, volumes, network, routes, state (asks for confirmation)'
     silent: true
-    deps: [{ task: _exists, vars: { NAME: '{{ .NAME }}' } }]
+    deps: [{ task: _exists, vars: { CLUSTER: '{{ .CLUSTER }}' } }]
     vars:
-      F: '{{ .CLUSTERS_DIR }}/{{ .NAME }}/cluster.yaml'
-      RAW: { sh: 'cat {{ .F }} 2>/dev/null || printf "metadata: {name: %s}\nspec: {nodes: []}\n" {{ .NAME }}' }
-      C: { ref: fromYaml .RAW }
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
+      DEF_RAW: { sh: 'cat {{ .CLUSTER_YAML }} 2>/dev/null || printf "metadata: {name: %s}\nspec: {nodes: []}\n" {{ .CLUSTER }}' }
+      DEF: { ref: fromYaml .DEF_RAW }
     cmds:
       - |
-        if [ "{{ .FORCE }}" != "1" ] && [ "${TKCTL_ASSUME_YES:-}" != "1" ]; then
-          printf 'Delete cluster {{ .NAME }} including its PVC data under {{ .CLUSTERS_DIR }}/{{ .NAME }}/storage? [y/N] '
+        if [ "${TK_ASSUME_YES:-}" != "1" ]; then
+          printf 'Delete cluster {{ .CLUSTER }} including its PVC data under {{ .STATE_DIR }}/storage? [y/N] '
           read -r a || a=""
           case "$a" in y|Y) ;; *) echo "aborted"; exit 1 ;; esac
         fi
         errs=0
         step() { echo "  $1"; shift; "$@" >/dev/null 2>&1 || { echo "    failed: $*"; errs=$((errs+1)); }; }
-        if systemctl list-units --all --no-legend "{{ .NAME }}.target" | grep -q .; then step "stop {{ .NAME }}.target" sudo systemctl disable --now {{ .NAME }}.target; fi
+        if systemctl list-units --all --no-legend "{{ .CLUSTER }}.target" | grep -q .; then step "stop {{ .CLUSTER }}.target" sudo systemctl disable --now {{ .CLUSTER }}.target; fi
         # The Quadlet network unit is a oneshot that stays active; stop it or a later cluster with the same name never creates its network.
-        if systemctl list-units --all --no-legend "{{ .NAME }}-network.service" | grep -q .; then step "stop {{ .NAME }}-network.service" sudo systemctl stop {{ .NAME }}-network.service; fi
-        step "remove units" sudo rm -rf /etc/containers/systemd/{{ .NAME }} /etc/systemd/system/{{ .NAME }}.target /etc/systemd/system/{{ .NAME }}-routes.service
+        if systemctl list-units --all --no-legend "{{ .CLUSTER }}-network.service" | grep -q .; then step "stop {{ .CLUSTER }}-network.service" sudo systemctl stop {{ .CLUSTER }}-network.service; fi
+        step "remove units" sudo rm -rf /etc/containers/systemd/{{ .CLUSTER }} /etc/systemd/system/{{ .CLUSTER }}.target /etc/systemd/system/{{ .CLUSTER }}-routes.service
         step "daemon-reload" sudo systemctl daemon-reload
-        sudo systemctl reset-failed "{{ .NAME }}*" 2>/dev/null || true
+        sudo systemctl reset-failed "{{ .CLUSTER }}*" 2>/dev/null || true
         # go-task's shell exits when a loop body ends with a failing && list, so use if/then throughout.
-        {{ range .C.spec.nodes }}
+        {{ range .DEF.spec.nodes }}
         if sudo podman container exists {{ .name }} 2>/dev/null; then step "remove container {{ .name }}" sudo podman rm -f {{ .name }}; fi
         for v in {{ .name }}-var {{ .name }}-etc {{ .name }}-usr-local-bin; do
           if sudo podman volume exists $v 2>/dev/null; then step "remove volume $v" sudo podman volume rm -f $v; fi
         done
         {{ end }}
-        if sudo podman network exists {{ .NAME }} 2>/dev/null; then step "remove network {{ .NAME }}" sudo podman network rm -f {{ .NAME }}; fi
-        {{ if .C.spec.network }}
-        if ip route show {{ .C.spec.network.pods }} 2>/dev/null | grep -q .; then step "remove route {{ .C.spec.network.pods }}" sudo ip route del {{ .C.spec.network.pods }}; fi
-        if ip route show {{ .C.spec.network.services }} 2>/dev/null | grep -q .; then step "remove route {{ .C.spec.network.services }}" sudo ip route del {{ .C.spec.network.services }}; fi
+        if sudo podman network exists {{ .CLUSTER }} 2>/dev/null; then step "remove network {{ .CLUSTER }}" sudo podman network rm -f {{ .CLUSTER }}; fi
+        {{ if .DEF.spec.network }}
+        if ip route show {{ .DEF.spec.network.pods }} 2>/dev/null | grep -q .; then step "remove route {{ .DEF.spec.network.pods }}" sudo ip route del {{ .DEF.spec.network.pods }}; fi
+        if ip route show {{ .DEF.spec.network.services }} 2>/dev/null | grep -q .; then step "remove route {{ .DEF.spec.network.services }}" sudo ip route del {{ .DEF.spec.network.services }}; fi
         {{ end }}
-        step "remove state {{ .CLUSTERS_DIR }}/{{ .NAME }}" sudo rm -rf {{ .CLUSTERS_DIR }}/{{ .NAME }}
-        if [ $errs -eq 0 ]; then echo "cluster {{ .NAME }} deleted"; else echo "cluster {{ .NAME }} deleted with $errs failed step(s); see the lines above" >&2; exit 1; fi
+        step "remove state {{ .STATE_DIR }}" sudo rm -rf {{ .STATE_DIR }}
+        if [ $errs -eq 0 ]; then echo "cluster {{ .CLUSTER }} deleted"; else echo "cluster {{ .CLUSTER }} deleted with $errs failed step(s); see the lines above" >&2; exit 1; fi

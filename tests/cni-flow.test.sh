@@ -3,7 +3,7 @@
 # exercised without a cluster. Regression for: create reported "ready" after cilium timed out.
 source "$(dirname "$0")/lib.sh"
 cd "$(dirname "$0")/.." || exit 1
-TMP=$(mktemp -d); export TAROKO_HOME="$TMP"
+TMP=$(mktemp -d); export TK_DATA_DIR="$TMP"
 STUB="$TMP/bin"; mkdir -p "$STUB" "$TMP/clusters/demo"; export STUB STUB_LOG="$TMP/calls.log"
 v() { sed -nE "s/^$1: *\"?([^\"]+)\"?.*/\1/p" versions.yaml; }
 fixture() {  # cni
@@ -39,7 +39,7 @@ case "$*" in
 esac
 SH
 chmod +x "$STUB"/*
-run() { : > "$STUB_LOG"; rm -f "$STUB/cilium"; out=$(PATH="$STUB:$PATH" task cni:install NAME=demo 2>&1); rc=$?; }
+run() { : > "$STUB_LOG"; rm -f "$STUB/cilium"; out=$(PATH="$STUB:$PATH" task cni:install CLUSTER=demo 2>&1); rc=$?; }
 
 fixture cilium; touch "$STUB/cilium-fail"; run
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "cilium never ready: cni:install fails"
