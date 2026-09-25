@@ -28,6 +28,8 @@ tasks:
       DEF: { ref: fromYaml .DEF_RAW }
       CACHE: '{{ .TK_DATA_DIR }}/cache'
       TARBALL: 'gvisor-{{ .VERSIONS.gvisor }}.tar.zstd'
+      # Written after a complete extraction; a bare runsc (baked image, interrupted tar) is not enough.
+      MARKER: '/usr/local/bin/.gvisor-{{ .VERSIONS.gvisor }}'
       URL: 'https://storage.googleapis.com/gvisor/releases/release/{{ .VERSIONS.gvisor }}/x86_64'
     env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
     cmds:
@@ -38,7 +40,7 @@ tasks:
         {{ end }}
         # Download and verify once on the host; each node extracts its own copy into /usr/local/bin.
         need=0
-        {{ range .DEF.spec.nodes }}if ! sudo podman exec {{ .name }} test -x /usr/local/bin/runsc; then need=1; fi
+        {{ range .DEF.spec.nodes }}if ! sudo podman exec {{ .name }} test -e {{ $.MARKER }}; then need=1; fi
         {{ end }}
         if [ $need -eq 1 ] && [ ! -f {{ .CACHE }}/{{ .TARBALL }} ]; then
           mkdir -p {{ .CACHE }} 2>/dev/null || { sudo mkdir -p {{ .CACHE }} && sudo chown "$(id -u):$(id -g)" {{ .CACHE }}; }
@@ -48,7 +50,7 @@ tasks:
           mv {{ .CACHE }}/gvisor.tar.zstd {{ .CACHE }}/{{ .TARBALL }}; rm -f {{ .CACHE }}/gvisor.tar.zstd.sha512
         fi
         {{ range .DEF.spec.nodes }}
-        if ! sudo podman exec {{ .name }} test -x /usr/local/bin/runsc; then
+        if ! sudo podman exec {{ .name }} test -e {{ $.MARKER }}; then
           # Node images published before zstd was added to the recipe cannot unpack the tarball.
           # podman exec runs no shell, so test the binary rather than `command -v`.
           if ! sudo podman exec {{ .name }} test -x /usr/bin/zstd; then
@@ -57,6 +59,7 @@ tasks:
           sudo podman cp {{ $.CACHE }}/{{ $.TARBALL }} {{ .name }}:/tmp/gvisor.tar.zstd
           sudo podman exec {{ .name }} tar --zstd -xf /tmp/gvisor.tar.zstd -C /usr/local/bin
           sudo podman exec {{ .name }} rm -f /tmp/gvisor.tar.zstd
+          sudo podman exec {{ .name }} touch {{ $.MARKER }}
         fi
         if ! sudo podman exec {{ .name }} test -e /etc/crio/crio.conf.d/20-gvisor.conf; then
           sudo podman cp {{ $.TK_HOME }}/templates/crio/20-gvisor.conf {{ .name }}:/etc/crio/crio.conf.d/20-gvisor.conf

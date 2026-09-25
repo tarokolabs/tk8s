@@ -37,6 +37,7 @@ case "$1" in
         case "$*" in
           "test -e "*|"test -x "*) [ -e "$root/$node${3}" ] ;;
           "grep -q "*) grep -q -- "$3" "$root/$node$4" 2>/dev/null ;;
+          "touch "*) mkdir -p "$(dirname "$root/$node$2")"; touch "$root/$node$2" ;;
           *"apt-get install"*zstd*) mkdir -p "$root/$node/usr/bin"; touch "$root/$node/usr/bin/zstd" ;;
           "sh -c cat >> "*) f=$(echo "$*" | sed -E 's/^sh -c cat >> ([^ ]+).*/\1/'); mkdir -p "$(dirname "$root/$node$f")"; cat >> "$root/$node$f" ;;
           *) exit 0 ;;
@@ -89,11 +90,18 @@ if [ "$(grep -n 'apt-get install' "$STUB_LOG" | head -1 | cut -d: -f1)" -lt "$(g
 run addons:gvisor
 assert_eq "1" "$(grep -c 'runtime_type = "vm"' "$TMP/nodefs/demo-worker1/etc/crio/crio.conf.d/20-gvisor.conf")" "second run does not rewrite the handler conf"
 if grep -q "systemctl restart crio" "$STUB_LOG"; then echo "FAIL  second run does not restart crio"; FAILURES=$((FAILURES+1)); else echo "PASS  second run does not restart crio"; fi
-# ---- old image with runsc baked in: no download, conf still written
+# ---- an interrupted extraction (runsc present, no version marker) is redone; the marker names the release
+fixture true; rm -rf "$TMP/nodefs"; mkdir -p "$TMP/nodefs/demo-control-plane/usr/local/bin" "$TMP/nodefs/demo-worker1/usr/local/bin" "$TMP/nodefs/demo-worker1/usr/bin"
+touch "$TMP/nodefs/demo-worker1/usr/local/bin/runsc" "$TMP/nodefs/demo-worker1/usr/bin/zstd"; run addons:gvisor
+assert_contains "$(log)" "podman exec demo-worker1 tar --zstd -xf /tmp/gvisor.tar.zstd -C /usr/local/bin" "runsc without the version marker is extracted again"
+if [ -e "$TMP/nodefs/demo-worker1/usr/local/bin/.gvisor-$(v gvisor)" ]; then echo "PASS  version marker written after extraction"; else echo "FAIL  version marker written after extraction"; FAILURES=$((FAILURES+1)); fi
+run addons:gvisor
+if grep -q "tar --zstd" "$STUB_LOG"; then echo "FAIL  marker present: no re-extraction"; FAILURES=$((FAILURES+1)); else echo "PASS  marker present: no re-extraction"; fi
+# ---- old image with runsc baked in (no marker): the pinned release is installed over it
 fixture true; rm -rf "$TMP/nodefs"; mkdir -p "$TMP/nodefs/demo-control-plane/usr/local/bin" "$TMP/nodefs/demo-worker1/usr/local/bin"
 touch "$TMP/nodefs/demo-control-plane/usr/local/bin/runsc" "$TMP/nodefs/demo-worker1/usr/local/bin/runsc"; rm -rf "$TMP/cache"; run addons:gvisor
-if grep -q "curl " "$STUB_LOG"; then echo "FAIL  runsc already present: no download"; FAILURES=$((FAILURES+1)); else echo "PASS  runsc already present: no download"; fi
-assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/crio/crio.conf.d/20-gvisor.conf")" 'runtime_type = "vm"' "handler conf still written when the binary was baked in"
+assert_contains "$(log)" "podman cp $TMP/cache/gvisor-$(v gvisor).tar.zstd demo-worker1:/tmp/gvisor.tar.zstd" "baked runsc without a marker is replaced by the pinned release"
+assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/crio/crio.conf.d/20-gvisor.conf")" 'runtime_type = "vm"' "handler conf written"
 # ---- metrics-server: pinned manifest, kubelet-insecure-tls via a JSON patch, rollout waited
 fixture false; run addons:metrics-server
 assert_eq "0" "$rc" "metrics-server exits 0"
