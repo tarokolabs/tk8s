@@ -32,6 +32,7 @@ esac
 SH
 cat > "$STUB/kubectl" <<'SH'
 #!/usr/bin/env bash
+echo "kubectl $*" >> "$STUB/kubectl.log"
 case "$*" in
   *"get nodes --no-headers"*) printf 'demo-control-plane Ready control-plane 1m v1.37.0\ndemo-worker1 Ready <none> 1m v1.37.0\n' ;;
   *"get nodes -o custom-columns"*) echo "  demo-control-plane v1.37.0 cri-o://1.37.0 6.12" ;;
@@ -58,6 +59,8 @@ run() { rm -f "$STUB/pods-calls" "$STUB/top-calls"; out=$(PATH="$STUB:$PATH" tas
 
 run
 assert_eq "0" "$rc" "all healthy: exit 0"
+pin=$(sed -nE 's/^verify_alpine: *"?([^"]+)"?.*/\1/p' versions.yaml)
+if [ -n "$pin" ] && grep -q -- "--image=$pin" "$STUB/kubectl.log"; then echo "PASS  test pods use the image pinned in versions.yaml"; else echo "FAIL  test pods use the image pinned in versions.yaml ($pin)"; FAILURES=$((FAILURES+1)); fi
 assert_contains "$out" "PASS  nodes: 2/2 Ready" "nodes section"
 assert_contains "$out" "PASS  kube-system pods all Running" "system pods (waited for pods still starting after a boot)"
 assert_contains "$out" "PASS  cilium status" "cilium status"

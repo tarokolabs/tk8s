@@ -30,9 +30,9 @@ tasks:
         set +e
         NS=tk-verify
         T=${TK_VERIFY_TIMEOUT:-180}
-        BUSYBOX=docker.io/library/busybox
-        ALPINE=docker.io/library/alpine
-        ECHO_IMG=registry.k8s.io/e2e-test-images/agnhost:2.53
+        BUSYBOX={{ .VERSIONS.verify_busybox }}
+        ALPINE={{ .VERSIONS.verify_alpine }}
+        ECHO_IMG={{ .VERSIONS.verify_agnhost }}
         HOST_IP={{ .DEF.spec.network.gateway }}   # the host's address on the node network: the client IP seen by a Gateway
         PASS=0; FAIL=0; SKIP=0
         ok()   { echo "PASS  $1"; PASS=$((PASS+1)); }
