@@ -5,7 +5,6 @@ metadata:
   name: tk8s
 spec:
   kubernetes: "1.37.0"
-  runtime: crio
   cni: cilium
   datapath: auto
   gvisor: false
@@ -53,7 +52,7 @@ PartOf=tk8s.target
 
 [Container]
 ContainerName=tk8s-control-plane
-Image=ghcr.io/tarokolabs/tk8s/node/crio:v1.37.0
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.0
 HostName=tk8s-control-plane
 Network=tk8s.network
 IP=172.22.0.1
@@ -89,7 +88,7 @@ After=tk8s-control-plane.service
 
 [Container]
 ContainerName=tk8s-worker1
-Image=ghcr.io/tarokolabs/tk8s/node/crio:v1.37.0
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.0
 HostName=tk8s-worker1
 Network=tk8s.network
 IP=172.22.0.2
@@ -125,7 +124,7 @@ After=tk8s-control-plane.service
 
 [Container]
 ContainerName=tk8s-worker2
-Image=ghcr.io/tarokolabs/tk8s/node/crio:v1.37.0
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.0
 HostName=tk8s-worker2
 Network=tk8s.network
 IP=172.22.0.3

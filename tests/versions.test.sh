@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.." || exit 1
 v() { sed -nE "s/^$1: *\"?([^\"]+)\"?.*/\1/p" versions.yaml; }
 hits=$(grep -nE 'releases/latest|api\.github\.com|calico/v[0-9]' Taskfile.yaml taskfiles/*.yaml || true)
 assert_eq "" "$hits" "no latest/API lookups or hard-coded versions in the taskfiles"
-for k in cni_plugins cilium_cli calico metrics_server local_path_provisioner gvisor crun; do
+for k in cni_plugins cilium_cli calico metrics_server local_path_provisioner gvisor; do
   if [ -n "$(v $k)" ]; then echo "PASS  versions.yaml pins $k"; else echo "FAIL  versions.yaml pins $k"; FAILURES=$((FAILURES+1)); fi
 done
 out=$(task --dry nodes:cni-plugins 2>&1)

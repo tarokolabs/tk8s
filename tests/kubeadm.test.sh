@@ -6,7 +6,6 @@ cat > "$TMP/clusters/demo/cluster.yaml" <<'YAML'
 metadata: {name: demo}
 spec:
   kubernetes: "1.37.0"
-  runtime: crio
   network: {index: 3, nodes: 172.22.3.0/24, gateway: 172.22.3.254, pods: 10.244.24.0/21, services: 10.98.3.0/24, vip: 172.22.3.100}
   nodes:
     - {role: control-plane, name: demo-control-plane, ip: 172.22.3.1, join: true}
@@ -17,15 +16,14 @@ YAML
 out=$(task kubeadm:render CLUSTER=demo DRY_RUN=true 2>&1)
 assert_contains "$out" "kubernetesVersion: 1.37.0" "k8s version"
 assert_contains "$out" "advertiseAddress: 172.22.3.1" "first control plane ip"
-assert_contains "$out" "criSocket: unix:///var/run/crio/crio.sock" "crio socket for runtime crio"
+assert_contains "$out" "criSocket: unix:///var/run/crio/crio.sock" "CRI-O socket"
 assert_contains "$out" 'controlPlaneEndpoint: "172.22.3.100:6443"' "vip endpoint when HA"
 assert_contains "$out" "podSubnet: 10.244.24.0/21" "pod subnet"
 assert_contains "$out" "serviceSubnet: 10.98.3.0/24" "service subnet"
 assert_contains "$out" "dnsDomain: demo.k8s" "dns domain from name"
 assert_contains "$out" "name: demo-control-plane" "node registration name"
-sed -i.bak 's/runtime: crio/runtime: containerd/; s/, vip: 172.22.3.100//' "$TMP/clusters/demo/cluster.yaml"
+sed -i.bak 's/, vip: 172.22.3.100//' "$TMP/clusters/demo/cluster.yaml"
 out=$(task kubeadm:render CLUSTER=demo DRY_RUN=true 2>&1)
-assert_contains "$out" "criSocket: unix:///run/containerd/containerd.sock" "containerd socket"
 if [[ "$out" == *controlPlaneEndpoint* ]]; then echo "FAIL  no controlPlaneEndpoint without vip"; FAILURES=$((FAILURES+1)); else echo "PASS  no controlPlaneEndpoint without vip"; fi
 # join plan: which nodes join and how (pure computation, no cluster needed); restore the vip first
 mv "$TMP/clusters/demo/cluster.yaml.bak" "$TMP/clusters/demo/cluster.yaml"

@@ -25,7 +25,6 @@ tasks:
       CLUSTER: '{{ .DEF.metadata.name }}'
       STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
       K8S: '{{ .DEF.spec.kubernetes | default .VERSIONS.kubernetes.default }}'
-      RUNTIME: '{{ .DEF.spec.runtime | default "crio" }}'
       CNI: '{{ .DEF.spec.cni | default "cilium" }}'
       # gVisor sandboxes have no network under netkit, so gvisor picks veth unless the file says otherwise.
       DATAPATH: '{{ .DEF.spec.datapath | default (ternary "veth" "auto" (eq (toString .DEF.spec.gvisor) "true")) }}'
@@ -63,7 +62,7 @@ tasks:
       # and read badly.
       INVALID:
         sh: |
-          case "{{ .RUNTIME }}" in crio|containerd) ;; *) echo 'spec.runtime "{{ .RUNTIME }}" must be crio or containerd'; exit 0 ;; esac
+          {{ if .DEF.spec.runtime }}echo 'spec.runtime is not a field any more: nodes run CRI-O from the single node image; remove the key'; exit 0{{ end }}
           case "{{ .CNI }}" in cilium|canal) ;; *) echo 'spec.cni "{{ .CNI }}" must be cilium or canal'; exit 0 ;; esac
           case "{{ .DATAPATH }}" in auto|netkit|veth) ;; *) echo 'spec.datapath "{{ .DATAPATH }}" must be auto, netkit or veth'; exit 0 ;; esac
           {{ if and (eq .GVISOR "true") (eq .DATAPATH "netkit") }}echo 'gvisor requires the veth datapath; gVisor sandboxes have no network under netkit'; exit 0{{ end }}
@@ -103,7 +102,6 @@ tasks:
           name: {{ .CLUSTER }}
         spec:
           kubernetes: "{{ .K8S }}"
-          runtime: {{ .RUNTIME }}
           cni: {{ .CNI }}
           datapath: {{ .DATAPATH }}
           gvisor: {{ .GVISOR }}

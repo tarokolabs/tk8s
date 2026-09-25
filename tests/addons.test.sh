@@ -5,15 +5,14 @@ cd "$(dirname "$0")/.." || exit 1
 TMP=$(mktemp -d); export TK_DATA_DIR="$TMP"
 STUB="$TMP/bin"; mkdir -p "$STUB" "$TMP/clusters/demo" "$TMP/nodefs"; export STUB STUB_LOG="$TMP/calls.log"
 v() { sed -nE "s/^$1: *\"?([^\"]+)\"?.*/\1/p" versions.yaml; }
-fixture() {  # runtime gvisor
+fixture() {  # gvisor
   cat > "$TMP/clusters/demo/cluster.yaml" <<YAML
 metadata: {name: demo}
 spec:
   kubernetes: "1.37.0"
-  runtime: $1
   cni: cilium
   datapath: veth
-  gvisor: $2
+  gvisor: $1
   network: {index: 0, nodes: 172.22.0.0/24, gateway: 172.22.0.254, pods: 10.244.0.0/21, services: 10.98.0.0/24, lb_range: 172.22.0.200-172.22.0.219}
   nodes:
     - {role: control-plane, name: demo-control-plane, ip: 172.22.0.1, cpu: 2, memory: 4g, join: true}
@@ -62,29 +61,18 @@ run() { : > "$STUB_LOG"; out=$(PATH="$STUB:$PATH" task "$@" CLUSTER=demo 2>&1); 
 log() { cat "$STUB_LOG"; }
 lpv=$(v local_path_provisioner)
 
-# ---- runtimeclass, crio: crun ships with CRI-O, only the RuntimeClass object is applied
-fixture crio false; run addons:runtimeclass
-assert_eq "0" "$rc" "runtimeclass (crio) exits 0"
+# ---- runtimeclass: CRI-O ships crun, only the RuntimeClass object is applied, nothing enters the nodes
+fixture false; run addons:runtimeclass
+assert_eq "0" "$rc" "runtimeclass exits 0"
 assert_contains "$(log)" "kubectl apply -f $PWD/manifests/runtimeclass.yaml" "RuntimeClass crun applied"
-if grep -q "crun-" "$STUB_LOG"; then echo "FAIL  crio path does not download crun"; FAILURES=$((FAILURES+1)); else echo "PASS  crio path does not download crun"; fi
-# ---- runtimeclass, containerd: crun binary into /usr/local/bin and a runtime table in config.toml, once
-fixture containerd false; rm -rf "$TMP/nodefs"; mkdir -p "$TMP/nodefs"; run addons:runtimeclass
-assert_eq "0" "$rc" "runtimeclass (containerd) exits 0"
-assert_contains "$(log)" "containers/crun/releases/download/$(v crun)/crun-$(v crun)-linux-amd64" "crun downloaded at the pinned version"
-assert_contains "$(log)" "podman cp $TMP/cache/crun-$(v crun) demo-worker1:/usr/local/bin/crun" "crun copied into every node"
-assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/containerd/config.toml")" 'runtimes.crun]' "crun runtime table appended to config.toml"
-assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/containerd/config.toml")" 'SystemdCgroup = false' "crun uses cgroupfs: its systemd mode needs a D-Bus socket the kind image lacks"
-assert_contains "$(log)" "podman exec demo-worker1 systemctl restart containerd" "containerd restarted after the config change"
-run addons:runtimeclass
-assert_eq "1" "$(grep -c 'runtimes.crun]' "$TMP/nodefs/demo-worker1/etc/containerd/config.toml")" "second run does not append a duplicate runtime table"
-if grep -q "curl " "$STUB_LOG"; then echo "FAIL  second run does not download again"; FAILURES=$((FAILURES+1)); else echo "PASS  second run does not download again"; fi
+if grep -qE "curl |podman cp|podman exec" "$STUB_LOG"; then echo "FAIL  runtimeclass touches no node"; FAILURES=$((FAILURES+1)); else echo "PASS  runtimeclass touches no node"; fi
 # ---- gvisor disabled: nothing installed, no RuntimeClass gvisor
-fixture crio false; rm -rf "$TMP/nodefs"; mkdir -p "$TMP/nodefs"; run addons:gvisor
+fixture false; rm -rf "$TMP/nodefs"; mkdir -p "$TMP/nodefs"; run addons:gvisor
 assert_eq "0" "$rc" "gvisor disabled exits 0"
 assert_contains "$out" "not enabled" "gvisor disabled says so"
 if grep -q "gvisor" "$STUB_LOG"; then echo "FAIL  gvisor disabled touches nothing"; FAILURES=$((FAILURES+1)); else echo "PASS  gvisor disabled touches nothing"; fi
 # ---- gvisor on crio: tarball verified on the host, extracted in every node, handler conf written, crio restarted
-fixture crio true; mkdir -p "$TMP/nodefs/demo-control-plane/usr/bin" "$TMP/nodefs/demo-worker1/usr/bin"; touch "$TMP/nodefs/demo-control-plane/usr/bin/zstd" "$TMP/nodefs/demo-worker1/usr/bin/zstd"; run addons:gvisor
+fixture true; mkdir -p "$TMP/nodefs/demo-control-plane/usr/bin" "$TMP/nodefs/demo-worker1/usr/bin"; touch "$TMP/nodefs/demo-control-plane/usr/bin/zstd" "$TMP/nodefs/demo-worker1/usr/bin/zstd"; run addons:gvisor
 if grep -q "apt-get" "$STUB_LOG"; then echo "FAIL  node with zstd: no apt-get"; FAILURES=$((FAILURES+1)); else echo "PASS  node with zstd: no apt-get"; fi
 assert_eq "0" "$rc" "gvisor (crio) exits 0"
 assert_contains "$(log)" "gvisor/releases/release/$(v gvisor)/x86_64/gvisor.tar.zstd.sha512" "gvisor checksum downloaded at the pinned release"
@@ -93,23 +81,21 @@ assert_contains "$(log)" "podman exec demo-worker1 tar --zstd -xf /tmp/gvisor.ta
 assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/crio/crio.conf.d/20-gvisor.conf")" 'runtime_type = "vm"' "CRI-O handler conf written into the node"
 assert_contains "$(log)" "podman exec demo-worker1 systemctl restart crio" "crio restarted"
 assert_contains "$(log)" "kubectl apply -f -" "RuntimeClass gvisor applied"
-# ---- gvisor on containerd: shim table appended once
-fixture containerd true; rm -rf "$TMP/nodefs"; mkdir -p "$TMP/nodefs"; run addons:gvisor
-assert_eq "0" "$rc" "gvisor (containerd) exits 0"
-assert_contains "$(log)" "apt-get install -y -qq zstd" "zstd installed into a node whose image lacks it (published containerd image)"
+# ---- node image without zstd (published before the recipe change): installed before extraction
+fixture true; rm -rf "$TMP/nodefs"; mkdir -p "$TMP/nodefs"; run addons:gvisor
+assert_eq "0" "$rc" "gvisor on a node without zstd exits 0"
+assert_contains "$(log)" "apt-get install -y -qq zstd" "zstd installed into a node whose image lacks it"
 if [ "$(grep -n 'apt-get install' "$STUB_LOG" | head -1 | cut -d: -f1)" -lt "$(grep -n 'tar --zstd' "$STUB_LOG" | head -1 | cut -d: -f1)" ]; then echo "PASS  zstd installed before extraction"; else echo "FAIL  zstd installed before extraction"; FAILURES=$((FAILURES+1)); fi
-assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/containerd/config.toml")" 'runtimes.runsc]' "runsc runtime table appended"
-assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/containerd/runsc.toml")" 'systemd-cgroup = "true"' "runsc told to use systemd cgroups"
-assert_contains "$(log)" "podman exec demo-worker1 systemctl restart containerd" "containerd restarted for runsc"
 run addons:gvisor
-assert_eq "1" "$(grep -c 'runtimes.runsc]' "$TMP/nodefs/demo-worker1/etc/containerd/config.toml")" "second run does not duplicate the runsc table"
+assert_eq "1" "$(grep -c 'runtime_type = "vm"' "$TMP/nodefs/demo-worker1/etc/crio/crio.conf.d/20-gvisor.conf")" "second run does not rewrite the handler conf"
+if grep -q "systemctl restart crio" "$STUB_LOG"; then echo "FAIL  second run does not restart crio"; FAILURES=$((FAILURES+1)); else echo "PASS  second run does not restart crio"; fi
 # ---- old image with runsc baked in: no download, conf still written
-fixture crio true; rm -rf "$TMP/nodefs"; mkdir -p "$TMP/nodefs/demo-control-plane/usr/local/bin" "$TMP/nodefs/demo-worker1/usr/local/bin"
+fixture true; rm -rf "$TMP/nodefs"; mkdir -p "$TMP/nodefs/demo-control-plane/usr/local/bin" "$TMP/nodefs/demo-worker1/usr/local/bin"
 touch "$TMP/nodefs/demo-control-plane/usr/local/bin/runsc" "$TMP/nodefs/demo-worker1/usr/local/bin/runsc"; rm -rf "$TMP/cache"; run addons:gvisor
 if grep -q "curl " "$STUB_LOG"; then echo "FAIL  runsc already present: no download"; FAILURES=$((FAILURES+1)); else echo "PASS  runsc already present: no download"; fi
 assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/crio/crio.conf.d/20-gvisor.conf")" 'runtime_type = "vm"' "handler conf still written when the binary was baked in"
 # ---- metrics-server: pinned manifest, kubelet-insecure-tls via a JSON patch, rollout waited
-fixture crio false; run addons:metrics-server
+fixture false; run addons:metrics-server
 assert_eq "0" "$rc" "metrics-server exits 0"
 assert_contains "$(log)" "metrics-server/releases/download/$(v metrics_server)/components.yaml" "metrics-server manifest at the pinned version"
 assert_contains "$(log)" '"--kubelet-insecure-tls"' "kubelet-insecure-tls added (kind nodes have self-signed kubelet certs)"

@@ -10,7 +10,6 @@ cat > "$TMP/clusters/demo/cluster.yaml" <<'YAML'
 metadata: {name: demo}
 spec:
   kubernetes: "1.37.0"
-  runtime: crio
   cni: cilium
   datapath: auto
   datapath_resolved: veth

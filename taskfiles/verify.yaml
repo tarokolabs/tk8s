@@ -41,7 +41,7 @@ tasks:
         sect() { echo; echo "[$1]"; }
         cleanup() { kubectl delete ns $NS --ignore-not-found --wait=false >/dev/null 2>&1; }
         trap cleanup EXIT
-        echo "verify {{ .CLUSTER }} ({{ .DEF.spec.runtime }}/{{ .DEF.spec.cni }}, {{ .NODE_COUNT }} nodes, timeout ${T}s)"
+        echo "verify {{ .CLUSTER }} (cni {{ .DEF.spec.cni }}, {{ .NODE_COUNT }} nodes, timeout ${T}s)"
 
         sect nodes
         for i in $(seq 1 $((T/5))); do

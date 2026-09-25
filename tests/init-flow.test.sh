@@ -9,7 +9,6 @@ cat > "$TMP/clusters/demo/cluster.yaml" <<'YAML'
 metadata: {name: demo}
 spec:
   kubernetes: "1.37.0"
-  runtime: crio
   network: {index: 0, nodes: 172.22.0.0/24, gateway: 172.22.0.254, pods: 10.244.0.0/21, services: 10.98.0.0/24}
   nodes: [{role: control-plane, name: demo-control-plane, ip: 172.22.0.1, join: true}]
 YAML

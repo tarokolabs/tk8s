@@ -8,7 +8,6 @@ kind: Cluster
 metadata: {name: demo}
 spec:
   kubernetes: "1.37.0"
-  runtime: crio
   network: {index: 3, nodes: 172.22.3.0/24, gateway: 172.22.3.254, pods: 10.244.24.0/21, services: 10.98.3.0/24, lb_range: 172.22.3.200-172.22.3.219}
   nodes:
     - {role: control-plane, name: demo-control-plane, ip: 172.22.3.1, cpu: 2, memory: 4g, join: true}
@@ -19,7 +18,7 @@ assert_contains "$out" "# ---- /etc/containers/systemd/demo/demo.network" "netwo
 assert_contains "$out" "Subnet=172.22.3.0/24" "network subnet"
 assert_contains "$out" "Gateway=172.22.3.254" "network gateway"
 assert_contains "$out" "# ---- /etc/containers/systemd/demo/demo-worker1.container" "worker unit path"
-assert_contains "$out" "Image=ghcr.io/tarokolabs/tk8s/node/crio:v1.37.0" "image from runtime and version"
+assert_contains "$out" "Image=ghcr.io/tarokolabs/tk8s/node:v1.37.0" "single node image, tagged by K8s version"
 assert_contains "$out" "IP=172.22.3.2" "worker ip"
 assert_contains "$out" "PodmanArgs=--privileged --cgroupns=private --cpus 4 --memory 8g" "per-node resources"
 assert_contains "$out" "After=demo-control-plane.service" "worker waits for control plane"

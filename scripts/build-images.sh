@@ -2,7 +2,7 @@
 # 建置並推送 tk8s 平台 image 至 GHCR（ghcr.io/tarokolabs/tk8s/*）
 #
 # 用法：
-#   build-images.sh node <K8s版本>...     # 每個版本建 node/crio 與 node/containerd
+#   build-images.sh node <K8s版本>...     # 每個版本建一個 node image（CRI-O）
 # （toolbox/admin 等叢集內 image 屬教材範疇，見 wulin repo 的 bin/build-images.sh）
 #
 # 環境變數：
@@ -41,8 +41,7 @@ node)
    shift
    [ "$1" == "" ] && echo "build-images.sh node <K8s版本>..." && exit 1
    for v in "$@"; do
-      build_push "node/containerd:v${v}" images/node/containerd --build-arg=VER=${v}
-      build_push "node/crio:v${v}"       images/node/crio       --build-arg=VER=${v}
+      build_push "node:v${v}" images/node --build-arg=VER=${v}
    done
    ;;
 *)

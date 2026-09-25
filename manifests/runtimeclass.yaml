@@ -1,5 +1,4 @@
-# RuntimeClass crun. CRI-O ships crun (default_runtime in crio.conf.d/10-taroko.conf);
-# containerd nodes get the binary and runtime table from addons:runtimeclass.
+# RuntimeClass crun. CRI-O ships crun (default_runtime in crio.conf.d/10-taroko.conf).
 # RuntimeClass gvisor is created by addons:gvisor only when the cluster was created with --gvisor.
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass

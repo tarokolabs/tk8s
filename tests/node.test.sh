@@ -9,7 +9,6 @@ metadata:
   name: demo
 spec:
   kubernetes: "1.37.0"
-  runtime: crio
   network:
     index: 3
     nodes: 172.22.3.0/24
@@ -67,7 +66,7 @@ out=$(task node:remove-entry CLUSTER=demo NODE=demo-control-plane 2>&1); rc=$?
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "cannot remove the first control plane"
 assert_contains "$out" "cannot be deleted" "first control plane message"
 out=$(task node:remove-entry CLUSTER=demo NODE=demo-nope 2>&1); assert_contains "$out" "not found" "remove unknown node message"
-# node:add must give the new node the same per-node addons create gave the others (crun on containerd, runsc on --gvisor).
+# node:add must give the new node the same per-node addons create gave the others (runsc on --gvisor clusters).
 STUB="$TMP/stub"; mkdir -p "$STUB"; export STUB STUB_LOG="$TMP/stub.log"; : > "$STUB_LOG"
 printf '#!/usr/bin/env bash\nexec "$@"\n' > "$STUB/sudo"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/systemctl"

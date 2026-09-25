@@ -5,7 +5,6 @@ metadata:
   name: ha
 spec:
   kubernetes: "1.37.0"
-  runtime: crio
   cni: cilium
   datapath: auto
   gvisor: false
@@ -66,7 +65,7 @@ PartOf=ha.target
 
 [Container]
 ContainerName=ha-control-plane
-Image=ghcr.io/tarokolabs/tk8s/node/crio:v1.37.0
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.0
 HostName=ha-control-plane
 Network=ha.network
 IP=172.22.0.1
@@ -102,7 +101,7 @@ After=ha-control-plane.service
 
 [Container]
 ContainerName=ha-control-plane2
-Image=ghcr.io/tarokolabs/tk8s/node/crio:v1.37.0
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.0
 HostName=ha-control-plane2
 Network=ha.network
 IP=172.22.0.2
@@ -138,7 +137,7 @@ After=ha-control-plane.service
 
 [Container]
 ContainerName=ha-control-plane3
-Image=ghcr.io/tarokolabs/tk8s/node/crio:v1.37.0
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.0
 HostName=ha-control-plane3
 Network=ha.network
 IP=172.22.0.3
@@ -174,7 +173,7 @@ After=ha-control-plane.service
 
 [Container]
 ContainerName=ha-worker1
-Image=ghcr.io/tarokolabs/tk8s/node/crio:v1.37.0
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.0
 HostName=ha-worker1
 Network=ha.network
 IP=172.22.0.4
@@ -210,7 +209,7 @@ After=ha-control-plane.service
 
 [Container]
 ContainerName=ha-worker2
-Image=ghcr.io/tarokolabs/tk8s/node/crio:v1.37.0
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.0
 HostName=ha-worker2
 Network=ha.network
 IP=172.22.0.5

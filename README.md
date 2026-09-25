@@ -13,13 +13,13 @@
 | 元件 | 說明 |
 |---|---|
 | Kubernetes | kubeadm 建立，預設 **1.37.0**，次新 1.36.4（見 `versions.yaml`） |
-| Container runtime | **CRI-O**（版本對齊 K8s minor）；可切換 containerd |
+| Container runtime | **CRI-O**（版本對齊 K8s minor）；只有一種節點 image |
 | CNI | **cilium** 1.20.2，kube-proxy replacement；datapath 預設在核心 ≥ 6.8 用 netkit，`--datapath veth` 可切 |
 | 負載平衡 | cilium LB-IPAM 加 L2 announcement，LoadBalancer IP 從節點網段的 `.200`–`.219` 配發 |
 | Gateway API | cilium 內建 controller，GatewayClass `cilium`，Gateway API v1.6.1 CRD（experimental channel，含 TCPRoute、UDPRoute） |
 | 高可用 | `--control-planes 3` 以上自動配 kube-vip VIP；多出來的 control plane 可以先不加入，留給練習 |
 | 節點生命週期 | Podman Quadlet 加 systemd：主機重開機叢集自動回來 |
-| RuntimeClass | `crun`（兩種 runtime 都有）；`--gvisor` 的叢集多一個 `gvisor`（handler `runsc`）。containerd 上的 `crun` 目前用 cgroupfs（image 沒有 D-Bus），這類 pod 不在 kubelet 的 pod 層級資源統計內 |
+| RuntimeClass | `crun`（CRI-O 內建）；`--gvisor` 的叢集多一個 `gvisor`（handler `runsc`） |
 | gVisor（選配） | `--gvisor` 時建叢集當場裝進每個節點，不烤在 image；需要 veth datapath，會自動選 |
 | 監控與儲存 | metrics-server（`kubectl top`）、local-path-provisioner（PVC 資料落在 `/opt/taroko/clusters/<名稱>/storage/`） |
 
@@ -37,7 +37,7 @@
 
 建叢集的流程與實體機上的 kubeadm 一致：建網路與節點容器、第一個 control plane `kubeadm init`、其餘節點 `kubeadm join`、裝 CNI。這是教學上想讓學員讀得懂的部分，所以全部是可讀的 shell。
 
-節點 image 為 `ghcr.io/tarokolabs/tk8s/node/<runtime>:v<K8s 版本>`，拉不到時以 `images/node/<runtime>` 的配方本地建置。
+節點 image 為 `ghcr.io/tarokolabs/tk8s/node:v<K8s 版本>`，拉不到時以 `images/node/` 的配方本地建置。
 
 ## 需求
 
@@ -123,7 +123,6 @@ metadata:
   name: tkdt
 spec:
   kubernetes: "1.37.0"
-  runtime: crio            # crio | containerd
   cni: cilium              # cilium | canal
   datapath: auto           # auto | netkit | veth
   gvisor: false
@@ -193,7 +192,7 @@ tkctl create cluster -f tkdt.yaml
 - 節點由 systemd 管，主機重開機叢集自動回來；v1 要手動 `kci`。
 - 多 control plane 真的會 join（v1 只放 kube-vip）。
 - 不再有 macvlan 外接節點、`tkport` DNAT 註解、`route-add`、`expose`；對外曝露改用 LoadBalancer 或 Gateway。
-- 只支援 systemd 主機，Alpine 不在範圍內。
+- 只支援 systemd 主機，Alpine 不在範圍內；節點只有 CRI-O，不再有 containerd 變體。
 
 ## 舊版
 

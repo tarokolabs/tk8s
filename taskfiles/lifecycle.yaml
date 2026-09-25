@@ -19,17 +19,16 @@ tasks:
         found=0
         for f in {{ .CLUSTERS_DIR }}/*/cluster.yaml; do
           [ -f "$f" ] || continue
-          [ $found -eq 0 ] && printf '%-12s %-7s %-8s %-11s %-9s %-9s %s\n' NAME NODES K8S RUNTIME DATAPATH STATE SUBNET
+          [ $found -eq 0 ] && printf '%-12s %-7s %-8s %-9s %-9s %s\n' NAME NODES K8S DATAPATH STATE SUBNET
           found=1
           d=$(dirname "$f"); n=$(basename "$d")
           k8s=$(grep -oE 'kubernetes: *"?[0-9.]+' "$f" | head -1 | tr -d '"' | awk '{print $2}')
-          rt=$(grep -oE 'runtime: *[a-z]+' "$f" | head -1 | awk '{print $2}')
           dp=$(grep -oE 'datapath_resolved: *[a-z]+' "$f" | head -1 | awk '{print $2}'); [ -n "$dp" ] || dp=$(grep -oE 'datapath: *[a-z]+' "$f" | head -1 | awk '{print $2}')
           cp=$(grep -c 'role: control-plane' "$f"); wk=$(grep -c 'role: worker' "$f")
           sub=$(grep -oE 'nodes: *172\.[0-9.]+/24' "$f" | head -1 | awk '{print $2}')
           if [ ! -f "$d/.create-complete" ]; then st=Creating
           elif systemctl is-active --quiet "$n.target" 2>/dev/null; then st=Running; else st=Stopped; fi
-          printf '%-12s %-7s %-8s %-11s %-9s %-9s %s\n' "$n" "${cp}+${wk}" "$k8s" "$rt" "$dp" "$st" "$sub"
+          printf '%-12s %-7s %-8s %-9s %-9s %s\n' "$n" "${cp}+${wk}" "$k8s" "$dp" "$st" "$sub"
         done
         [ $found -eq 1 ] || echo "no clusters"
 
@@ -50,7 +49,7 @@ tasks:
         state=$( [ -f {{ .STATE_DIR }}/.create-complete ] && (systemctl is-active --quiet {{ .CLUSTER }}.target && echo Running || echo Stopped) || echo Creating )
         echo "Name:        {{ .CLUSTER }}"
         echo "State:       $state"
-        echo "Kubernetes:  {{ .DEF.spec.kubernetes }}   runtime: {{ .DEF.spec.runtime }}   cni: {{ .DEF.spec.cni }}   datapath: {{ .DEF.spec.datapath_resolved | default .DEF.spec.datapath }}   gvisor: {{ .DEF.spec.gvisor }}"
+        echo "Kubernetes:  {{ .DEF.spec.kubernetes }}   cni: {{ .DEF.spec.cni }}   datapath: {{ .DEF.spec.datapath_resolved | default .DEF.spec.datapath }}   gvisor: {{ .DEF.spec.gvisor }}"
         echo "Network:     nodes {{ .DEF.spec.network.nodes }} (gateway {{ .DEF.spec.network.gateway }})  pods {{ .DEF.spec.network.pods }}  services {{ .DEF.spec.network.services }}  lb {{ .DEF.spec.network.lb_range }}{{ if .DEF.spec.network.vip }}  vip {{ .DEF.spec.network.vip }}{{ end }}"
         echo "Nodes:"
         printf '  %-24s %-14s %-14s %-14s %s\n' NAME ROLE IP RESOURCES JOIN

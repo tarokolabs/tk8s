@@ -3,7 +3,7 @@
 #      叢集內 image（toolbox/admin 等）屬教材，由 wulin repo 發佈
 #   2. 彙整 digest，生成 Release notes（image 對照表即相容性契約）
 #   3. 建立 GitHub Release（安裝用的 source archive 由 GitHub 自動附上）
-# 首次設定：node/crio 與 node/containerd 兩個 package 的
+# 首次設定：node package 的
 # Manage Actions access 需把本 repo 加為 Write，GITHUB_TOKEN 才推得動。
 name: release
 
@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: 登入 GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
-      - name: 建置並推送節點 image（兩個 runtime 變體）
+      - name: 建置並推送節點 image
         run: TK="$GITHUB_WORKSPACE" SUDO="" DIGEST_DIR="$GITHUB_WORKSPACE/digests" scripts/build-images.sh node "${{ matrix.k8s }}"
       - uses: actions/upload-artifact@v4
         with:
@@ -68,7 +68,7 @@ jobs:
             echo "| 元件 | 版本 |"
             echo "|---|---|"
             echo "| Kubernetes（kubeadm）| 主要支援最新與次新 minor——本版節點 image：1.36.4、1.37.0（更舊版本可本地建置）|"
-            echo "| Container runtime | CRI-O（對齊 K8s minor）；可切換 containerd |"
+            echo "| Container runtime | CRI-O（對齊 K8s minor） |"
             echo "| CNI | cilium ${CILIUM}（kube-proxy replacement + LB-IPAM/L2）|"
             echo "| Gateway API | cilium 內建 controller（Gateway API ${GWAPI}，experimental channel CRD）|"
             echo "| 儲存 | local-path-provisioner |"

@@ -17,7 +17,7 @@ tasks:
       PODS: '{{ .DEF.spec.network.pods }}'
       SERVICES: '{{ .DEF.spec.network.services }}'
       VIP: '{{ .DEF.spec.network.vip | default "" }}'
-      CRI_SOCKET: '{{ if eq .DEF.spec.runtime "crio" }}unix:///var/run/crio/crio.sock{{ else }}unix:///run/containerd/containerd.sock{{ end }}'
+      CRI_SOCKET: 'unix:///var/run/crio/crio.sock'
       OUT: '{{ if eq .DRY_RUN "true" }}/dev/stdout{{ else }}{{ .STATE_DIR }}/init-config.yaml{{ end }}'
     cmds:
       - |

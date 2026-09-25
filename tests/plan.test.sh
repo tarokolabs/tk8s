@@ -28,7 +28,7 @@ assert_contains "$out" "name: demo-control-plane" "first control plane name"
 assert_contains "$out" "name: demo-worker2" "workers expanded from count"
 assert_contains "$out" "ip: 172.22.1.3" "third node ip"
 assert_contains "$out" 'kubernetes: "1.37.0"' "default kubernetes version filled in"
-assert_contains "$out" "runtime: crio" "default runtime"
+if [[ "$out" == *"runtime:"* ]]; then echo "FAIL  no runtime field (CRI-O only)"; FAILURES=$((FAILURES+1)); else echo "PASS  no runtime field (CRI-O only)"; fi
 assert_contains "$out" "join: true" "join defaults to true"
 # HA
 sed -i.bak 's/role: control-plane, cpu: 2/role: control-plane, count: 3, cpu: 2/' "$TMP/in.yaml"
@@ -75,7 +75,7 @@ bad "no control plane" '  nodes: [{role: worker, count: 2}]' "control-plane"
 bad "worker listed first" '  nodes: [{role: worker}, {role: control-plane}]' "first"
 bad "even control-plane count" '  nodes: [{role: control-plane, count: 2}]' "odd"
 bad "gvisor with netkit" '  gvisor: true\n  datapath: netkit\n  nodes: [{role: control-plane}]' "netkit"
-bad "unknown runtime" '  runtime: docker\n  nodes: [{role: control-plane}]' "runtime"
+bad "runtime key from a v2 pre-release file" '  runtime: crio\n  nodes: [{role: control-plane}]' "CRI-O"
 printf 'metadata: {name: gv}\nspec:\n  gvisor: true\n  nodes: [{role: control-plane}]\n' > "$TMP/gv.yaml"
 out=$(task plan:resolve CLUSTER_FILE="$TMP/gv.yaml" DRY_RUN=true 2>&1)
 assert_contains "$out" "datapath: veth" "gvisor without an explicit datapath resolves to veth (sandboxes have no network under netkit)"

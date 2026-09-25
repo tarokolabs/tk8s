@@ -15,7 +15,7 @@ tasks:
       DEF_RAW: { sh: 'cat {{ .CLUSTER_YAML }}' }
       DEF: { ref: fromYaml .DEF_RAW }
       NODES: { ref: .DEF.spec.nodes }
-      IMAGE: 'ghcr.io/tarokolabs/tk8s/node/{{ .DEF.spec.runtime }}:v{{ .DEF.spec.kubernetes }}'
+      IMAGE: 'ghcr.io/tarokolabs/tk8s/node:v{{ .DEF.spec.kubernetes }}'
       CP_NAME: '{{ .CLUSTER }}-control-plane'
       CP_IP: '{{ (index .DEF.spec.nodes 0).ip }}'
     cmds:
@@ -105,14 +105,14 @@ tasks:
       CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
       DEF_RAW: { sh: 'cat {{ .CLUSTER_YAML }}' }
       DEF: { ref: fromYaml .DEF_RAW }
-      IMAGE: 'ghcr.io/tarokolabs/tk8s/node/{{ .DEF.spec.runtime }}:v{{ .DEF.spec.kubernetes }}'
+      IMAGE: 'ghcr.io/tarokolabs/tk8s/node:v{{ .DEF.spec.kubernetes }}'
     status:
       - sudo podman image exists {{ .IMAGE }}
     cmds:
       - |
         if sudo podman pull {{ .IMAGE }} >/dev/null 2>&1; then echo "{{ .IMAGE }} pulled"; else
           echo "{{ .IMAGE }} is not published; building locally (the first build takes a few minutes)"
-          sudo podman build --build-arg VER={{ .DEF.spec.kubernetes }} --force-rm -t {{ .IMAGE }} {{ .TK_HOME }}/images/node/{{ .DEF.spec.runtime }}
+          sudo podman build --build-arg VER={{ .DEF.spec.kubernetes }} --force-rm -t {{ .IMAGE }} {{ .TK_HOME }}/images/node
         fi
 
   cni-plugins:
@@ -162,9 +162,8 @@ tasks:
       - sudo systemctl reset-failed "{{ .CLUSTER }}*" 2>/dev/null || true
       - sudo systemctl enable --now --quiet {{ .CLUSTER }}.target
       - |
-        # Wait for systemd inside each node, then for the container runtime: kubeadm preflight
+        # Wait for systemd inside each node, then for CRI-O: kubeadm preflight
         # fails if the CRI socket is not up yet (the first start also copies /etc into its volume).
-        cri={{ if eq .DEF.spec.runtime "crio" }}crio{{ else }}containerd{{ end }}
         for n in {{ range .NODES }}{{ .name }} {{ end }}; do
           for i in $(seq 1 90); do
             s=$(sudo podman exec "$n" systemctl is-system-running 2>/dev/null || true)
@@ -173,8 +172,8 @@ tasks:
             sleep 2
           done
           for i in $(seq 1 60); do
-            if sudo podman exec "$n" systemctl is-active --quiet $cri 2>/dev/null; then echo "$n: systemd $s, $cri active"; break; fi
-            [ $i -eq 60 ] && { echo "$n: $cri did not become active (podman exec $n journalctl -u $cri)" >&2; exit 1; }
+            if sudo podman exec "$n" systemctl is-active --quiet crio 2>/dev/null; then echo "$n: systemd $s, crio active"; break; fi
+            [ $i -eq 60 ] && { echo "$n: crio did not become active (podman exec $n journalctl -u crio)" >&2; exit 1; }
             sleep 2
           done
         done
