@@ -50,6 +50,9 @@ tasks:
           fi
           used=$(grep -hsoE 'index: *[0-9]+' {{ .CLUSTERS_DIR }}/*/cluster.yaml 2>/dev/null | awk '{print $2}')
           n=0; while echo "$used" | grep -qx "$n"; do n=$((n+1)); done; echo $n
+      # cni:install records the datapath it resolved; a resume must not lose it when rewriting the file.
+      DATAPATH_RESOLVED:
+        sh: '[ -f "{{ .CLUSTER_YAML }}" ] && grep -oE "datapath_resolved: *[a-z]+" "{{ .CLUSTER_YAML }}" | awk "{print \$2}" || true'
       OVERLAP:
         sh: |
           [ -f "{{ .CLUSTER_YAML }}" ] && { echo no; exit 0; }
@@ -104,6 +107,9 @@ tasks:
           kubernetes: "{{ .K8S }}"
           cni: {{ .CNI }}
           datapath: {{ .DATAPATH }}
+        {{- if .DATAPATH_RESOLVED }}
+          datapath_resolved: {{ .DATAPATH_RESOLVED }}
+        {{- end }}
           gvisor: {{ .GVISOR }}
           network:
             index: {{ .INDEX }}

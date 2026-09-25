@@ -44,9 +44,10 @@ YAML
 out=$(task plan:resolve CLUSTER_FILE="$TMP/in3.yaml" DRY_RUN=true 2>&1)
 assert_eq "2" "$(echo "$out" | grep -c "join: false")" "join: false carried per node"
 # resume keeps index
-mkdir -p "$TMP/clusters/demo"; printf 'metadata: {name: demo}\nspec:\n  network: {index: 7}\n  nodes: []\n' > "$TMP/clusters/demo/cluster.yaml"
+mkdir -p "$TMP/clusters/demo"; printf 'metadata: {name: demo}\nspec:\n  datapath: auto\n  datapath_resolved: netkit\n  network: {index: 7}\n  nodes: []\n' > "$TMP/clusters/demo/cluster.yaml"
 out=$(task plan:resolve CLUSTER_FILE="$TMP/in.yaml" DRY_RUN=true 2>&1)
 assert_contains "$out" "index: 7" "resume keeps the existing index"
+assert_contains "$out" "datapath_resolved: netkit" "resume keeps the resolved datapath recorded by cni:install"
 rm -rf "$TMP/clusters/demo"
 # overlap
 cat > "$TMP/in2.yaml" <<'YAML'
