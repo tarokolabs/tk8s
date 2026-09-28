@@ -51,24 +51,16 @@
 | 網路 | 需連外：下載節點 image、CNI plugins、cilium CLI、Gateway API CRD |
 | 其他 | `curl`、`git` |
 
-`task` 與 `kubectl` 兩個執行檔目前要自己放到 `/usr/local/bin`（見下一節）；一行安裝腳本會在 v2 完成前補上。
+`task` 與 `kubectl` 由 `install.sh` 下載到 `/usr/local/bin`。
 
-## 安裝（v2 開發期間）
+## 安裝
 
 ```bash
-# 1. 兩個執行檔
-v=$(curl -fsSL https://raw.githubusercontent.com/tarokolabs/tk8s/v2/versions.yaml | grep '^task:' | awk '{print $2}' | tr -d '"')
-curl -fsSL https://github.com/go-task/task/releases/download/${v}/task_linux_amd64.tar.gz | sudo tar -xz -C /usr/local/bin task
-k=$(curl -fsSL https://raw.githubusercontent.com/tarokolabs/tk8s/v2/versions.yaml | grep -A1 '^kubernetes:' | grep default | awk '{print $2}' | tr -d '"')
-sudo curl -fsSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/v${k}/bin/linux/amd64/kubectl" && sudo chmod +x /usr/local/bin/kubectl
-
-# 2. 平台
-git clone --branch v2 https://github.com/tarokolabs/tk8s.git ~/tk
-sudo ln -sf ~/tk/bin/tkctl /usr/local/bin/tkctl
-
-# 3. 第一個叢集：1 個 control plane、2 個 worker、每節點 2 CPU 4G
+curl -fsSL https://raw.githubusercontent.com/tarokolabs/tk8s/main/install.sh | sh
 tkctl create cluster
 ```
+
+`install.sh` 做四件事，可重跑：檢查前置條件（podman ≥ 5.4、systemd、cgroup v2、swap 關閉、免密碼 sudo、curl、git）；依 `versions.yaml` 下載 `task` 與 `kubectl` 到 `/usr/local/bin` 並驗 checksum；clone 到 `/opt/taroko/tk8s`；把 `tkctl` 連結到 `/usr/local/bin`。`TK_VERSION=v2026.10.0 sh` 釘版本；開發者可以 clone 到任何位置直接用 `bin/tkctl`。
 
 約四分鐘後印出 `cluster tk8s is ready`。接著：
 
