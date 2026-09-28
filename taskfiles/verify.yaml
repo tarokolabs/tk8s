@@ -110,7 +110,7 @@ tasks:
            && [ "$(kubectl logs -n $NS writer 2>/dev/null)" = "verify-ok" ]; then
           ok "PVC bound and pod wrote data"
           pv=$(kubectl get pvc -n $NS pvc -o jsonpath='{.spec.volumeName}')
-          if sudo ls -d {{ .STATE_DIR }}/storage/${pv}_* >/dev/null 2>&1; then ok "PV data on host ({{ .STATE_DIR }}/storage)"; else ng "PV data on host" "no {{ .STATE_DIR }}/storage/${pv}_*"; fi
+          if ls -d {{ .STATE_DIR }}/storage/${pv}_* >/dev/null 2>&1; then ok "PV data on host ({{ .STATE_DIR }}/storage)"; else ng "PV data on host" "no {{ .STATE_DIR }}/storage/${pv}_*"; fi
         else
           ng "PVC / writer pod" "$(kubectl get pvc -n $NS pvc --no-headers 2>/dev/null | awk '{print "pvc "$2}'); $(kubectl get pod -n $NS writer -o jsonpath='{.status.phase}' 2>/dev/null)"
         fi

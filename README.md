@@ -47,7 +47,7 @@
 | 容器引擎 | **podman ≥ 5.4** |
 | cgroup | v2 |
 | swap | 必須關閉：`sudo swapoff -a`，並註解 `/etc/fstab` 的 swap 行 |
-| 權限 | `sudo` 免密碼 |
+| 權限 | `sudo` 免密碼。只用在必要處：`podman` 與 `systemctl`（節點是系統層級的 Quadlet unit）、寫 `/etc` 的 unit 與 sysctl 檔、寫 `/usr/local/bin`、第一次建立 `/opt/taroko`（之後歸使用者擁有）、刪叢集時清掉節點以 root 寫下的資料 |
 | 網路 | 需連外：下載節點 image、CNI plugins、cilium CLI、Gateway API CRD |
 | 主機防火牆 | 前置檢查會把主機的 `net.bridge.bridge-nf-call-iptables` 設為 0 並寫入 `/etc/sysctl.d/90-tk8s.conf`：節點之間的橋接流量不經主機 iptables，否則裝了 Docker 的主機（FORWARD 預設 DROP）會擋掉 pod 到其他節點的流量 |
 | 其他 | `curl`、`git` |

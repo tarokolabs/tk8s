@@ -50,8 +50,8 @@ tasks:
         task --silent -d {{ .TK_HOME }} kubeadm:render CLUSTER={{ .CLUSTER }} DRY_RUN=true CLUSTERS_DIR=$tmp/clusters
         rm -rf $tmp
         {{ else }}
-        task --silent -d {{ .TK_HOME }} plan:resolve CLUSTER_FILE={{ .CLUSTER_FILE }} ALLOW_OVERLAP={{ .ALLOW_OVERLAP }}
         task --silent -d {{ .TK_HOME }} preflight:check
+        task --silent -d {{ .TK_HOME }} plan:resolve CLUSTER_FILE={{ .CLUSTER_FILE }} ALLOW_OVERLAP={{ .ALLOW_OVERLAP }}
         task --silent -d {{ .TK_HOME }} nodes:up CLUSTER={{ .CLUSTER }}
         task --silent -d {{ .TK_HOME }} kubeadm:bootstrap CLUSTER={{ .CLUSTER }}
         task --silent -d {{ .TK_HOME }} cni:install CLUSTER={{ .CLUSTER }}

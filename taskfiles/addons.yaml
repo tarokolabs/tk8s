@@ -43,7 +43,7 @@ tasks:
         {{ range .DEF.spec.nodes }}if ! sudo podman exec {{ .name }} test -e {{ $.MARKER }}; then need=1; fi
         {{ end }}
         if [ $need -eq 1 ] && [ ! -f {{ .CACHE }}/{{ .TARBALL }} ]; then
-          mkdir -p {{ .CACHE }} 2>/dev/null || { sudo mkdir -p {{ .CACHE }} && sudo chown "$(id -u):$(id -g)" {{ .CACHE }}; }
+          mkdir -p {{ .CACHE }}
           curl -fsSL -o {{ .CACHE }}/gvisor.tar.zstd {{ .URL }}/gvisor.tar.zstd
           curl -fsSL -o {{ .CACHE }}/gvisor.tar.zstd.sha512 {{ .URL }}/gvisor.tar.zstd.sha512
           (cd {{ .CACHE }} && sha512sum -c gvisor.tar.zstd.sha512 >/dev/null) || { rm -f {{ .CACHE }}/gvisor.tar.zstd*; echo "gvisor.tar.zstd checksum mismatch" >&2; exit 1; }

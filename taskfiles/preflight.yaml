@@ -22,4 +22,10 @@ tasks:
         sudo sysctl -qw net.bridge.bridge-nf-call-iptables=0 net.bridge.bridge-nf-call-ip6tables=0 || fail "cannot set net.bridge.bridge-nf-call-iptables"
         printf 'br_netfilter\n' | sudo tee /etc/modules-load.d/tk8s.conf >/dev/null
         printf '# tk8s: bridged frames between cluster nodes bypass the host firewall (Docker sets FORWARD DROP)\nnet.bridge.bridge-nf-call-iptables = 0\nnet.bridge.bridge-nf-call-ip6tables = 0\n' | sudo tee /etc/sysctl.d/90-tk8s.conf >/dev/null
-        echo "preflight ok: podman $v, systemd, cgroup v2, swap off, host bridge-nf off"
+        # Everything under TK_DATA_DIR belongs to the user running tkctl; only creating it under /opt
+        # needs root. Nodes (root inside their containers) write into it regardless of ownership.
+        for d in {{ .TK_DATA_DIR }} {{ .CLUSTERS_DIR }} {{ .CNI_DIR }} {{ .TK_DATA_DIR }}/cache; do
+          [ -d "$d" ] || sudo install -d -o "$(id -u)" -g "$(id -g)" "$d"
+          [ -w "$d" ] || sudo chown "$(id -u):$(id -g)" "$d"
+        done
+        echo "preflight ok: podman $v, systemd, cgroup v2, swap off, host bridge-nf off, {{ .TK_DATA_DIR }} owned by $(id -un)"

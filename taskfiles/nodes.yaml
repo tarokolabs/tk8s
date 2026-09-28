@@ -120,10 +120,12 @@ tasks:
     cmds:
       - |
         set -e
-        sudo mkdir -p {{ .CNI_DIR }}
+        mkdir -p {{ .CNI_DIR }}
+        # Plugins installed by an earlier root-run tkctl are root-owned; take them over once.
+        [ ! -e {{ .CNI_DIR }}/bridge ] || [ -w {{ .CNI_DIR }}/bridge ] || sudo chown -R "$(id -u):$(id -g)" {{ .CNI_DIR }}
         tmp=$(mktemp -d)
         curl -fsSL https://github.com/containernetworking/plugins/releases/download/{{ .VERSIONS.cni_plugins }}/cni-plugins-linux-amd64-{{ .VERSIONS.cni_plugins }}.tgz | tar -xz -C "$tmp"
-        sudo cp -a "$tmp"/. {{ .CNI_DIR }}/
+        cp -a "$tmp"/. {{ .CNI_DIR }}/
         rm -rf "$tmp"
         echo "CNI plugins $( {{ .CNI_DIR }}/bridge --version 2>/dev/null | head -1 ) in {{ .CNI_DIR }}"
     status:
@@ -147,7 +149,8 @@ tasks:
     cmds:
       - task: render
         vars: { CLUSTER: '{{ .CLUSTER }}' }
-      - sudo mkdir -p {{ .STATE_DIR }}/storage {{ .STATE_DIR }}/logs {{ .TK_WULIN_DIR }}
+      - mkdir -p {{ .STATE_DIR }}/storage {{ .STATE_DIR }}/logs
+      - '[ -d {{ .TK_WULIN_DIR }} ] || sudo install -d -o "$(id -u)" -g "$(id -g)" {{ .TK_WULIN_DIR }}'
       - |
         # A leftover <node>-var volume from an earlier cluster carries old kubelet/etcd
         # state and makes kubeadm preflight fail. Drop it when the node container is new.

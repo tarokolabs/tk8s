@@ -25,5 +25,8 @@ assert_eq "0" "$rc" "preflight passes on a good host"
 assert_contains "$(cat "$STUB_LOG")" "sysctl -qw net.bridge.bridge-nf-call-iptables=0 net.bridge.bridge-nf-call-ip6tables=0" "bridged frames on the host stay out of the host firewall (Docker's FORWARD DROP)"
 assert_contains "$(cat "$TMP/etc/sysctl.d/90-tk8s.conf" 2>/dev/null)" "net.bridge.bridge-nf-call-iptables = 0" "setting persisted for reboots"
 assert_contains "$(cat "$TMP/etc/modules-load.d/tk8s.conf" 2>/dev/null)" "br_netfilter" "br_netfilter loaded at boot so the sysctl applies"
+assert_contains "$(cat "$STUB_LOG")" "sudo install -d -o $(id -u) -g $(id -g) $TMP/clusters" "data tree created for the user (clusters)"
+assert_contains "$(cat "$STUB_LOG")" "sudo install -d -o $(id -u) -g $(id -g) $TMP/cni" "data tree created for the user (cni)"
+if [ -d "$TMP/clusters" ] && [ -w "$TMP/cache" ]; then echo "PASS  data tree exists and is writable"; else echo "FAIL  data tree exists and is writable"; FAILURES=$((FAILURES+1)); fi
 assert_contains "$out" "preflight ok" "summary line"
 rm -rf "$TMP"; finish
