@@ -94,6 +94,8 @@ tkctl delete node <叢集> <節點> [--yes]
 tkctl version
 ```
 
+`PATH` 上任何叫 `tkctl-<名字>` 的執行檔會變成 `tkctl <名字>`（規則同 kubectl 的 plugin：最長匹配、內建動詞優先），例如講師工具 [tarokolabs/lab](https://github.com/tarokolabs/lab) 提供的 `tkctl lab`。
+
 幾個規則：
 
 - 名稱省略是 `tk8s`。名稱進節點名（`tk8s-control-plane`、`tk8s-worker1`）與叢集 DNS 網域（`tk8s.k8s`），格式 `^[a-z][a-z0-9-]{0,15}$`。

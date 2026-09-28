@@ -48,6 +48,18 @@ out=$($T create cluster demo --memory 4096M --dry-run 2>&1); assert_contains "$o
 assert_fails "control-planes 0 is rejected" $T create cluster demo --control-planes 0 --dry-run
 assert_fails "control-planes 2 (even) is rejected" $T create cluster demo --control-planes 2 --dry-run
 assert_fails "unknown verb" $T frobnicate cluster demo
+# CLI plugins, kubectl rules: tkctl-<a>-<b> before tkctl-<a>, longest match, built-in verbs win.
+PLUG="$TMP/plugins"; mkdir -p "$PLUG"
+printf '#!/usr/bin/env bash\necho "hello: $*"\n' > "$PLUG/tkctl-hello"
+printf '#!/usr/bin/env bash\necho "hello-world: $*"\n' > "$PLUG/tkctl-hello-world"
+printf '#!/usr/bin/env bash\necho "never"\n' > "$PLUG/tkctl-create"; chmod +x "$PLUG"/tkctl-*
+out=$(PATH="$PLUG:$PATH" $T hello create class k8s-101 --students 3 2>&1); rc=$?
+assert_eq "0" "$rc" "plugin exits with the plugin's status"
+assert_eq "hello: create class k8s-101 --students 3" "$out" "tkctl-hello receives the remaining arguments verbatim"
+out=$(PATH="$PLUG:$PATH" $T hello world a --x 2>&1); assert_eq "hello-world: a --x" "$out" "longest match wins (tkctl-hello-world)"
+out=$(PATH="$PLUG:$PATH" $T create cluster --dry-run 2>&1); assert_contains "$out" "name: tk8s" "a plugin cannot shadow a built-in verb"
+out=$(PATH="$PLUG:$PATH" $T --help 2>&1); assert_contains "$out" "Plugins found on PATH: create hello hello-world" "help lists plugins"
+assert_fails "unknown verb without a plugin still fails" env PATH="$PLUG:$PATH" $T frobnicate cluster demo
 assert_fails "unknown flag" $T create cluster demo --colour red --dry-run
 out=$($T --help 2>&1); assert_contains "$out" "create cluster" "help lists create"
 assert_contains "$out" "add node" "help lists add node"

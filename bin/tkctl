@@ -52,9 +52,22 @@ Environment:
   TK_TASK                path to the go-task binary (default: task from PATH)
   TK_VERIFY_TIMEOUT      seconds to wait for each verify check (default 180)
 USAGE
+  local plugins; plugins=$(compgen -c tkctl- 2>/dev/null | sed 's/^tkctl-//' | sort -u | paste -sd' ' -)
+  [ -z "$plugins" ] || echo "Plugins found on PATH: $plugins   (tkctl <plugin> ...)"
 }
 
 die() { echo "tkctl: $*" >&2; exit 1; }
+
+# kubectl-style plugins: tkctl a b c ... runs tkctl-a-b-c, tkctl-a-b or tkctl-a from PATH (longest
+# match) with the unused arguments; built-in verbs are dispatched before this is reached.
+run_plugin() {
+  local words=() a n name
+  for a in "$@"; do case "$a" in -*) break ;; *) words+=("$a") ;; esac; done
+  for ((n=${#words[@]}; n>0; n--)); do
+    name=$(IFS=-; echo "tkctl-${words[*]:0:n}")
+    if command -v "$name" >/dev/null 2>&1; then shift "$n"; exec "$name" "$@"; fi
+  done
+}
 
 run_task() { "$TK_TASK" --silent -d "$TK_HOME" "$@" || exit 1; }  # normalize go-task exit codes (e.g. 201) to 1
 
@@ -187,7 +200,7 @@ main() {
     version)  echo "tkctl $(git -C "$TK_HOME" describe --tags --always 2>/dev/null || echo dev)"
               echo "kubernetes default $(sed -nE 's/^\s+default:\s*"([^"]+)"/\1/p' "$TK_HOME/versions.yaml")" ;;
     -h|--help|help) usage ;;
-    *) die "unknown command '$1' (see tkctl --help)" ;;
+    *) run_plugin "$@"; die "unknown command '$1' (see tkctl --help)" ;;
   esac
 }
 main "$@"
