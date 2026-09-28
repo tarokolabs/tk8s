@@ -31,5 +31,5 @@ rm -f "$STUB/cat-fail"
 out=$(PATH="$STUB:$PATH" task kubeadm:init CLUSTER=demo 2>&1); rc=$?
 assert_eq "0" "$rc" "init succeeds when admin.conf is readable"
 assert_contains "$(cat "$TMP/clusters/demo/kubeconfig")" "kind: Config" "kubeconfig holds admin.conf"
-assert_eq "600" "$(stat -f %Lp "$TMP/clusters/demo/kubeconfig" 2>/dev/null || stat -c %a "$TMP/clusters/demo/kubeconfig")" "kubeconfig is 0600"
+assert_eq "600" "$(if stat -c %a /dev/null >/dev/null 2>&1; then stat -c %a "$TMP/clusters/demo/kubeconfig"; else stat -f %Lp "$TMP/clusters/demo/kubeconfig"; fi)" "kubeconfig is 0600"
 rm -rf "$TMP"; finish
