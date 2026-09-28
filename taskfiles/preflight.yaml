@@ -20,8 +20,11 @@ tasks:
         # pod-to-node traffic (pod IPs match no netavark rule). Keep host-bridge frames out of the host
         # firewall; nodes set their own bridge-nf sysctls inside their network namespaces.
         sudo sysctl -qw net.bridge.bridge-nf-call-iptables=0 net.bridge.bridge-nf-call-ip6tables=0 || fail "cannot set net.bridge.bridge-nf-call-iptables"
+        # A node's network namespace copies the host's IPv4 forwarding flag when it is created; a
+        # fresh cloud image boots with it off and kubeadm's preflight then fails inside every node.
+        sudo sysctl -qw net.ipv4.ip_forward=1 || fail "cannot set net.ipv4.ip_forward"
         printf 'br_netfilter\n' | sudo tee /etc/modules-load.d/tk8s.conf >/dev/null
-        printf '# tk8s: bridged frames between cluster nodes bypass the host firewall (Docker sets FORWARD DROP)\nnet.bridge.bridge-nf-call-iptables = 0\nnet.bridge.bridge-nf-call-ip6tables = 0\n' | sudo tee /etc/sysctl.d/90-tk8s.conf >/dev/null
+        printf '# tk8s: bridged frames between cluster nodes bypass the host firewall (Docker sets FORWARD DROP)\nnet.bridge.bridge-nf-call-iptables = 0\nnet.bridge.bridge-nf-call-ip6tables = 0\n# tk8s: node network namespaces inherit this at creation\nnet.ipv4.ip_forward = 1\n' | sudo tee /etc/sysctl.d/90-tk8s.conf >/dev/null
         # Everything under TK_DATA_DIR belongs to the user running tkctl; only creating it under /opt
         # needs root. Nodes (root inside their containers) write into it regardless of ownership.
         # Only a root-owned directory (an earlier root-run tkctl) is taken over; another user's is refused.
@@ -32,4 +35,4 @@ tasks:
             else fail "$d is owned by $(stat -c %U "$d"), not $(id -un); set TK_DATA_DIR to a directory of your own or fix its ownership"; fi
           fi
         done
-        echo "preflight ok: podman $v, systemd, cgroup v2, swap off, host bridge-nf off, {{ .TK_DATA_DIR }} owned by $(id -un)"
+        echo "preflight ok: podman $v, systemd, cgroup v2, swap off, host bridge-nf off, ip_forward on, {{ .TK_DATA_DIR }} owned by $(id -un)"
