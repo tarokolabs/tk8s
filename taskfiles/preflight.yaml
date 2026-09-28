@@ -9,10 +9,17 @@ tasks:
         command -v podman >/dev/null || fail "podman not found (podman >= 5.4 is required)"
         v=$(podman --version | awk '{print $3}'); maj=${v%%.*}; min=${v#*.}; min=${min%%.*}
         [ "$maj" -gt 5 ] || { [ "$maj" -eq 5 ] && [ "$min" -ge 4 ]; } || fail "podman $v is too old (>= 5.4 required)"
-        [ -d /run/systemd/system ] || fail "systemd is not running (tk8s v2 supports systemd hosts only)"
+        { [ -d /run/systemd/system ] || systemctl is-system-running >/dev/null 2>&1; } || fail "systemd is not running (tk8s v2 supports systemd hosts only)"
         [ "$(stat -fc %T /sys/fs/cgroup)" == "cgroup2fs" ] || fail "cgroup v2 is required"
         [ -z "$(swapon --show --noheadings 2>/dev/null)" ] || fail "swap is enabled; run: sudo swapoff -a and comment the swap line in /etc/fstab"
         sudo -n true 2>/dev/null || fail "sudo without a password prompt is required for podman and systemd operations"
         command -v curl >/dev/null || fail "curl not found"
         lsmod | grep -q br_netfilter || sudo modprobe br_netfilter || fail "cannot load br_netfilter"
-        echo "preflight ok: podman $v, systemd, cgroup v2, swap off"
+        # kubeadm needs br_netfilter loaded, but with it the host's iptables FORWARD chain also sees
+        # bridged frames between nodes. Docker sets that chain's policy to DROP, which silently kills
+        # pod-to-node traffic (pod IPs match no netavark rule). Keep host-bridge frames out of the host
+        # firewall; nodes set their own bridge-nf sysctls inside their network namespaces.
+        sudo sysctl -qw net.bridge.bridge-nf-call-iptables=0 net.bridge.bridge-nf-call-ip6tables=0 || fail "cannot set net.bridge.bridge-nf-call-iptables"
+        printf 'br_netfilter\n' | sudo tee /etc/modules-load.d/tk8s.conf >/dev/null
+        printf '# tk8s: bridged frames between cluster nodes bypass the host firewall (Docker sets FORWARD DROP)\nnet.bridge.bridge-nf-call-iptables = 0\nnet.bridge.bridge-nf-call-ip6tables = 0\n' | sudo tee /etc/sysctl.d/90-tk8s.conf >/dev/null
+        echo "preflight ok: podman $v, systemd, cgroup v2, swap off, host bridge-nf off"

@@ -16,6 +16,8 @@ kube_vip: "v1.0.1"
 task: "v3.53.1"
 # crun for the L3 runner only (Ubuntu 24.04 ships 1.14, too old for podman 5); nodes get crun from CRI-O
 crun: "1.29.1"
+# podman built from source on the L3 runner (Ubuntu 24.04 ships 4.9); hosts need >= 5.4
+podman: "5.4.2"
 # Images used by tkctl verify's test pods
 verify_busybox: "docker.io/library/busybox:1.37.0"
 verify_alpine: "docker.io/library/alpine:3.22"

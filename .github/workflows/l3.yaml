@@ -42,7 +42,8 @@ jobs:
           crun_v=$(sed -nE 's/^crun: *"([^"]+)"/\1/p' versions.yaml)
           sudo curl -fsSL -o /usr/local/bin/crun "https://github.com/containers/crun/releases/download/${crun_v}/crun-${crun_v}-linux-amd64"
           sudo chmod 755 /usr/local/bin/crun; crun --version | head -1
-          git clone --quiet --depth 1 --branch v${PODMAN_VERSION} https://github.com/containers/podman.git /tmp/podman
+          podman_v=$(sed -nE 's/^podman: *"([^"]+)"/\1/p' versions.yaml)
+          git clone --quiet --depth 1 --branch "v${podman_v}" https://github.com/containers/podman.git /tmp/podman
           make -C /tmp/podman -j"$(nproc)" BUILDTAGS="seccomp systemd" binaries
           sudo make -C /tmp/podman install.bin install.systemd
           sudo ln -sfn /usr/local/lib/systemd/system-generators/podman-system-generator /etc/systemd/system-generators/podman-system-generator || true
@@ -50,8 +51,6 @@ jobs:
           sudo swapoff -a
           sudo -n true
           free -g; nproc; uname -r
-        env:
-          PODMAN_VERSION: "5.4.2"
       - name: Install tk8s with install.sh from this checkout
         run: TK_VERSION="${GITHUB_REF_NAME}" TK_REPO="$GITHUB_WORKSPACE" TK_RAW="file://$GITHUB_WORKSPACE" sh install.sh
       - name: Create a cluster
@@ -71,8 +70,9 @@ jobs:
           export KUBECONFIG=/opt/taroko/clusters/ci/kubeconfig
           kubectl get pods -A -o wide > logs/pods.txt 2>&1 || true
           # pod-level reachability of the API ClusterIP from each node, cilium service map, host firewall
+          probe_img=$(sed -nE 's/^verify_alpine: *"([^"]+)"/\1/p' versions.yaml)
           for n in ci-control-plane ci-worker1; do
-            kubectl run "probe-$n" --image=docker.io/library/alpine:3.22 --restart=Never --overrides="{\"spec\":{\"nodeName\":\"$n\"}}" -- sh -c 'wget -qO- -T 5 --no-check-certificate https://10.98.0.1/version 2>&1 | head -c 200; echo; wget -qO- -T 5 --no-check-certificate https://172.22.0.1:6443/version 2>&1 | head -c 200' >/dev/null 2>&1 || true
+            kubectl run "probe-$n" --image="$probe_img" --restart=Never --overrides="{\"spec\":{\"nodeName\":\"$n\"}}" -- sh -c 'wget -qO- -T 5 --no-check-certificate https://10.98.0.1/version 2>&1 | head -c 200; echo; wget -qO- -T 5 --no-check-certificate https://172.22.0.1:6443/version 2>&1 | head -c 200' >/dev/null 2>&1 || true
           done; sleep 20
           for n in ci-control-plane ci-worker1; do { echo "== probe on $n (ClusterIP then node IP)"; kubectl logs "probe-$n" 2>&1; } >> logs/probes.txt; done
           c=$(kubectl -n kube-system get pods -l k8s-app=cilium -o jsonpath='{.items[0].metadata.name}'); kubectl -n kube-system exec "$c" -- cilium-dbg service list > logs/cilium-services.txt 2>&1 || true
