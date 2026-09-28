@@ -1,6 +1,6 @@
 # Taroko Kubernetes
 
-> **這個分支（`v2`）是開發中的下一代 tkctl。** 穩定版請用 [v2026.9.1](https://github.com/tarokolabs/tk8s/releases/tag/v2026.9.1)（`git clone --branch v2026.9.1`）。v2 的安裝腳本、驗證命令、備份還原與教材整合尚未完成，指令與檔案格式在合併前仍可能調整。
+> 版本政策：`main` 是開發線；穩定版用最新的 [Release](https://github.com/tarokolabs/tk8s/releases) tag（`TK_VERSION=<tag> sh install.sh`）。v1 世代（`kto`、`conf/`）的最後版本是 [v2026.9.1](https://github.com/tarokolabs/tk8s/releases/tag/v2026.9.1)，不再維護。
 
 在單一 Linux 主機上，以 podman 容器作為節點建立多節點 Kubernetes 叢集。一道指令建起來，不用先改任何設定檔。
 
@@ -178,6 +178,8 @@ tkctl create cluster -f tkdt.yaml
 支援政策：**最新與次新的 K8s minor**，目前為 1.37.x 與 1.36.x，釘在 `versions.yaml`。每次 push 到 `main` 與每個 tag，CI 都會在 GitHub runner 上以這兩個版本各建一個叢集並跑 `tkctl verify cluster`（workflow `l3`）。更舊的版本可以用 `--k8s` 指定，節點 image 會本地建置，但不在主要支援範圍。
 
 ## 與 v1 的差異
+
+v1 叢集不自動轉換：以 v2026.9.1 的工具備份或拆除，PVC 資料先備 `storage/`，新版重建。
 
 - 沒有 `conf/*.conf`：拓樸用旗標或 `-f`，網段自動分配。
 - 沒有 `kto`、`kls` 這些短命令，也沒有 `tkctl cluster create` 這種名詞在前的寫法。
