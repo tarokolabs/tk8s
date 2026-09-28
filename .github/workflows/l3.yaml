@@ -1,0 +1,113 @@
+# L3: a real cluster on a GitHub runner for each supported Kubernetes version, on every push to v2/main
+# and tag. Ubuntu 24.04 runners ship podman 4.9, below the 5.4 floor, and OBS has no podman 5 for Ubuntu,
+# so podman is built from source; the node image is built from this checkout so L3 verifies the recipe
+# being released, not whatever GHCR holds.
+name: l3
+# Least privilege: the job only reads the checkout; the cluster lives on the runner.
+permissions:
+  contents: read
+on:
+  push:
+    branches: [v2, main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      datapath:
+        description: "cilium datapath: auto | netkit | veth"
+        required: false
+        default: auto
+        type: string
+concurrency:
+  group: l3-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  versions:
+    runs-on: ubuntu-24.04
+    outputs:
+      k8s: ${{ steps.v.outputs.k8s }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          d=$(sed -nE 's/^  default: *"([^"]+)"/\1/p' versions.yaml); p=$(sed -nE 's/^  previous: *"([^"]+)"/\1/p' versions.yaml)
+          echo "k8s=[\"$d\",\"$p\"]" >> "$GITHUB_OUTPUT"
+  cluster:
+    needs: versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        k8s: ${{ fromJSON(needs.versions.outputs.k8s) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare the runner (podman 5 built from source, helpers from OBS, swap off, sudo)
+        run: |
+          set -eux
+          # Ubuntu 24.04 ships podman 4.9 and OBS has no podman 5 for it, only the helpers.
+          sudo mkdir -p /etc/apt/keyrings
+          curl -fsSL https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_24.04/Release.key \
+            | gpg --dearmor | sudo tee /etc/apt/keyrings/libcontainers-unstable.gpg >/dev/null
+          echo "deb [signed-by=/etc/apt/keyrings/libcontainers-unstable.gpg] https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_24.04/ /" \
+            | sudo tee /etc/apt/sources.list.d/libcontainers-unstable.list
+          sudo apt-get update -qq
+          # Keep containers-common (policy.json, registries.conf); drop the 4.9 binary and its Quadlet generator.
+          sudo apt-get remove -y -qq podman crun
+          sudo apt-get install -y -qq netavark aardvark-dns conmon uidmap \
+            libgpgme-dev libseccomp-dev libbtrfs-dev libassuan-dev libdevmapper-dev libsystemd-dev pkg-config go-md2man
+          # Ubuntu's crun 1.14 rejects the OCI spec version podman 5 emits ("unknown version specified").
+          crun_v=$(sed -nE 's/^crun: *"([^"]+)"/\1/p' versions.yaml)
+          sudo curl -fsSL -o /usr/local/bin/crun "https://github.com/containers/crun/releases/download/${crun_v}/crun-${crun_v}-linux-amd64"
+          sudo chmod 755 /usr/local/bin/crun; crun --version | head -1
+          podman_v=$(sed -nE 's/^podman: *"([^"]+)"/\1/p' versions.yaml)
+          git clone --quiet --depth 1 --branch "v${podman_v}" https://github.com/containers/podman.git /tmp/podman
+          make -C /tmp/podman -j"$(nproc)" BUILDTAGS="seccomp systemd" binaries
+          sudo make -C /tmp/podman install.bin install.systemd
+          sudo ln -sfn /usr/local/lib/systemd/system-generators/podman-system-generator /etc/systemd/system-generators/podman-system-generator || true
+          podman --version
+          sudo swapoff -a
+          sudo -n true
+          free -g; nproc; uname -r
+      - name: Install tk8s with install.sh from this checkout
+        run: TK_VERSION="${GITHUB_REF_NAME}" TK_REPO="$GITHUB_WORKSPACE" TK_RAW="file://$GITHUB_WORKSPACE" sh install.sh
+      - name: Build the node image from this checkout
+        run: sudo podman build --build-arg VER="${{ matrix.k8s }}" --force-rm -t "ghcr.io/tarokolabs/tk8s/node:v${{ matrix.k8s }}" images/node >/tmp/node-build.log 2>&1 || { tail -30 /tmp/node-build.log; exit 1; }
+      - name: Create a cluster
+        env:
+          DATAPATH: ${{ inputs.datapath || 'auto' }}
+        run: time tkctl create cluster ci --workers 1 --k8s "${{ matrix.k8s }}" --datapath "$DATAPATH"
+      - name: Verify
+        run: tkctl verify cluster ci
+      - name: Collect logs
+        if: failure()
+        run: |
+          mkdir -p logs
+          sudo journalctl -u ci.target -u ci-control-plane.service -u ci-worker1.service --no-pager > logs/units.log 2>&1 || true
+          sudo podman ps -a > logs/podman-ps.txt 2>&1 || true
+          for n in ci-control-plane ci-worker1; do sudo podman logs "$n" > "logs/$n.log" 2>&1 || true; sudo podman exec "$n" journalctl -u kubelet -u crio --no-pager > "logs/$n-node.log" 2>&1 || true; done
+          cp /tmp/ci-cilium*.out logs/ 2>/dev/null || true
+          export KUBECONFIG=/opt/taroko/clusters/ci/kubeconfig
+          kubectl get pods -A -o wide > logs/pods.txt 2>&1 || true
+          # pod-level reachability of the API ClusterIP from each node, cilium service map, host firewall
+          probe_img=$(sed -nE 's/^verify_alpine: *"([^"]+)"/\1/p' versions.yaml)
+          for n in ci-control-plane ci-worker1; do
+            kubectl run "probe-$n" --image="$probe_img" --restart=Never --overrides="{\"spec\":{\"nodeName\":\"$n\"}}" -- sh -c 'wget -qO- -T 5 --no-check-certificate https://10.98.0.1/version 2>&1 | head -c 200; echo; wget -qO- -T 5 --no-check-certificate https://172.22.0.1:6443/version 2>&1 | head -c 200' >/dev/null 2>&1 || true
+          done; sleep 20
+          for n in ci-control-plane ci-worker1; do { echo "== probe on $n (ClusterIP then node IP)"; kubectl logs "probe-$n" 2>&1; } >> logs/probes.txt; done
+          c=$(kubectl -n kube-system get pods -l k8s-app=cilium -o jsonpath='{.items[0].metadata.name}'); kubectl -n kube-system exec "$c" -- cilium-dbg service list > logs/cilium-services.txt 2>&1 || true
+          kubectl -n kube-system exec "$c" -- cilium-dbg status --verbose > logs/cilium-verbose.txt 2>&1 || true
+          sudo nft list ruleset > logs/nft.txt 2>&1 || true; sudo iptables -S 2>/dev/null > logs/iptables.txt || true
+          sudo podman exec ci-worker1 sysctl net.ipv4.ip_forward net.ipv4.conf.all.rp_filter net.bridge.bridge-nf-call-iptables > logs/worker-sysctl.txt 2>&1 || true
+          sysctl net.ipv4.ip_forward net.ipv4.conf.all.rp_filter net.bridge.bridge-nf-call-iptables > logs/host-sysctl.txt 2>&1 || true
+          # describe and logs of every pod that is not Running/Completed
+          kubectl get pods -A --no-headers 2>/dev/null | awk '$4!="Running" && $4!="Completed"{print $1, $2}' | while read -r ns pod; do
+            { kubectl -n "$ns" describe pod "$pod"; echo "--- logs"; kubectl -n "$ns" logs "$pod" --all-containers --tail=400; echo "--- previous"; kubectl -n "$ns" logs "$pod" --all-containers --previous --tail=400; } > "logs/pod-$ns-$pod.txt" 2>&1 || true
+          done
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: l3-logs-${{ github.run_id }}-${{ matrix.k8s }}
+          path: logs/
+      - name: Delete the cluster
+        if: always()
+        run: tkctl delete cluster ci --yes || true

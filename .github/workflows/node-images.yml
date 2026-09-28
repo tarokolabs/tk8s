@@ -1,7 +1,9 @@
 # 臨時補建節點 image（不發 Release）：K8s 出新 patch 版而平台無需發版時，
-# 手動觸發建置指定版本的 node/crio 與 node/containerd。
+# 手動觸發建置指定版本的 node image（CRI-O）。
 # 前提：docker.io/kindest/node 已發佈對應版本 tag。
 name: node-images
+permissions:
+  contents: read
 
 on:
   workflow_dispatch:
@@ -11,12 +13,12 @@ on:
         required: true
         type: string
 
-permissions:
-  packages: write
-
 jobs:
   node:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
     env:
       K8S_VERSIONS: ${{ inputs.k8s_versions }}
     steps:

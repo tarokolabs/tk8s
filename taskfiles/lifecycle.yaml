@@ -1,0 +1,163 @@
+version: '3'
+# Day-2 operations on existing clusters.
+tasks:
+  _exists:
+    internal: true
+    requires: { vars: [CLUSTER] }
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
+    preconditions:
+      - sh: 'test -f {{ .CLUSTER_YAML }}'
+        msg: "cluster {{ .CLUSTER }} not found under {{ .CLUSTERS_DIR }} (tkctl get clusters)"
+
+  list:
+    desc: List clusters
+    silent: true
+    cmds:
+      - |
+        found=0
+        for f in {{ .CLUSTERS_DIR }}/*/cluster.yaml; do
+          [ -f "$f" ] || continue
+          [ $found -eq 0 ] && printf '%-12s %-7s %-8s %-9s %-9s %s\n' NAME NODES K8S DATAPATH STATE SUBNET
+          found=1
+          d=$(dirname "$f"); n=$(basename "$d")
+          k8s=$(grep -oE 'kubernetes: *"?[0-9.]+' "$f" | head -1 | tr -d '"' | awk '{print $2}')
+          dp=$(grep -oE 'datapath_resolved: *[a-z]+' "$f" | head -1 | awk '{print $2}'); [ -n "$dp" ] || dp=$(grep -oE 'datapath: *[a-z]+' "$f" | head -1 | awk '{print $2}')
+          cp=$(grep -c 'role: control-plane' "$f"); wk=$(grep -c 'role: worker' "$f")
+          sub=$(grep -oE 'nodes: *172\.[0-9.]+/24' "$f" | head -1 | awk '{print $2}')
+          if [ ! -f "$d/.create-complete" ]; then st=Creating
+          elif systemctl is-active --quiet "$n.target" 2>/dev/null; then st=Running; else st=Stopped; fi
+          printf '%-12s %-7s %-8s %-9s %-9s %s\n' "$n" "${cp}+${wk}" "$k8s" "$dp" "$st" "$sub"
+        done
+        [ $found -eq 1 ] || echo "no clusters"
+
+  describe:
+    desc: Describe a cluster (OUTPUT=yaml prints cluster.yaml)
+    silent: true
+    deps: [{ task: _exists, vars: { CLUSTER: '{{ .CLUSTER }}' } }]
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
+      DEF_RAW: { sh: 'cat {{ .CLUSTER_YAML }} 2>/dev/null || printf "metadata: {name: %s}\nspec: {nodes: []}\n" {{ .CLUSTER }}' }
+      DEF: { ref: fromYaml .DEF_RAW }
+      KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig'
+    env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
+    cmds:
+      - |
+        {{ if eq .OUTPUT "yaml" }}cat {{ .CLUSTER_YAML }}{{ else }}
+        state=$( [ -f {{ .STATE_DIR }}/.create-complete ] && (systemctl is-active --quiet {{ .CLUSTER }}.target && echo Running || echo Stopped) || echo Creating )
+        echo "Name:        {{ .CLUSTER }}"
+        echo "State:       $state"
+        echo "Kubernetes:  {{ .DEF.spec.kubernetes }}   cni: {{ .DEF.spec.cni }}   datapath: {{ .DEF.spec.datapath_resolved | default .DEF.spec.datapath }}   gvisor: {{ .DEF.spec.gvisor }}"
+        echo "Network:     nodes {{ .DEF.spec.network.nodes }} (gateway {{ .DEF.spec.network.gateway }})  pods {{ .DEF.spec.network.pods }}  services {{ .DEF.spec.network.services }}  lb {{ .DEF.spec.network.lb_range }}{{ if .DEF.spec.network.vip }}  vip {{ .DEF.spec.network.vip }}{{ end }}"
+        echo "Nodes:"
+        printf '  %-24s %-14s %-14s %-14s %s\n' NAME ROLE IP RESOURCES JOIN
+        {{ range .DEF.spec.nodes }}
+        j="{{ if eq (toString .join) "false" }}not joined{{ else }}joined{{ end }}"
+        printf '  %-24s %-14s %-14s %-14s %s\n' "{{ .name }}" "{{ .role }}" "{{ .ip }}" "{{ .cpu }} cpu, {{ .memory }}" "$j"
+        {{- end }}
+        echo "Addons:"
+        if [ "$state" = Running ]; then
+          # go-task's shell stops at the first failing statement, so a missing addon must not fail k.
+          k() { kubectl --request-timeout=5s "$@" 2>/dev/null || true; }
+          ms=$(k -n kube-system get deploy metrics-server -o jsonpath='{.spec.template.spec.containers[0].image}' | sed 's/.*://'); echo "  metrics-server  ${ms:-not installed}"
+          lp=$(k -n local-path-storage get deploy local-path-provisioner -o jsonpath='{.spec.template.spec.containers[0].image}' | sed 's/.*://'); echo "  local-path      ${lp:-not installed}"
+          rc=$(k get runtimeclass -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}'); echo "  runtimeclass    ${rc:-none}"
+        else
+          echo "  unavailable (cluster is not running)"
+        fi
+        {{- if .DEF.spec.network }}
+        hostip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") print $(i+1)}' | head -1)
+        echo "Access:"
+        echo "  from this host:       LoadBalancer IPs ({{ .DEF.spec.network.lb_range }}) and ClusterIPs ({{ .DEF.spec.network.services }}) are routed"
+        echo "  from another machine: sudo ip route add {{ .DEF.spec.network.nodes }} via ${hostip:-<host-ip>}   (and {{ .DEF.spec.network.services }} for ClusterIPs)"
+        {{- end }}
+        echo "Paths:"
+        echo "  state:      {{ .STATE_DIR }}/"
+        echo "  kubeconfig: {{ .KUBECONFIG }}"
+        echo "  units:      /etc/containers/systemd/{{ .CLUSTER }}/   target: /etc/systemd/system/{{ .CLUSTER }}.target"
+        {{ end }}
+
+  stop:
+    desc: Stop every node of a cluster (state and data are kept)
+    silent: true
+    deps: [{ task: _exists, vars: { CLUSTER: '{{ .CLUSTER }}' } }]
+    cmds:
+      - sudo systemctl stop {{ .CLUSTER }}.target
+      - echo "cluster {{ .CLUSTER }} stopped"
+
+  start:
+    desc: Start a stopped cluster and wait for its nodes to be Ready
+    silent: true
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+    deps: [{ task: _exists, vars: { CLUSTER: '{{ .CLUSTER }}' } }]
+    cmds:
+      - |
+        since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        sudo systemctl start {{ .CLUSTER }}.target
+        export KUBECONFIG={{ .STATE_DIR }}/kubeconfig
+        # Node objects keep their last status for a while after a stop; require a Ready
+        # condition whose heartbeat is newer than this start.
+        for i in $(seq 1 90); do
+          fresh=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name} {range .status.conditions[?(@.type=="Ready")]}{.status} {.lastHeartbeatTime}{end}{"\n"}{end}' 2>/dev/null | awk -v s="$since" '$2=="True" && $3 > s' | wc -l)
+          total=$(kubectl get nodes --no-headers 2>/dev/null | wc -l)
+          if [ "$total" -gt 0 ] && [ "$fresh" -eq "$total" ]; then break; fi
+          sleep 5
+        done
+        kubectl get nodes --no-headers | awk '{print "  "$1, $2}'
+
+  use:
+    desc: Point ~/.kube/config at a cluster (the previous file is kept as ~/.kube/config.bak)
+    silent: true
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+    deps: [{ task: _exists, vars: { CLUSTER: '{{ .CLUSTER }}' } }]
+    cmds:
+      - mkdir -p ~/.kube && { [ ! -f ~/.kube/config ] || cp ~/.kube/config ~/.kube/config.bak; }
+      - install -m 600 {{ .STATE_DIR }}/kubeconfig ~/.kube/config
+      - echo "~/.kube/config now points at {{ .CLUSTER }}"
+
+  delete:
+    desc: 'Delete a cluster: units, containers, volumes, network, routes, state (asks for confirmation)'
+    silent: true
+    requires: { vars: [CLUSTER] }
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
+      # A half-created or hand-cleaned cluster may have lost cluster.yaml; delete what is left.
+      DEF_RAW: { sh: 'cat {{ .CLUSTER_YAML }} 2>/dev/null || printf "metadata: {name: %s}\nspec: {nodes: []}\n" {{ .CLUSTER }}' }
+      DEF: { ref: fromYaml .DEF_RAW }
+    preconditions:
+      - sh: 'test -d {{ .STATE_DIR }} || test -d /etc/containers/systemd/{{ .CLUSTER }} || test -f /etc/systemd/system/{{ .CLUSTER }}.target || sudo podman network exists {{ .CLUSTER }} 2>/dev/null'
+        msg: "cluster {{ .CLUSTER }} not found: no state under {{ .CLUSTERS_DIR }}, no units, no network (tkctl get clusters)"
+    cmds:
+      - |
+        if [ "${TK_ASSUME_YES:-}" != "1" ]; then
+          printf 'Delete cluster {{ .CLUSTER }} including its PVC data under {{ .STATE_DIR }}/storage? [y/N] '
+          read -r a || a=""
+          case "$a" in y|Y) ;; *) echo "aborted"; exit 1 ;; esac
+        fi
+        errs=0
+        step() { echo "  $1"; shift; "$@" >/dev/null 2>&1 || { echo "    failed: $*"; errs=$((errs+1)); }; }
+        if systemctl list-units --all --no-legend "{{ .CLUSTER }}.target" | grep -q .; then step "stop {{ .CLUSTER }}.target" sudo systemctl disable --now {{ .CLUSTER }}.target; fi
+        # The Quadlet network unit is a oneshot that stays active; stop it or a later cluster with the same name never creates its network.
+        if systemctl list-units --all --no-legend "{{ .CLUSTER }}-network.service" | grep -q .; then step "stop {{ .CLUSTER }}-network.service" sudo systemctl stop {{ .CLUSTER }}-network.service; fi
+        step "remove units" sudo rm -rf /etc/containers/systemd/{{ .CLUSTER }} /etc/systemd/system/{{ .CLUSTER }}.target /etc/systemd/system/{{ .CLUSTER }}-routes.service
+        step "daemon-reload" sudo systemctl daemon-reload
+        sudo systemctl reset-failed "{{ .CLUSTER }}*" 2>/dev/null || true
+        # go-task's shell exits when a loop body ends with a failing && list, so use if/then throughout.
+        {{ range .DEF.spec.nodes }}
+        if sudo podman container exists {{ .name }} 2>/dev/null; then step "remove container {{ .name }}" sudo podman rm -f {{ .name }}; fi
+        for v in {{ .name }}-var {{ .name }}-etc {{ .name }}-usr-local-bin; do
+          if sudo podman volume exists $v 2>/dev/null; then step "remove volume $v" sudo podman volume rm -f $v; fi
+        done
+        {{ end }}
+        if sudo podman network exists {{ .CLUSTER }} 2>/dev/null; then step "remove network {{ .CLUSTER }}" sudo podman network rm -f {{ .CLUSTER }}; fi
+        {{ if .DEF.spec.network }}
+        if ip route show {{ .DEF.spec.network.pods }} 2>/dev/null | grep -q .; then step "remove route {{ .DEF.spec.network.pods }}" sudo ip route del {{ .DEF.spec.network.pods }}; fi
+        if ip route show {{ .DEF.spec.network.services }} 2>/dev/null | grep -q .; then step "remove route {{ .DEF.spec.network.services }}" sudo ip route del {{ .DEF.spec.network.services }}; fi
+        {{ end }}
+        step "remove state {{ .STATE_DIR }}" sudo rm -rf {{ .STATE_DIR }}
+        if [ $errs -eq 0 ]; then echo "cluster {{ .CLUSTER }} deleted"; else echo "cluster {{ .CLUSTER }} deleted with $errs failed step(s); see the lines above" >&2; exit 1; fi

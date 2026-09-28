@@ -1,0 +1,65 @@
+version: '3'
+# tk8s orchestration. Every task is readable shell; `task --list` is the flow.
+# The user-facing entry point is bin/tkctl, which translates flags into a
+# cluster.yaml and calls these tasks with CLUSTER_FILE set.
+includes:
+  preflight: ./taskfiles/preflight.yaml
+  plan: ./taskfiles/plan.yaml
+  nodes: ./taskfiles/nodes.yaml
+  kubeadm: ./taskfiles/kubeadm.yaml
+  cni: ./taskfiles/cni.yaml
+  addons: ./taskfiles/addons.yaml
+  lifecycle: ./taskfiles/lifecycle.yaml
+  node: ./taskfiles/node.yaml
+  verify: ./taskfiles/verify.yaml
+vars:
+  TK_HOME:
+    sh: pwd
+  TK_DATA_DIR: '{{ .TK_DATA_DIR | default "/opt/taroko" }}'
+  CLUSTERS_DIR: '{{ .TK_DATA_DIR }}/clusters'
+  CNI_DIR: '{{ .TK_DATA_DIR }}/cni'
+  TK_WULIN_DIR: '{{ .TK_WULIN_DIR | default (print .TK_DATA_DIR "/wulin") }}'
+  VERSIONS_RAW:
+    sh: cat {{ .TK_HOME }}/versions.yaml
+  VERSIONS:
+    ref: fromYaml .VERSIONS_RAW
+tasks:
+  default:
+    desc: List tasks
+    cmds:
+      - task --list
+
+  cluster:create:
+    desc: Create a cluster from CLUSTER_FILE (plan, preflight, nodes, kubeadm, cni)
+    silent: true
+    requires: { vars: [CLUSTER_FILE] }
+    vars:
+      CLUSTER: { sh: 'task --silent -d {{ .TK_HOME }} plan:cluster-name CLUSTER_FILE={{ .CLUSTER_FILE }}' }
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+    preconditions:
+      - sh: '[ ! -f {{ .STATE_DIR }}/.create-complete ]'
+        msg: "cluster {{ .CLUSTER }} already exists; delete it first or pick another name"
+    cmds:
+      - |
+        set -e
+        {{ if eq .DRY_RUN "true" }}
+        tmp=$(mktemp -d)
+        task --silent -d {{ .TK_HOME }} plan:resolve CLUSTER_FILE={{ .CLUSTER_FILE }} ALLOW_OVERLAP={{ .ALLOW_OVERLAP }} OUT_ROOT=$tmp/clusters DRY_RUN=false
+        echo "# ---- $tmp/clusters/{{ .CLUSTER }}/cluster.yaml"; cat $tmp/clusters/{{ .CLUSTER }}/cluster.yaml; echo
+        task --silent -d {{ .TK_HOME }} nodes:render CLUSTER={{ .CLUSTER }} DRY_RUN=true CLUSTERS_DIR=$tmp/clusters
+        task --silent -d {{ .TK_HOME }} kubeadm:render CLUSTER={{ .CLUSTER }} DRY_RUN=true CLUSTERS_DIR=$tmp/clusters
+        rm -rf $tmp
+        {{ else }}
+        task --silent -d {{ .TK_HOME }} preflight:check
+        task --silent -d {{ .TK_HOME }} plan:resolve CLUSTER_FILE={{ .CLUSTER_FILE }} ALLOW_OVERLAP={{ .ALLOW_OVERLAP }}
+        task --silent -d {{ .TK_HOME }} nodes:up CLUSTER={{ .CLUSTER }}
+        task --silent -d {{ .TK_HOME }} kubeadm:bootstrap CLUSTER={{ .CLUSTER }}
+        task --silent -d {{ .TK_HOME }} cni:install CLUSTER={{ .CLUSTER }}
+        task --silent -d {{ .TK_HOME }} addons:install CLUSTER={{ .CLUSTER }}
+        touch {{ .STATE_DIR }}/.create-complete
+        echo
+        echo "cluster {{ .CLUSTER }} is ready"
+        echo "  kubeconfig: {{ .STATE_DIR }}/kubeconfig   (tkctl use cluster {{ .CLUSTER }})"
+        echo "  units:      /etc/containers/systemd/{{ .CLUSTER }}/   target: {{ .CLUSTER }}.target"
+        echo "  describe:   tkctl describe cluster {{ .CLUSTER }}"
+        {{ end }}

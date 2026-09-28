@@ -1,0 +1,24 @@
+# Single source of truth for pinned component versions.
+# Read by the Taskfile (fromYaml), install.sh, and the release workflow.
+kubernetes:
+  default: "1.37.0"
+  previous: "1.36.4"
+cilium: "1.20.2"
+cilium_cli: "v0.20.0"
+cni_plugins: "v1.9.1"
+calico: "v3.31.5"
+metrics_server: "v0.9.0"
+local_path_provisioner: "v0.0.37"
+# gVisor release (single gvisor.tar.zstd per release); installed into nodes by addons:gvisor
+gvisor: "20260921.0"
+gateway_api: "v1.6.1"
+kube_vip: "v1.0.1"
+task: "v3.53.1"
+# crun for the L3 runner only (Ubuntu 24.04 ships 1.14, too old for podman 5); nodes get crun from CRI-O
+crun: "1.29.1"
+# podman built from source on the L3 runner (Ubuntu 24.04 ships 4.9); hosts need >= 5.4
+podman: "5.4.2"
+# Images used by tkctl verify's test pods
+verify_busybox: "docker.io/library/busybox:1.37.0"
+verify_alpine: "docker.io/library/alpine:3.22"
+verify_agnhost: "registry.k8s.io/e2e-test-images/agnhost:2.53"

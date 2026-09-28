@@ -1,0 +1,141 @@
+version: '3'
+# Resolve a cluster.yaml: fill defaults, allocate subnets, expand node groups.
+# The output is the canonical cluster.yaml every other task reads.
+tasks:
+  cluster-name:
+    desc: Print metadata.name from CLUSTER_FILE (the one YAML parser tkctl and the Taskfile share)
+    silent: true
+    requires: { vars: [CLUSTER_FILE] }
+    vars:
+      DEF_RAW: { sh: 'cat {{ .CLUSTER_FILE }}' }
+      DEF: { ref: fromYaml .DEF_RAW }
+    cmds:
+      - echo "{{ if .DEF.metadata }}{{ .DEF.metadata.name | default "" }}{{ end }}"
+
+  resolve:
+    desc: Resolve cluster.yaml (defaults, subnet allocation, node expansion)
+    silent: true
+    requires:
+      vars: [CLUSTER_FILE]
+    vars:
+      DEF_RAW:
+        sh: cat {{ .CLUSTER_FILE }}
+      DEF:
+        ref: fromYaml .DEF_RAW
+      CLUSTER: '{{ .DEF.metadata.name }}'
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      K8S: '{{ .DEF.spec.kubernetes | default .VERSIONS.kubernetes.default }}'
+      CNI: '{{ .DEF.spec.cni | default "cilium" }}'
+      # gVisor sandboxes have no network under netkit, so gvisor picks veth unless the file says otherwise.
+      DATAPATH: '{{ .DEF.spec.datapath | default (ternary "veth" "auto" (eq (toString .DEF.spec.gvisor) "true")) }}'
+      GVISOR: '{{ if eq (toString .DEF.spec.gvisor) "true" }}true{{ else }}false{{ end }}'
+      NODES:
+        ref: .DEF.spec.nodes
+      CP_COUNT:
+        sh: |
+          n=0; {{ range .DEF.spec.nodes }}{{ if eq .role "control-plane" }}n=$((n + {{ .count | default 1 }})); {{ end }}{{ end }}echo $n
+      # Explicit node subnet from the input, if any (172.22.N.0/24).
+      WANT_NODES: '{{ if .DEF.spec.network }}{{ .DEF.spec.network.nodes | default "" }}{{ end }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
+      # Index N: reuse the one already recorded for this cluster (resume), else the
+      # one implied by an explicit subnet, else the smallest N no other cluster uses.
+      INDEX:
+        sh: |
+          if [ -f "{{ .CLUSTER_YAML }}" ]; then
+            grep -oE 'index: *[0-9]+' "{{ .CLUSTER_YAML }}" | head -1 | awk '{print $2}'; exit 0
+          fi
+          want="{{ .WANT_NODES }}"
+          if [ -n "$want" ]; then
+            echo "$want" | sed -nE 's#^172\.22\.([0-9]+)\.0/24$#\1#p'; exit 0
+          fi
+          used=$(grep -hsoE 'index: *[0-9]+' {{ .CLUSTERS_DIR }}/*/cluster.yaml 2>/dev/null | awk '{print $2}')
+          n=0; while echo "$used" | grep -qx "$n"; do n=$((n+1)); done; echo $n
+      # cni:install records the datapath it resolved; a resume must not lose it when rewriting the file.
+      DATAPATH_RESOLVED:
+        sh: '[ -f "{{ .CLUSTER_YAML }}" ] && grep -oE "datapath_resolved: *[a-z]+" "{{ .CLUSTER_YAML }}" | awk "{print \$2}" || true'
+      OVERLAP:
+        sh: |
+          [ -f "{{ .CLUSTER_YAML }}" ] && { echo no; exit 0; }
+          grep -hsoE 'index: *[0-9]+' {{ .CLUSTERS_DIR }}/*/cluster.yaml 2>/dev/null | awk '{print $2}' | grep -qx "{{ .INDEX }}" && echo yes || echo no
+      # Where the resolved file goes; dry-run points OUT_ROOT at a temp dir while the
+      # index and overlap scans above keep reading the real CLUSTERS_DIR.
+      OUT_DIR: '{{ .OUT_ROOT | default .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      # First problem found in the input, or empty. A -f file gets the same rules and
+      # messages as the flags bin/tkctl validates; podman and kubeadm errors come late
+      # and read badly.
+      INVALID:
+        sh: |
+          {{ if .DEF.spec.runtime }}echo 'spec.runtime is not a field any more: nodes run CRI-O from the single node image; remove the key'; exit 0{{ end }}
+          case "{{ .CNI }}" in cilium|canal) ;; *) echo 'spec.cni "{{ .CNI }}" must be cilium or canal'; exit 0 ;; esac
+          case "{{ .DATAPATH }}" in auto|netkit|veth) ;; *) echo 'spec.datapath "{{ .DATAPATH }}" must be auto, netkit or veth'; exit 0 ;; esac
+          {{ if and (eq .GVISOR "true") (eq .DATAPATH "netkit") }}echo 'gvisor requires the veth datapath; gVisor sandboxes have no network under netkit'; exit 0{{ end }}
+          {{ if not .DEF.spec.nodes }}echo 'spec.nodes must list at least one control-plane node'; exit 0{{ end }}
+          names=""
+          {{ range .DEF.spec.nodes }}
+          case "{{ .role }}" in control-plane|worker) ;; *) echo 'node role "{{ .role }}" must be control-plane or worker'; exit 0 ;; esac
+          echo "{{ default "4G" .memory }}" | grep -qE '^[0-9]+[GgMm]$' || { echo 'node memory "{{ .memory }}" must be a number followed by G or M, e.g. 4G or 4096M (podman does not accept 4Gi)'; exit 0; }
+          echo "{{ default 2 .cpu }}" | grep -qE '^[1-9][0-9]*$' || { echo 'node cpu "{{ .cpu }}" must be a positive integer'; exit 0; }
+          echo "{{ default 1 .count }}" | grep -qE '^[1-9][0-9]*$' || { echo 'node count "{{ .count }}" must be a positive integer'; exit 0; }
+          {{ if .name }}
+          echo "{{ .name }}" | grep -qE '^[a-z][a-z0-9-]*$' || { echo 'node name "{{ .name }}" must use lowercase letters, digits and -, starting with a letter'; exit 0; }
+          [ "{{ default 1 .count }}" = 1 ] || { echo 'node name "{{ .name }}" cannot be combined with count {{ .count }}; a named entry is one node'; exit 0; }
+          case " $names " in *" {{ .name }} "*) echo 'node name "{{ .name }}" is used twice'; exit 0 ;; esac
+          names="$names {{ .name }}"
+          {{ end }}
+          {{ end }}
+          {{ if .DEF.spec.nodes }}[ "{{ (index .DEF.spec.nodes 0).role }}" = control-plane ] || { echo 'the first entry in spec.nodes must be a control-plane (it runs kubeadm init)'; exit 0; }{{ end }}
+          [ $(( {{ .CP_COUNT }} % 2 )) -eq 1 ] || { echo 'control-plane count {{ .CP_COUNT }} must be odd (1, 3, 5) for etcd quorum'; exit 0; }
+    preconditions:
+      - sh: '[ -n "{{ .CLUSTER }}" ]'
+        msg: "metadata.name is required in {{ .CLUSTER_FILE }}"
+      - sh: '[ -z "{{ .INVALID }}" ]'
+        msg: "{{ .INVALID }}"
+      - sh: '[ -n "{{ .INDEX }}" ]'
+        msg: "spec.network.nodes must be 172.22.N.0/24 (N = 0..255) or omitted for automatic allocation"
+      - sh: '[ "{{ .OVERLAP }}" == "no" ] || [ "{{ .ALLOW_OVERLAP }}" == "true" ]'
+        msg: "subnet 172.22.{{ .INDEX }}.0/24 is already used by another cluster; pass --allow-overlap to force"
+    cmds:
+      - |
+        {{ if ne .DRY_RUN "true" }}mkdir -p {{ .OUT_DIR }}
+        exec > {{ .OUT_DIR }}/cluster.yaml{{ end }}
+        cat <<'YAML'
+        apiVersion: taroko.io/v1alpha1
+        kind: Cluster
+        metadata:
+          name: {{ .CLUSTER }}
+        spec:
+          kubernetes: "{{ .K8S }}"
+          cni: {{ .CNI }}
+          datapath: {{ .DATAPATH }}
+        {{- if .DATAPATH_RESOLVED }}
+          datapath_resolved: {{ .DATAPATH_RESOLVED }}
+        {{- end }}
+          gvisor: {{ .GVISOR }}
+          network:
+            index: {{ .INDEX }}
+            nodes: 172.22.{{ .INDEX }}.0/24
+            gateway: 172.22.{{ .INDEX }}.254
+            lb_range: 172.22.{{ .INDEX }}.200-172.22.{{ .INDEX }}.219
+            pods: 10.244.{{ mul (atoi .INDEX) 8 }}.0/21
+            services: 10.98.{{ .INDEX }}.0/24
+        {{- if gt (atoi .CP_COUNT) 1 }}
+            vip: 172.22.{{ .INDEX }}.100
+        {{- end }}
+          nodes:
+        {{- $idx := .INDEX }}{{ $ip := 0 }}{{ $cp := 0 }}{{ $wk := 0 }}
+        {{- range .NODES }}{{ $grp := . }}
+        {{- range $i := until (int (default 1 $grp.count)) }}
+        {{- $ip = add $ip 1 }}
+        {{- if eq $grp.role "control-plane" }}{{ $cp = add $cp 1 }}
+            - role: control-plane
+              name: {{ if $grp.name }}{{ $grp.name }}{{ else }}{{ $.CLUSTER }}-control-plane{{ if gt (int $cp) 1 }}{{ $cp }}{{ end }}{{ end }}
+        {{- else }}{{ $wk = add $wk 1 }}
+            - role: worker
+              name: {{ if $grp.name }}{{ $grp.name }}{{ else }}{{ $.CLUSTER }}-worker{{ $wk }}{{ end }}
+        {{- end }}
+              ip: 172.22.{{ $idx }}.{{ $ip }}
+              cpu: {{ default 2 $grp.cpu }}
+              memory: {{ default "4G" $grp.memory | toString | lower }}
+              join: {{ if eq (toString $grp.join) "false" }}false{{ else }}true{{ end }}
+        {{- end }}{{ end }}
+        YAML

@@ -1,0 +1,135 @@
+version: '3'
+# Cluster addons. Each task is idempotent (status: or in-node markers) so an interrupted
+# create resumes without redoing work. Anything installed into a node lives under
+# /usr/local/bin or /etc, the paths kept in named volumes across restarts and reboots.
+# Nodes run CRI-O; there is one node image.
+tasks:
+  runtimeclass:
+    desc: RuntimeClass crun (CRI-O ships crun as its default runtime; nothing to install)
+    silent: true
+    requires: { vars: [CLUSTER] }
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+    env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
+    cmds:
+      - |
+        set -e
+        kubectl apply -f {{ .TK_HOME }}/manifests/runtimeclass.yaml >/dev/null
+        echo "RuntimeClass crun ok"
+
+  gvisor:
+    desc: 'Install gVisor into every node (CRI-O handler runsc) and create RuntimeClass gvisor (only when spec.gvisor is true)'
+    silent: true
+    requires: { vars: [CLUSTER] }
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
+      DEF_RAW: { sh: 'cat {{ .CLUSTER_YAML }}' }
+      DEF: { ref: fromYaml .DEF_RAW }
+      CACHE: '{{ .TK_DATA_DIR }}/cache'
+      TARBALL: 'gvisor-{{ .VERSIONS.gvisor }}.tar.zstd'
+      # Written after a complete extraction; a bare runsc (baked image, interrupted tar) is not enough.
+      MARKER: '/usr/local/bin/.gvisor-{{ .VERSIONS.gvisor }}'
+      URL: 'https://storage.googleapis.com/gvisor/releases/release/{{ .VERSIONS.gvisor }}/x86_64'
+    env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
+    cmds:
+      - |
+        set -e
+        {{ if ne (toString .DEF.spec.gvisor) "true" }}
+        echo "gVisor not enabled (create with --gvisor)"; exit 0
+        {{ end }}
+        # Download and verify once on the host; each node extracts its own copy into /usr/local/bin.
+        need=0
+        {{ range .DEF.spec.nodes }}if ! sudo podman exec {{ .name }} test -e {{ $.MARKER }}; then need=1; fi
+        {{ end }}
+        if [ $need -eq 1 ] && [ ! -f {{ .CACHE }}/{{ .TARBALL }} ]; then
+          mkdir -p {{ .CACHE }}
+          curl -fsSL -o {{ .CACHE }}/gvisor.tar.zstd {{ .URL }}/gvisor.tar.zstd
+          curl -fsSL -o {{ .CACHE }}/gvisor.tar.zstd.sha512 {{ .URL }}/gvisor.tar.zstd.sha512
+          (cd {{ .CACHE }} && sha512sum -c gvisor.tar.zstd.sha512 >/dev/null) || { rm -f {{ .CACHE }}/gvisor.tar.zstd*; echo "gvisor.tar.zstd checksum mismatch" >&2; exit 1; }
+          mv {{ .CACHE }}/gvisor.tar.zstd {{ .CACHE }}/{{ .TARBALL }}; rm -f {{ .CACHE }}/gvisor.tar.zstd.sha512
+        fi
+        {{ range .DEF.spec.nodes }}
+        if ! sudo podman exec {{ .name }} test -e {{ $.MARKER }}; then
+          # Node images published before zstd was added to the recipe cannot unpack the tarball.
+          # podman exec runs no shell, so test the binary rather than `command -v`.
+          if ! sudo podman exec {{ .name }} test -x /usr/bin/zstd; then
+            sudo podman exec {{ .name }} sh -c 'apt-get update -qq >/dev/null && apt-get install -y -qq zstd >/dev/null'
+          fi
+          sudo podman cp {{ $.CACHE }}/{{ $.TARBALL }} {{ .name }}:/tmp/gvisor.tar.zstd
+          sudo podman exec {{ .name }} tar --zstd -xf /tmp/gvisor.tar.zstd -C /usr/local/bin
+          sudo podman exec {{ .name }} rm -f /tmp/gvisor.tar.zstd
+          sudo podman exec {{ .name }} touch {{ $.MARKER }}
+        fi
+        if ! sudo podman exec {{ .name }} test -e /etc/crio/crio.conf.d/20-gvisor.conf; then
+          sudo podman cp {{ $.TK_HOME }}/templates/crio/20-gvisor.conf {{ .name }}:/etc/crio/crio.conf.d/20-gvisor.conf
+          sudo podman exec {{ .name }} systemctl restart crio
+          echo "{{ .name }}: gVisor {{ $.VERSIONS.gvisor }} handler runsc, crio restarted"
+        fi
+        {{ end }}
+        kubectl apply -f - >/dev/null <<'YAML'
+        apiVersion: node.k8s.io/v1
+        kind: RuntimeClass
+        metadata:
+          name: gvisor
+        handler: runsc
+        YAML
+        echo "RuntimeClass gvisor ok (gVisor {{ .VERSIONS.gvisor }}; datapath must be veth, see --gvisor)"
+
+  metrics-server:
+    desc: metrics-server (kubectl top) with --kubelet-insecure-tls for kind-style nodes
+    silent: true
+    requires: { vars: [CLUSTER] }
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+    env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
+    status:
+      # Done means deployed AND patched: an interrupted create must not skip the patch on rerun.
+      - kubectl get deploy -n kube-system metrics-server -o jsonpath='{.spec.template.spec.containers[0].args}' 2>/dev/null | grep -q kubelet-insecure-tls
+    cmds:
+      - |
+        set -e
+        kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/{{ .VERSIONS.metrics_server }}/components.yaml >/dev/null
+        # Node kubelet certs are self-signed in kind images; patch instead of sed on the upstream text.
+        if ! kubectl get deploy -n kube-system metrics-server -o jsonpath='{.spec.template.spec.containers[0].args}' | grep -q kubelet-insecure-tls; then
+          kubectl -n kube-system patch deploy metrics-server --type=json \
+            -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]' >/dev/null
+        fi
+        kubectl rollout status -n kube-system deploy/metrics-server --timeout=300s >/dev/null || {
+          echo "metrics-server did not become ready (kubectl -n kube-system describe deploy metrics-server)" >&2; exit 1; }
+        echo "metrics-server {{ .VERSIONS.metrics_server }} ok"
+
+  local-path:
+    desc: local-path-provisioner with PV data under the cluster state dir (storage/)
+    silent: true
+    requires: { vars: [CLUSTER] }
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      MANIFEST: '{{ .TK_HOME }}/manifests/local-path-storage.{{ .VERSIONS.local_path_provisioner | trimPrefix "v" }}.yaml'
+    env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
+    preconditions:
+      - sh: 'test -f {{ .MANIFEST }}'
+        msg: "{{ .MANIFEST }} is missing; versions.yaml pins local_path_provisioner {{ .VERSIONS.local_path_provisioner }} but the customized manifest was not updated"
+    status:
+      - kubectl get storageclass local-path >/dev/null 2>&1
+    cmds:
+      - |
+        set -e
+        kubectl apply -f {{ .MANIFEST }} >/dev/null
+        kubectl rollout status -n local-path-storage deploy/local-path-provisioner --timeout=300s >/dev/null || {
+          echo "local-path-provisioner did not become ready (kubectl -n local-path-storage get pods)" >&2; exit 1; }
+        echo "local-path {{ .VERSIONS.local_path_provisioner }} ok (PV data under {{ .STATE_DIR }}/storage)"
+
+  install:
+    desc: Install every addon (RuntimeClass crun, optional gVisor, metrics-server, local-path)
+    silent: true
+    requires: { vars: [CLUSTER] }
+    cmds:
+      - task: runtimeclass
+        vars: { CLUSTER: '{{ .CLUSTER }}' }
+      - task: gvisor
+        vars: { CLUSTER: '{{ .CLUSTER }}' }
+      - task: metrics-server
+        vars: { CLUSTER: '{{ .CLUSTER }}' }
+      - task: local-path
+        vars: { CLUSTER: '{{ .CLUSTER }}' }
