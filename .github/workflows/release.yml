@@ -55,13 +55,7 @@ jobs:
       - name: Wait for L3 on this commit
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          for i in $(seq 1 90); do
-            st=$(gh run list -R "$GITHUB_REPOSITORY" --workflow l3.yaml --commit "$GITHUB_SHA" --json status,conclusion -q '.[0] | .status + "/" + (.conclusion // "")')
-            case "$st" in completed/success) echo "L3 green"; exit 0 ;; completed/*) echo "L3 $st"; exit 1 ;; esac
-            sleep 30
-          done
-          echo "L3 did not finish"; exit 1
+        run: scripts/wait-l3.sh "$GITHUB_SHA"
       - name: Render release notes
         run: scripts/release-notes.sh "$GITHUB_REF_NAME" digests > /tmp/notes.md && cat /tmp/notes.md
       - name: Create the Release

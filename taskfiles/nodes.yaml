@@ -122,7 +122,7 @@ tasks:
         set -e
         mkdir -p {{ .CNI_DIR }}
         # Plugins installed by an earlier root-run tkctl are root-owned; take them over once.
-        [ ! -e {{ .CNI_DIR }}/bridge ] || [ -w {{ .CNI_DIR }}/bridge ] || sudo chown -R "$(id -u):$(id -g)" {{ .CNI_DIR }}
+        if [ -e {{ .CNI_DIR }}/bridge ] && [ ! -w {{ .CNI_DIR }}/bridge ] && [ "$(stat -c %u {{ .CNI_DIR }}/bridge)" = 0 ]; then sudo chown -R "$(id -u):$(id -g)" {{ .CNI_DIR }}; fi
         tmp=$(mktemp -d)
         curl -fsSL https://github.com/containernetworking/plugins/releases/download/{{ .VERSIONS.cni_plugins }}/cni-plugins-linux-amd64-{{ .VERSIONS.cni_plugins }}.tgz | tar -xz -C "$tmp"
         cp -a "$tmp"/. {{ .CNI_DIR }}/

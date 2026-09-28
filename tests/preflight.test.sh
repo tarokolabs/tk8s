@@ -8,7 +8,8 @@ STUB="$TMP/bin"; mkdir -p "$STUB" "$TMP/etc/sysctl.d" "$TMP/etc/modules-load.d";
 printf '#!/usr/bin/env bash\n[ "$1" = -n ] && shift; echo "sudo $*" >> "$STUB_LOG"; exec "$@"\n' > "$STUB/sudo"
 printf '#!/usr/bin/env bash\necho "podman version 5.4.2"\n' > "$STUB/podman"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/swapon"
-printf '#!/usr/bin/env bash\necho cgroup2fs\n' > "$STUB/stat"
+printf '#!/usr/bin/env bash\ncase "$*" in *%%u*) cat "$STUB/owner";; *%%U*) echo someone;; *) echo cgroup2fs;; esac\n' > "$STUB/stat"   # -fc %T cgroup, -c %u owner
+echo 0 > "$STUB/owner"
 printf '#!/usr/bin/env bash\necho "br_netfilter 32768 0"\n' > "$STUB/lsmod"
 printf '#!/usr/bin/env bash\necho "sysctl $*" >> "$STUB_LOG"; exit 0\n' > "$STUB/sysctl"
 printf '#!/usr/bin/env bash\necho "modprobe $*" >> "$STUB_LOG"; exit 0\n' > "$STUB/modprobe"
@@ -29,4 +30,15 @@ assert_contains "$(cat "$STUB_LOG")" "sudo install -d -o $(id -u) -g $(id -g) $T
 assert_contains "$(cat "$STUB_LOG")" "sudo install -d -o $(id -u) -g $(id -g) $TMP/cni" "data tree created for the user (cni)"
 if [ -d "$TMP/clusters" ] && [ -w "$TMP/cache" ]; then echo "PASS  data tree exists and is writable"; else echo "FAIL  data tree exists and is writable"; FAILURES=$((FAILURES+1)); fi
 assert_contains "$out" "preflight ok" "summary line"
+# Ownership handover only from root (an earlier root-run tkctl); another user's directory is refused, not taken.
+mkdir -p "$TMP/clusters"; chmod 555 "$TMP/clusters"; echo 0 > "$STUB/owner"; : > "$STUB_LOG"
+out=$(PATH="$STUB:$PATH" task preflight:check 2>&1); rc=$?
+assert_eq "0" "$rc" "root-owned dir: taken over"
+assert_contains "$(cat "$STUB_LOG")" "sudo chown $(id -u):$(id -g) $TMP/clusters" "root-owned dir is chowned to the user"
+echo 999 > "$STUB/owner"; : > "$STUB_LOG"
+out=$(PATH="$STUB:$PATH" task preflight:check 2>&1); rc=$?
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "another user's dir: refused"
+assert_contains "$out" "owned by someone" "refusal names the owner"
+if grep -q "sudo chown" "$STUB_LOG"; then echo "FAIL  another user's dir is not chowned"; FAILURES=$((FAILURES+1)); else echo "PASS  another user's dir is not chowned"; fi
+chmod 755 "$TMP/clusters"
 rm -rf "$TMP"; finish

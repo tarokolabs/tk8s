@@ -1,5 +1,7 @@
-# L3: a real cluster on a GitHub runner for each supported Kubernetes version, on every push to v2/main and tag. Ubuntu 24.04 runners ship podman 4.9, below the 5.4 floor,
-# so podman comes from the OBS unstable repo (the same source as Debian testing).
+# L3: a real cluster on a GitHub runner for each supported Kubernetes version, on every push to v2/main
+# and tag. Ubuntu 24.04 runners ship podman 4.9, below the 5.4 floor, and OBS has no podman 5 for Ubuntu,
+# so podman is built from source; the node image is built from this checkout so L3 verifies the recipe
+# being released, not whatever GHCR holds.
 name: l3
 # Least privilege: the job only reads the checkout; the cluster lives on the runner.
 permissions:
@@ -68,8 +70,12 @@ jobs:
           free -g; nproc; uname -r
       - name: Install tk8s with install.sh from this checkout
         run: TK_VERSION="${GITHUB_REF_NAME}" TK_REPO="$GITHUB_WORKSPACE" TK_RAW="file://$GITHUB_WORKSPACE" sh install.sh
+      - name: Build the node image from this checkout
+        run: sudo podman build --build-arg VER="${{ matrix.k8s }}" --force-rm -t "ghcr.io/tarokolabs/tk8s/node:v${{ matrix.k8s }}" images/node >/tmp/node-build.log 2>&1 || { tail -30 /tmp/node-build.log; exit 1; }
       - name: Create a cluster
-        run: time tkctl create cluster ci --workers 1 --k8s "${{ matrix.k8s }}" --datapath "${{ inputs.datapath || 'auto' }}"
+        env:
+          DATAPATH: ${{ inputs.datapath || 'auto' }}
+        run: time tkctl create cluster ci --workers 1 --k8s "${{ matrix.k8s }}" --datapath "$DATAPATH"
       - name: Verify
         run: tkctl verify cluster ci
       - name: Collect logs

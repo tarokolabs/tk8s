@@ -24,8 +24,12 @@ tasks:
         printf '# tk8s: bridged frames between cluster nodes bypass the host firewall (Docker sets FORWARD DROP)\nnet.bridge.bridge-nf-call-iptables = 0\nnet.bridge.bridge-nf-call-ip6tables = 0\n' | sudo tee /etc/sysctl.d/90-tk8s.conf >/dev/null
         # Everything under TK_DATA_DIR belongs to the user running tkctl; only creating it under /opt
         # needs root. Nodes (root inside their containers) write into it regardless of ownership.
+        # Only a root-owned directory (an earlier root-run tkctl) is taken over; another user's is refused.
         for d in {{ .TK_DATA_DIR }} {{ .CLUSTERS_DIR }} {{ .CNI_DIR }} {{ .TK_DATA_DIR }}/cache; do
-          [ -d "$d" ] || sudo install -d -o "$(id -u)" -g "$(id -g)" "$d"
-          [ -w "$d" ] || sudo chown "$(id -u):$(id -g)" "$d"
+          if [ ! -d "$d" ]; then sudo install -d -o "$(id -u)" -g "$(id -g)" "$d"
+          elif [ ! -w "$d" ]; then
+            if [ "$(stat -c %u "$d")" = 0 ]; then sudo chown "$(id -u):$(id -g)" "$d"
+            else fail "$d is owned by $(stat -c %U "$d"), not $(id -un); set TK_DATA_DIR to a directory of your own or fix its ownership"; fi
+          fi
         done
         echo "preflight ok: podman $v, systemd, cgroup v2, swap off, host bridge-nf off, {{ .TK_DATA_DIR }} owned by $(id -un)"
