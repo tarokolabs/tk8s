@@ -52,7 +52,9 @@ jobs:
           KUBECONFIG=/opt/taroko/clusters/ci/kubeconfig kubectl get pods -A -o wide > logs/pods.txt 2>&1 || true
       - uses: actions/upload-artifact@v4
         if: failure()
-        with: { name: l3-logs-${{ github.run_id }}, path: logs/ }
+        with:
+          name: l3-logs-${{ github.run_id }}
+          path: logs/
       - name: Delete the cluster
         if: always()
         run: tkctl delete cluster ci --yes || true
