@@ -1,4 +1,4 @@
-# L3: a real cluster on a GitHub runner. Ubuntu 24.04 runners ship podman 4.9, below the 5.4 floor,
+# L3: a real cluster on a GitHub runner for each supported Kubernetes version, on every push to v2/main and tag. Ubuntu 24.04 runners ship podman 4.9, below the 5.4 floor,
 # so podman comes from the OBS unstable repo (the same source as Debian testing).
 name: l3
 # Least privilege: the job only reads the checkout; the cluster lives on the runner.
@@ -6,22 +6,37 @@ permissions:
   contents: read
 on:
   push:
-    branches: [v2]
+    branches: [v2, main]
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
-      k8s:
-        description: "Kubernetes version (default: versions.yaml kubernetes.default)"
-        required: false
-        type: string
       datapath:
         description: "cilium datapath: auto | netkit | veth"
         required: false
         default: auto
         type: string
+concurrency:
+  group: l3-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
+  versions:
+    runs-on: ubuntu-24.04
+    outputs:
+      k8s: ${{ steps.v.outputs.k8s }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          d=$(sed -nE 's/^  default: *"([^"]+)"/\1/p' versions.yaml); p=$(sed -nE 's/^  previous: *"([^"]+)"/\1/p' versions.yaml)
+          echo "k8s=[\"$d\",\"$p\"]" >> "$GITHUB_OUTPUT"
   cluster:
+    needs: versions
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        k8s: ${{ fromJSON(needs.versions.outputs.k8s) }}
     steps:
       - uses: actions/checkout@v4
       - name: Prepare the runner (podman 5 built from source, helpers from OBS, swap off, sudo)
@@ -54,9 +69,7 @@ jobs:
       - name: Install tk8s with install.sh from this checkout
         run: TK_VERSION="${GITHUB_REF_NAME}" TK_REPO="$GITHUB_WORKSPACE" TK_RAW="file://$GITHUB_WORKSPACE" sh install.sh
       - name: Create a cluster
-        run: |
-          k8s="${{ inputs.k8s }}"; [ -n "$k8s" ] || k8s=$(sed -nE 's/^  default: *"([^"]+)"/\1/p' versions.yaml)
-          time tkctl create cluster ci --workers 1 --k8s "$k8s" --datapath "${{ inputs.datapath || 'auto' }}"
+        run: time tkctl create cluster ci --workers 1 --k8s "${{ matrix.k8s }}" --datapath "${{ inputs.datapath || 'auto' }}"
       - name: Verify
         run: tkctl verify cluster ci
       - name: Collect logs
@@ -87,7 +100,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: l3-logs-${{ github.run_id }}
+          name: l3-logs-${{ github.run_id }}-${{ matrix.k8s }}
           path: logs/
       - name: Delete the cluster
         if: always()

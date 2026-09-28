@@ -49,6 +49,7 @@
 | swap | 必須關閉：`sudo swapoff -a`，並註解 `/etc/fstab` 的 swap 行 |
 | 權限 | `sudo` 免密碼 |
 | 網路 | 需連外：下載節點 image、CNI plugins、cilium CLI、Gateway API CRD |
+| 主機防火牆 | 前置檢查會把主機的 `net.bridge.bridge-nf-call-iptables` 設為 0 並寫入 `/etc/sysctl.d/90-tk8s.conf`：節點之間的橋接流量不經主機 iptables，否則裝了 Docker 的主機（FORWARD 預設 DROP）會擋掉 pod 到其他節點的流量 |
 | 其他 | `curl`、`git` |
 
 `task` 與 `kubectl` 由 `install.sh` 下載到 `/usr/local/bin`。
@@ -174,7 +175,7 @@ tkctl create cluster -f tkdt.yaml
 
 ## 支援的 K8s 版本
 
-支援政策：**最新與次新的 K8s minor**，目前為 1.37.x 與 1.36.x，釘在 `versions.yaml`。更舊的版本可以用 `--k8s` 指定，節點 image 會本地建置，但不在主要支援範圍。
+支援政策：**最新與次新的 K8s minor**，目前為 1.37.x 與 1.36.x，釘在 `versions.yaml`。每次 push 到 `main` 與每個 tag，CI 都會在 GitHub runner 上以這兩個版本各建一個叢集並跑 `tkctl verify cluster`（workflow `l3`）。更舊的版本可以用 `--k8s` 指定，節點 image 會本地建置，但不在主要支援範圍。
 
 ## 與 v1 的差異
 

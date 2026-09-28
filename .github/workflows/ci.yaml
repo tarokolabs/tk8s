@@ -17,7 +17,7 @@ jobs:
       - name: Taskfiles parse
         run: task --list >/dev/null
       - name: shellcheck
-        run: sudo apt-get install -y shellcheck >/dev/null && shellcheck -S warning bin/tkctl tests/*.sh
+        run: sudo apt-get install -y shellcheck >/dev/null && shellcheck -S warning bin/tkctl tests/*.sh && shellcheck -s sh -S warning install.sh
       - name: yamllint
         run: |
           pip install --quiet yamllint
