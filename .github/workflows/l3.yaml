@@ -1,0 +1,53 @@
+# L3: a real cluster on a GitHub runner. Ubuntu 24.04 runners ship podman 4.9, below the 5.4 floor,
+# so podman comes from the OBS unstable repo (the same source as Debian testing).
+name: l3
+on:
+  workflow_dispatch:
+    inputs:
+      k8s:
+        description: "Kubernetes version (default: versions.yaml kubernetes.default)"
+        required: false
+        type: string
+jobs:
+  cluster:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare the runner (podman 5 from OBS, swap off, sudo)
+        run: |
+          set -eux
+          sudo mkdir -p /etc/apt/keyrings
+          curl -fsSL https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_24.04/Release.key \
+            | gpg --dearmor | sudo tee /etc/apt/keyrings/libcontainers-unstable.gpg >/dev/null
+          echo "deb [signed-by=/etc/apt/keyrings/libcontainers-unstable.gpg] https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_24.04/ /" \
+            | sudo tee /etc/apt/sources.list.d/libcontainers-unstable.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq podman netavark aardvark-dns
+          podman --version
+          sudo swapoff -a
+          sudo -n true
+          free -g; nproc; uname -r
+      - name: Install tk8s with install.sh from this checkout
+        run: TK_VERSION="${GITHUB_REF_NAME}" TK_REPO="$GITHUB_WORKSPACE" TK_RAW="file://$GITHUB_WORKSPACE" sh install.sh
+      - name: Create a cluster
+        run: |
+          k8s="${{ inputs.k8s }}"; [ -n "$k8s" ] || k8s=$(sed -nE 's/^  default: *"([^"]+)"/\1/p' versions.yaml)
+          time tkctl create cluster ci --workers 1 --k8s "$k8s"
+      - name: Verify
+        run: tkctl verify cluster ci
+      - name: Collect logs
+        if: failure()
+        run: |
+          mkdir -p logs
+          sudo journalctl -u ci.target -u ci-control-plane.service -u ci-worker1.service --no-pager > logs/units.log 2>&1 || true
+          sudo podman ps -a > logs/podman-ps.txt 2>&1 || true
+          for n in ci-control-plane ci-worker1; do sudo podman logs "$n" > "logs/$n.log" 2>&1 || true; sudo podman exec "$n" journalctl -u kubelet -u crio --no-pager > "logs/$n-node.log" 2>&1 || true; done
+          cp /tmp/ci-cilium*.out logs/ 2>/dev/null || true
+          KUBECONFIG=/opt/taroko/clusters/ci/kubeconfig kubectl get pods -A -o wide > logs/pods.txt 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with: { name: l3-logs-${{ github.run_id }}, path: logs/ }
+      - name: Delete the cluster
+        if: always()
+        run: tkctl delete cluster ci --yes || true

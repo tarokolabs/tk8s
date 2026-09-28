@@ -10,7 +10,8 @@ main() {
   TK_REPO="${TK_REPO:-https://github.com/tarokolabs/tk8s.git}"
   TK_INSTALL_DIR="${TK_INSTALL_DIR:-/opt/taroko/tk8s}"
   TK_BIN_DIR="${TK_BIN_DIR:-/usr/local/bin}"
-  RAW="https://raw.githubusercontent.com/tarokolabs/tk8s/${TK_VERSION}"
+  # TK_RAW: where versions.yaml is read from (CI points it at the checkout under test with file://).
+  RAW="${TK_RAW:-https://raw.githubusercontent.com/tarokolabs/tk8s/${TK_VERSION}}"
 
   say() { printf 'install: %s\n' "$*"; }
   fail() { printf 'install: %s\n' "$*" >&2; exit 1; }

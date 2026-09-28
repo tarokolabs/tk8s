@@ -72,6 +72,10 @@ if [ -e "$TMP/usr/local/bin/task" ]; then echo "FAIL  bad task checksum: no bina
 run env KUBECTL_BAD=1
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "bad kubectl checksum: exit non-zero"
 if [ -e "$TMP/usr/local/bin/kubectl" ]; then echo "FAIL  bad kubectl checksum: no binary left"; FAILURES=$((FAILURES+1)); else echo "PASS  bad kubectl checksum: no binary left"; fi
+# TK_RAW points versions.yaml at a local checkout (CI installs from the commit under test)
+run env TK_RAW="file://$PWD"
+assert_eq "0" "$rc" "TK_RAW install exits 0"
+assert_contains "$(cat "$STUB_LOG")" "curl file://$PWD/versions.yaml" "versions.yaml fetched from TK_RAW"
 # prerequisites
 printf '#!/usr/bin/env bash\necho "podman version 4.9.3"\n' > "$STUB/podman"; run env
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "old podman: refused"
