@@ -11,3 +11,9 @@ for w in .github/workflows/*.y*ml; do
 done
 assert_contains "$(cat .github/workflows/release.yml)" "scripts/wait-l3.sh" "release gate uses the tested wait script"
 finish
+
+# ci.yaml: lint and unit tests are separate jobs, so a red check names what actually failed
+ci_jobs=$(awk '/^jobs:/{f=1;next} f && /^  [a-z0-9_-]+:$/{sub(":","");print $1}' .github/workflows/ci.yaml | tr '\n' ' ')
+assert_eq "lint test " "$ci_jobs" "ci.yaml runs lint and test as separate jobs"
+assert_contains "$(awk '/^  test:/{f=1} f' .github/workflows/ci.yaml)" "tests/run.sh" "unit tests live in the test job"
+if awk '/^  lint:/{f=1} /^  test:/{f=0} f' .github/workflows/ci.yaml | grep -q "tests/run.sh"; then echo "FAIL  lint job does not run the unit tests"; FAILURES=$((FAILURES+1)); else echo "PASS  lint job does not run the unit tests"; fi
