@@ -19,20 +19,30 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare the runner (podman 5 from OBS, swap off, sudo)
+      - name: Prepare the runner (podman 5 built from source, helpers from OBS, swap off, sudo)
         run: |
           set -eux
+          # Ubuntu 24.04 ships podman 4.9 and OBS has no podman 5 for it, only the helpers.
           sudo mkdir -p /etc/apt/keyrings
           curl -fsSL https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_24.04/Release.key \
             | gpg --dearmor | sudo tee /etc/apt/keyrings/libcontainers-unstable.gpg >/dev/null
           echo "deb [signed-by=/etc/apt/keyrings/libcontainers-unstable.gpg] https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_24.04/ /" \
             | sudo tee /etc/apt/sources.list.d/libcontainers-unstable.list
           sudo apt-get update -qq
-          sudo apt-get install -y -qq podman netavark aardvark-dns
+          # Keep containers-common (policy.json, registries.conf); drop the 4.9 binary and its Quadlet generator.
+          sudo apt-get remove -y -qq podman
+          sudo apt-get install -y -qq netavark aardvark-dns conmon crun uidmap \
+            libgpgme-dev libseccomp-dev libbtrfs-dev libassuan-dev libdevmapper-dev libsystemd-dev pkg-config go-md2man
+          git clone --quiet --depth 1 --branch v${PODMAN_VERSION} https://github.com/containers/podman.git /tmp/podman
+          make -C /tmp/podman -j"$(nproc)" BUILDTAGS="seccomp systemd" binaries
+          sudo make -C /tmp/podman install.bin install.systemd
+          sudo ln -sfn /usr/local/lib/systemd/system-generators/podman-system-generator /etc/systemd/system-generators/podman-system-generator || true
           podman --version
           sudo swapoff -a
           sudo -n true
           free -g; nproc; uname -r
+        env:
+          PODMAN_VERSION: "5.4.2"
       - name: Install tk8s with install.sh from this checkout
         run: TK_VERSION="${GITHUB_REF_NAME}" TK_REPO="$GITHUB_WORKSPACE" TK_RAW="file://$GITHUB_WORKSPACE" sh install.sh
       - name: Create a cluster
