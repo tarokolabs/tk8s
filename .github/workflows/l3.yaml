@@ -30,9 +30,13 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/libcontainers-unstable.list
           sudo apt-get update -qq
           # Keep containers-common (policy.json, registries.conf); drop the 4.9 binary and its Quadlet generator.
-          sudo apt-get remove -y -qq podman
-          sudo apt-get install -y -qq netavark aardvark-dns conmon crun uidmap \
+          sudo apt-get remove -y -qq podman crun
+          sudo apt-get install -y -qq netavark aardvark-dns conmon uidmap \
             libgpgme-dev libseccomp-dev libbtrfs-dev libassuan-dev libdevmapper-dev libsystemd-dev pkg-config go-md2man
+          # Ubuntu's crun 1.14 rejects the OCI spec version podman 5 emits ("unknown version specified").
+          crun_v=$(sed -nE 's/^crun: *"([^"]+)"/\1/p' versions.yaml)
+          sudo curl -fsSL -o /usr/local/bin/crun "https://github.com/containers/crun/releases/download/${crun_v}/crun-${crun_v}-linux-amd64"
+          sudo chmod 755 /usr/local/bin/crun; crun --version | head -1
           git clone --quiet --depth 1 --branch v${PODMAN_VERSION} https://github.com/containers/podman.git /tmp/podman
           make -C /tmp/podman -j"$(nproc)" BUILDTAGS="seccomp systemd" binaries
           sudo make -C /tmp/podman install.bin install.systemd
