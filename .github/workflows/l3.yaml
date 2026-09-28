@@ -13,6 +13,11 @@ on:
         description: "Kubernetes version (default: versions.yaml kubernetes.default)"
         required: false
         type: string
+      datapath:
+        description: "cilium datapath: auto | netkit | veth"
+        required: false
+        default: auto
+        type: string
 jobs:
   cluster:
     runs-on: ubuntu-24.04
@@ -52,7 +57,7 @@ jobs:
       - name: Create a cluster
         run: |
           k8s="${{ inputs.k8s }}"; [ -n "$k8s" ] || k8s=$(sed -nE 's/^  default: *"([^"]+)"/\1/p' versions.yaml)
-          time tkctl create cluster ci --workers 1 --k8s "$k8s"
+          time tkctl create cluster ci --workers 1 --k8s "$k8s" --datapath "${{ inputs.datapath || 'auto' }}"
       - name: Verify
         run: tkctl verify cluster ci
       - name: Collect logs
@@ -65,6 +70,16 @@ jobs:
           cp /tmp/ci-cilium*.out logs/ 2>/dev/null || true
           export KUBECONFIG=/opt/taroko/clusters/ci/kubeconfig
           kubectl get pods -A -o wide > logs/pods.txt 2>&1 || true
+          # pod-level reachability of the API ClusterIP from each node, cilium service map, host firewall
+          for n in ci-control-plane ci-worker1; do
+            kubectl run "probe-$n" --image=docker.io/library/alpine:3.22 --restart=Never --overrides="{\"spec\":{\"nodeName\":\"$n\"}}" -- sh -c 'wget -qO- -T 5 --no-check-certificate https://10.98.0.1/version 2>&1 | head -c 200; echo; wget -qO- -T 5 --no-check-certificate https://172.22.0.1:6443/version 2>&1 | head -c 200' >/dev/null 2>&1 || true
+          done; sleep 20
+          for n in ci-control-plane ci-worker1; do { echo "== probe on $n (ClusterIP then node IP)"; kubectl logs "probe-$n" 2>&1; } >> logs/probes.txt; done
+          c=$(kubectl -n kube-system get pods -l k8s-app=cilium -o jsonpath='{.items[0].metadata.name}'); kubectl -n kube-system exec "$c" -- cilium-dbg service list > logs/cilium-services.txt 2>&1 || true
+          kubectl -n kube-system exec "$c" -- cilium-dbg status --verbose > logs/cilium-verbose.txt 2>&1 || true
+          sudo nft list ruleset > logs/nft.txt 2>&1 || true; sudo iptables -S 2>/dev/null > logs/iptables.txt || true
+          sudo podman exec ci-worker1 sysctl net.ipv4.ip_forward net.ipv4.conf.all.rp_filter net.bridge.bridge-nf-call-iptables > logs/worker-sysctl.txt 2>&1 || true
+          sysctl net.ipv4.ip_forward net.ipv4.conf.all.rp_filter net.bridge.bridge-nf-call-iptables > logs/host-sysctl.txt 2>&1 || true
           # describe and logs of every pod that is not Running/Completed
           kubectl get pods -A --no-headers 2>/dev/null | awk '$4!="Running" && $4!="Completed"{print $1, $2}' | while read -r ns pod; do
             { kubectl -n "$ns" describe pod "$pod"; echo "--- logs"; kubectl -n "$ns" logs "$pod" --all-containers --tail=400; echo "--- previous"; kubectl -n "$ns" logs "$pod" --all-containers --previous --tail=400; } > "logs/pod-$ns-$pod.txt" 2>&1 || true
