@@ -8,7 +8,7 @@ K8S=$(sed -nE 's/^  default: *"([^"]+)"/\1/p' versions.yaml); TASKV=$(v task)
 # The whole script must be inside a function called on the last line, so a truncated `curl | sh` runs nothing.
 assert_contains "$(tail -n 1 install.sh 2>/dev/null)" 'main "$@"' "script body runs only from main on the last line"
 assert_eq "1" "$(grep -c '^main() {' install.sh 2>/dev/null)" "one main function"
-printf '#!/usr/bin/env bash\n[ "$1" = -n ] && shift; exec "$@"\n' > "$STUB/sudo"
+printf '#!/usr/bin/env bash\n[ "$1" = -n ] && shift; echo "sudo $*" >> "$STUB_LOG"; exec "$@"\n' > "$STUB/sudo"
 printf '#!/usr/bin/env bash\necho "podman version 5.4.2"\n' > "$STUB/podman"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/swapon"
 printf '#!/usr/bin/env bash\necho "$*" >> "$STUB_LOG"; exit 0\n' > "$STUB/systemctl"
@@ -39,7 +39,7 @@ SH
 cat > "$STUB/tar" <<'SH'
 #!/usr/bin/env bash
 # `tar -xz -C DIR -f ARCHIVE task` from a fake archive: drop a fake task binary in DIR.
-prev=""; for a in "$@"; do case "$prev" in -C) d=$a;; esac; prev=$a; done; printf '#!/bin/sh\necho "Task version: %s"\n' "$TASKV" > "$d/task"; chmod +x "$d/task"
+prev=""; for a in "$@"; do case "$prev" in -C) d=$a;; esac; prev=$a; done; printf '#!/bin/sh\necho "%s"\n' "${TASKV#v}" > "$d/task"; chmod +x "$d/task"   # go-task prints a bare version
 SH
 chmod +x "$STUB"/*; export TASKV
 run() { : > "$STUB_LOG"; out=$(PATH="$STUB:/usr/bin:/bin" TK_INSTALL_DIR="$TMP/opt/tk8s" TK_BIN_DIR="$TMP/usr/local/bin" "$@" sh install.sh 2>&1); rc=$?; }
@@ -53,6 +53,9 @@ assert_contains "$(cat "$STUB_LOG")" "--branch main" "default TK_VERSION is main
 if [ -x "$TMP/usr/local/bin/kubectl" ] && [ -x "$TMP/usr/local/bin/task" ]; then echo "PASS  binaries installed into TK_BIN_DIR"; else echo "FAIL  binaries installed into TK_BIN_DIR"; FAILURES=$((FAILURES+1)); fi
 assert_eq "$TMP/opt/tk8s/bin/tkctl" "$(readlink "$TMP/usr/local/bin/tkctl")" "tkctl symlinked into TK_BIN_DIR"
 assert_contains "$out" "tkctl create cluster" "prints the next step"
+# The checkout belongs to the installing user: git refuses root-owned repos for other users, and tkctl version needs git.
+assert_contains "$(cat "$STUB_LOG")" "sudo install -d -o $(id -u) -g $(id -g) $TMP/opt/tk8s" "checkout directory created for the installing user"
+if grep -q "sudo git" "$STUB_LOG"; then echo "FAIL  git runs as the user, not root"; FAILURES=$((FAILURES+1)); else echo "PASS  git runs as the user, not root"; fi
 # rerun: existing checkout is updated, not re-cloned; same task version is not downloaded again; symlink refreshed
 run env TK_VERSION=v2026.10.0
 assert_eq "0" "$rc" "rerun exits 0"

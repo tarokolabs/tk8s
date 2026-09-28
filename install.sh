@@ -35,8 +35,9 @@ main() {
   k8s_v=$(sed -nE 's/^  default: *"?([^"]+)"?.*/\1/p' "$tmp/versions.yaml")
   [ -n "$task_v" ] && [ -n "$k8s_v" ] || fail "versions.yaml of $TK_VERSION has no task/kubernetes versions"
 
-  have_task=$("$TK_BIN_DIR/task" --version 2>/dev/null | awk '{print $3}' || true)
-  if [ "$have_task" = "$task_v" ] || [ "$have_task" = "${task_v#v}" ]; then
+  # go-task prints a bare version ("3.53.1"); older builds printed "Task version: v3.53.1".
+  have_task=$("$TK_BIN_DIR/task" --version 2>/dev/null | awk '{print $NF}' | sed 's/^v//' || true)
+  if [ "$have_task" = "${task_v#v}" ]; then
     say "task $task_v already installed"
   else
     base="https://github.com/go-task/task/releases/download/$task_v"
@@ -63,14 +64,15 @@ main() {
     say "kubectl $k8s_v installed to $TK_BIN_DIR"
   fi
 
-  # 3. The platform itself: a git checkout, updated in place on reruns
+  # 3. The platform itself: a git checkout owned by the installing user (git refuses root-owned
+  #    repositories for other users, and tkctl version reads git), updated in place on reruns
   if [ -d "$TK_INSTALL_DIR/.git" ]; then
-    sudo git -C "$TK_INSTALL_DIR" fetch --tags --quiet origin
-    sudo git -C "$TK_INSTALL_DIR" checkout --quiet "$TK_VERSION"
-    if [ "$TK_VERSION" = main ]; then sudo git -C "$TK_INSTALL_DIR" pull --quiet --ff-only origin main; fi
+    git -C "$TK_INSTALL_DIR" fetch --tags --quiet origin
+    git -C "$TK_INSTALL_DIR" checkout --quiet "$TK_VERSION"
+    if [ "$TK_VERSION" = main ]; then git -C "$TK_INSTALL_DIR" pull --quiet --ff-only origin main; fi
   else
-    sudo mkdir -p "$(dirname "$TK_INSTALL_DIR")"
-    sudo git clone --quiet --branch "$TK_VERSION" "$TK_REPO" "$TK_INSTALL_DIR"
+    sudo install -d -o "$(id -u)" -g "$(id -g)" "$TK_INSTALL_DIR"
+    git clone --quiet --branch "$TK_VERSION" "$TK_REPO" "$TK_INSTALL_DIR"
   fi
   sudo ln -sfn "$TK_INSTALL_DIR/bin/tkctl" "$TK_BIN_DIR/tkctl"
   say "tk8s $TK_VERSION at $TK_INSTALL_DIR ($(git -C "$TK_INSTALL_DIR" rev-parse --short HEAD)); tkctl linked into $TK_BIN_DIR"
