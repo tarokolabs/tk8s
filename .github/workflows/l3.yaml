@@ -1,7 +1,12 @@
 # L3: a real cluster on a GitHub runner. Ubuntu 24.04 runners ship podman 4.9, below the 5.4 floor,
 # so podman comes from the OBS unstable repo (the same source as Debian testing).
 name: l3
+# Least privilege: the job only reads the checkout; the cluster lives on the runner.
+permissions:
+  contents: read
 on:
+  push:
+    branches: [v2]
   workflow_dispatch:
     inputs:
       k8s:
