@@ -1,40 +1,50 @@
-# 發佈流程（#13）：推上 v* tag 即觸發
-#   1. 建置節點 image 矩陣（tag = K8s 版本）推送 GHCR——平台只發佈節點 image，
-#      叢集內 image（toolbox/admin 等）屬教材，由 wulin repo 發佈
-#   2. 彙整 digest，生成 Release notes（image 對照表即相容性契約）
-#   3. 建立 GitHub Release（安裝用的 source archive 由 GitHub 自動附上）
-# 首次設定：node package 的
-# Manage Actions access 需把本 repo 加為 Write，GITHUB_TOKEN 才推得動。
+# Release (#13): pushing a v* tag builds the node image for both supported Kubernetes versions,
+# waits for the L3 run of the same commit, and creates the GitHub Release with notes rendered
+# from versions.yaml and the image digests (the digest table is the compatibility contract).
+# First-time setup: the GHCR package tk8s/node must grant this repo write access under
+# "Manage Actions access" for GITHUB_TOKEN to push.
 name: release
-
+permissions:
+  contents: read
 on:
   push:
     tags: ["v*"]
-
-permissions:
-  contents: write
-  packages: write
-
 jobs:
-  node:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        k8s: ["1.36.4", "1.37.0"]
+  versions:
+    runs-on: ubuntu-24.04
+    outputs:
+      k8s: ${{ steps.v.outputs.k8s }}
     steps:
       - uses: actions/checkout@v4
-      - name: 登入 GHCR
+      - id: v
+        run: |
+          d=$(sed -nE 's/^  default: *"([^"]+)"/\1/p' versions.yaml); p=$(sed -nE 's/^  previous: *"([^"]+)"/\1/p' versions.yaml)
+          echo "k8s=[\"$d\",\"$p\"]" >> "$GITHUB_OUTPUT"
+  node:
+    needs: versions
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        k8s: ${{ fromJSON(needs.versions.outputs.k8s) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
-      - name: 建置並推送節點 image
+      - name: Build and push the node image
         run: TK="$GITHUB_WORKSPACE" SUDO="" DIGEST_DIR="$GITHUB_WORKSPACE/digests" scripts/build-images.sh node "${{ matrix.k8s }}"
       - uses: actions/upload-artifact@v4
         with:
           name: digests-node-${{ matrix.k8s }}
           path: digests/
-
   release:
     needs: [node]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -42,39 +52,19 @@ jobs:
           pattern: digests-*
           merge-multiple: true
           path: digests
-      - name: 生成 Release notes
+      - name: Wait for L3 on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          CILIUM=$(grep -oE 'CILIUM_VER:-[0-9.]+' libexec/tkctl/cluster/create | head -1 | cut -d- -f2)
-          GWAPI=$(grep -oE 'GWAPI_VER:-v[0-9.]+' libexec/tkctl/cluster/create | head -1 | cut -d- -f2)
-          {
-            echo "## 安裝"
-            echo
-            echo '```bash'
-            echo "git clone --branch $GITHUB_REF_NAME https://github.com/tarokolabs/tk8s.git tk8s"
-            echo '```'
-            echo
-            echo "需求與使用方式見 [README](https://github.com/tarokolabs/tk8s/blob/$GITHUB_REF_NAME/README.md)。"
-            echo
-            echo "## 本版 image 對照表"
-            echo
-            echo "以下節點 image 由本 tag 的配方於 CI 建置（tag 對應 K8s 版本；以 digest 引用可完全固定內容）。叢集內 image（toolbox、admin 等）屬教材範疇，由 [wulin](https://github.com/tarokolabs/wulin) 發佈。"
-            echo
-            echo "| image | digest |"
-            echo "|---|---|"
-            sort digests/*.digest | awk '{printf "| `%s` | `%s` |\n", $1, $2}'
-            echo
-            echo "## 平台元件"
-            echo
-            echo "| 元件 | 版本 |"
-            echo "|---|---|"
-            echo "| Kubernetes（kubeadm）| 主要支援最新與次新 minor——本版節點 image：1.36.4、1.37.0（更舊版本可本地建置）|"
-            echo "| Container runtime | CRI-O（對齊 K8s minor） |"
-            echo "| CNI | cilium ${CILIUM}（kube-proxy replacement + LB-IPAM/L2）|"
-            echo "| Gateway API | cilium 內建 controller（Gateway API ${GWAPI}，experimental channel CRD）|"
-            echo "| 儲存 | local-path-provisioner |"
-          } > /tmp/notes.md
-          cat /tmp/notes.md
-      - name: 建立 Release
+          for i in $(seq 1 90); do
+            st=$(gh run list -R "$GITHUB_REPOSITORY" --workflow l3.yaml --commit "$GITHUB_SHA" --json status,conclusion -q '.[0] | .status + "/" + (.conclusion // "")')
+            case "$st" in completed/success) echo "L3 green"; exit 0 ;; completed/*) echo "L3 $st"; exit 1 ;; esac
+            sleep 30
+          done
+          echo "L3 did not finish"; exit 1
+      - name: Render release notes
+        run: scripts/release-notes.sh "$GITHUB_REF_NAME" digests > /tmp/notes.md && cat /tmp/notes.md
+      - name: Create the Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" --title "tk8s $GITHUB_REF_NAME" --notes-file /tmp/notes.md

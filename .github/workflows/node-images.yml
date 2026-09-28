@@ -2,6 +2,8 @@
 # 手動觸發建置指定版本的 node image（CRI-O）。
 # 前提：docker.io/kindest/node 已發佈對應版本 tag。
 name: node-images
+permissions:
+  contents: read
 
 on:
   workflow_dispatch:
@@ -11,12 +13,12 @@ on:
         required: true
         type: string
 
-permissions:
-  packages: write
-
 jobs:
   node:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
     env:
       K8S_VERSIONS: ${{ inputs.k8s_versions }}
     steps:
