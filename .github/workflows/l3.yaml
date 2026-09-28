@@ -67,7 +67,7 @@ jobs:
           kubectl get pods -A -o wide > logs/pods.txt 2>&1 || true
           # describe and logs of every pod that is not Running/Completed
           kubectl get pods -A --no-headers 2>/dev/null | awk '$4!="Running" && $4!="Completed"{print $1, $2}' | while read -r ns pod; do
-            { kubectl -n "$ns" describe pod "$pod"; echo "--- logs"; kubectl -n "$ns" logs "$pod" --all-containers --tail=100; echo "--- previous"; kubectl -n "$ns" logs "$pod" --all-containers --previous --tail=100; } > "logs/pod-$ns-$pod.txt" 2>&1 || true
+            { kubectl -n "$ns" describe pod "$pod"; echo "--- logs"; kubectl -n "$ns" logs "$pod" --all-containers --tail=400; echo "--- previous"; kubectl -n "$ns" logs "$pod" --all-containers --previous --tail=400; } > "logs/pod-$ns-$pod.txt" 2>&1 || true
           done
       - uses: actions/upload-artifact@v4
         if: failure()
