@@ -22,5 +22,13 @@ jobs:
         run: |
           pip install --quiet yamllint
           yamllint -d '{extends: relaxed, rules: {line-length: disable}}' Taskfile.yaml taskfiles versions.yaml .github/workflows
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install task
+        run: |
+          v=$(grep '^task:' versions.yaml | awk '{print $2}' | tr -d '"')
+          curl -fsSL https://github.com/go-task/task/releases/download/${v}/task_linux_amd64.tar.gz | sudo tar -xz -C /usr/local/bin task
       - name: Unit tests
         run: tests/run.sh
