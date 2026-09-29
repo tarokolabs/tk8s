@@ -31,7 +31,8 @@ SH
 cat > "$STUB/kubectl" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
-  *"get ds "*) exit 1 ;;
+  *"get ds "*) [ -f "$STUB/ds-exists" ] ;;
+  *"get ciliumloadbalancerippool"*) [ -f "$STUB/pool-exists" ] ;;
   *"get secret"*) exit 0 ;;
   *"wait gatewayclass"*) [ ! -f "$STUB/gw-fail" ] ;;
   *"get nodes"*) if [ -f "$STUB/nodes-notready" ]; then echo "demo-worker1 NotReady <none> 1m v1.37.0"; fi; echo "demo-control-plane Ready control-plane 1m v1.37.0" ;;
@@ -61,4 +62,15 @@ assert_eq "1" "$(grep -c datapath_resolved "$TMP/clusters/demo/cluster.yaml")" "
 fixture canal; run
 assert_eq "0" "$rc" "canal path exits 0"
 assert_contains "$(cat "$STUB_LOG")" "projectcalico/calico/$(v calico)/manifests/canal.yaml" "canal manifest at the pinned calico version"
+fixture cilium
+# Regression: a first attempt that timed out waiting for cilium leaves the DaemonSet behind but
+# never applied the LB-IPAM pool; the rerun must run the task again, not report it up to date.
+touch "$STUB/ds-exists"; rm -f "$STUB/pool-exists"; run
+assert_eq "0" "$rc" "rerun after a cilium timeout exits 0"
+assert_contains "$out" "LB-IPAM pool" "rerun after a cilium timeout applies the LB-IPAM pool"
+assert_contains "$out" "cilium $(v cilium) ok (upgrade)" "rerun upgrades the existing cilium release"
+touch "$STUB/pool-exists"; run
+assert_eq "0" "$rc" "complete install is up to date"
+if [[ "$out" == *"LB-IPAM pool"* ]]; then echo "FAIL  complete install is not redone"; FAILURES=$((FAILURES+1)); else echo "PASS  complete install is not redone"; fi
+
 rm -rf "$TMP"; finish

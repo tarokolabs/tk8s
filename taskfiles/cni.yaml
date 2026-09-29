@@ -27,7 +27,9 @@ tasks:
     env:
       KUBECONFIG: '{{ .KUBECONFIG }}'
     status:
-      - 'kubectl -n kube-system get ds cilium >/dev/null 2>&1 || kubectl -n kube-system get ds canal >/dev/null 2>&1'
+      # cilium counts as installed only once its LB-IPAM pool exists: a first attempt that timed
+      # out waiting for the DaemonSet leaves the DaemonSet behind but never reached the pool.
+      - '{ kubectl -n kube-system get ds cilium >/dev/null 2>&1 && kubectl get ciliumloadbalancerippool default-pool >/dev/null 2>&1; } || kubectl -n kube-system get ds canal >/dev/null 2>&1'
     cmds:
       - |
         set -e
