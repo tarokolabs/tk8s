@@ -20,6 +20,8 @@ spec:
     - {role: worker, name: demo-worker1, ip: 172.22.0.2, cpu: 2, memory: 4g, join: true}
 YAML
 printf '#!/usr/bin/env bash\nexec "$@"\n' > "$STUB/sudo"
+# podman exec <node> journalctl -u kubelet …: quiet unless the test plants kubelet-noisy
+printf '#!/usr/bin/env bash\necho "podman $*" >> "$STUB/podman.log"\n[ -f "$STUB/kubelet-noisy" ] && echo \x27E0929 14:39:56 993 summary_sys_containers.go:91] "Failed to get system container stats" err="failed to get cgroup stats for /system.slice/containerd.service"\x27\nexit 0\n' > "$STUB/podman"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/sleep"
 printf '#!/usr/bin/env bash\n[ "$1" = is-active ] && [ ! -f "$STUB/stopped" ]\n' > "$STUB/systemctl"
 printf '#!/usr/bin/env bash\n[ "$1" = status ] && [ ! -f "$STUB/cilium-bad" ]\n' > "$STUB/cilium"
@@ -64,6 +66,8 @@ if [ -n "$pin" ] && grep -q -- "--image=$pin" "$STUB/kubectl.log"; then echo "PA
 assert_contains "$out" "PASS  nodes: 2/2 Ready" "nodes section"
 assert_contains "$out" "PASS  kube-system pods all Running" "system pods (waited for pods still starting after a boot)"
 assert_contains "$out" "PASS  cilium status" "cilium status"
+assert_contains "$out" "PASS  kubelet: no runtime cgroup errors" "kubelet section"
+assert_contains "$(cat "$STUB/podman.log")" "exec demo-control-plane journalctl -u kubelet" "kubelet log read on the control plane"
 assert_contains "$out" "PASS  kubectl top nodes" "metrics-server (retried until the first scrape landed)"
 assert_contains "$out" "PASS  PVC bound and pod wrote data" "local-path write"
 assert_contains "$out" "PASS  PV data on host" "local-path data on host"
@@ -87,6 +91,14 @@ assert_contains "$out" "FAIL  RuntimeClass crun — pod did not succeed" "failin
 assert_contains "$out" "[gateway-api]" "checks after a failure still run"
 assert_contains "$out" "FAIL 1" "summary counts exactly the crun failure"
 rm -f "$STUB/crun-bad"
+# kubelet pointed at a runtime cgroup that does not exist (containerd's, on a CRI-O node) logs
+# "Failed to get system container stats" every few seconds; verify must call that out.
+touch "$STUB/kubelet-noisy"; run
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "noisy kubelet: exit 1"
+assert_contains "$out" "FAIL  kubelet runtime cgroup" "noisy kubelet: named"
+assert_contains "$out" "containerd.service" "noisy kubelet: the message shows the cgroup it looks for"
+rm -f "$STUB/kubelet-noisy"
+
 touch "$STUB/stopped"; run
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "stopped cluster: refused"
 assert_contains "$out" "cluster demo is not running" "stopped cluster message"
@@ -94,3 +106,4 @@ rm -f "$STUB/stopped"; rm -f "$TMP/clusters/demo/.create-complete"; run
 assert_contains "$out" "not fully created" "half-created cluster message"
 if [[ "$out" == *"[nodes]"* ]]; then echo "FAIL  refused verify runs no checks"; FAILURES=$((FAILURES+1)); else echo "PASS  refused verify runs no checks"; fi
 rm -rf "$TMP"; finish
+

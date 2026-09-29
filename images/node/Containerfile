@@ -45,6 +45,9 @@ COPY storage.conf /etc/containers/storage.conf
 # 會報 can't stat imageStore dir，crio 起不來。
 RUN mkdir -p /var/lib/shared
 
-# 換掉 CRI：關閉 containerd，改由 crio 提供 CRI socket
+# 換掉 CRI：關閉 containerd，改由 crio 提供 CRI socket。kind 在 /etc/default/kubelet 把 kubelet 的
+# --runtime-cgroups 指向 containerd 的 cgroup；跟著換成 crio 的，否則 kubelet 每幾秒就報
+# "Failed to get system container stats"。
 RUN systemctl disable containerd.service && \
-    systemctl enable crio.service
+    systemctl enable crio.service && \
+    sed -i 's#/system.slice/containerd.service#/system.slice/crio.service#' /etc/default/kubelet

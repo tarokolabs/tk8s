@@ -56,6 +56,18 @@ tasks:
           ng "nodes: ${ready:-0}/{{ .NODE_COUNT }} Ready" "$(kubectl get nodes --no-headers 2>/dev/null | awk '$2!="Ready"{print $1}' | paste -sd' ' -)"
         fi
 
+        sect kubelet
+        # A kubelet watching a runtime cgroup that never exists (containerd's, on a CRI-O node) logs
+        # "Failed to get system container stats" every few seconds; two minutes of log is enough to tell.
+        cp={{ (index .DEF.spec.nodes 0).name }}
+        noisy=$(sudo podman exec $cp journalctl -u kubelet --no-pager --since -2min 2>/dev/null | grep -c "Failed to get system container stats" || true)
+        if [ "${noisy:-0}" = 0 ]; then
+          ok "kubelet: no runtime cgroup errors"
+        else
+          what=$(sudo podman exec $cp journalctl -u kubelet --no-pager --since -2min 2>/dev/null | grep -m1 -o 'cgroup stats for [^:]*' | tr -d '\\"')
+          ng "kubelet runtime cgroup" "$noisy errors in 2 min ($what)"
+        fi
+
         sect system
         # Right after a boot or start the system pods are still coming up; give them the same wait as the nodes.
         for i in $(seq 1 $((T/5))); do
