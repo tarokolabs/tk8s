@@ -13,6 +13,7 @@ tasks:
       - sudo podman image exists {{ .IMAGE }}
     cmds:
       - |
+        [ "${TK_OFFLINE:-}" != 1 ] || { echo "node image {{ .IMAGE }} is not present and TK_OFFLINE=1 forbids pulling or building it" >&2; exit 1; }
         if sudo podman pull {{ .IMAGE }} >/dev/null 2>&1; then echo "{{ .IMAGE }} pulled"; else
           echo "{{ .IMAGE }} is not published; building locally (the first build takes a few minutes)"
           sudo podman build --build-arg VER={{ .K8S }} --force-rm -t {{ .IMAGE }} {{ .TK_HOME }}/images/node
@@ -113,6 +114,22 @@ tasks:
         msg: "no image store for Kubernetes {{ .K8S }} under {{ .IMAGES_DIR }} (tkctl get images)"
     cmds:
       - |
+        if [ "${TK_ASSUME_YES:-}" != "1" ]; then
+          printf 'Delete the shared image store for Kubernetes {{ .K8S }} under {{ .IMAGES_DIR }}? [y/N] '
+          read -r a || a=""
+          case "$a" in y|Y) ;; *) echo "aborted"; exit 1 ;; esac
+        fi
+      # The cluster check and the delete run under the version's lock, after the prompt: a create that
+      # started while the prompt waited either holds the lock (prune waits, then sees its cluster) or
+      # finds the store gone and refills it. The lock file stays so a waiting ensure keeps its inode.
+      - flock {{ .IMAGES_DIR }}/{{ .K8S }}.lock task --silent -d {{ .TK_HOME }} images:delete-store K8S={{ .K8S }}
+
+  delete-store:
+    desc: Delete a version's store when no cluster uses it (prune runs this under the lock)
+    silent: true
+    requires: { vars: [K8S] }
+    cmds:
+      - |
         set -e
         using=""
         for f in {{ .CLUSTERS_DIR }}/*/cluster.yaml; do
@@ -120,11 +137,6 @@ tasks:
           if grep -qE '^ *kubernetes: *"?{{ .K8S }}"?' "$f"; then using="$using $(basename "$(dirname "$f")")"; fi
         done
         [ -z "$using" ] || { echo "image store {{ .K8S }} is used by cluster(s):$using; delete them first" >&2; exit 1; }
-        if [ "${TK_ASSUME_YES:-}" != "1" ]; then
-          printf 'Delete the shared image store for Kubernetes {{ .K8S }} under {{ .IMAGES_DIR }}? [y/N] '
-          read -r a || a=""
-          case "$a" in y|Y) ;; *) echo "aborted"; exit 1 ;; esac
-        fi
         sudo rm -rf {{ .IMAGES_DIR }}/{{ .K8S }}
-        rm -f {{ .IMAGES_DIR }}/{{ .K8S }}.conf {{ .IMAGES_DIR }}/{{ .K8S }}.lock
+        rm -f {{ .IMAGES_DIR }}/{{ .K8S }}.conf
         echo "image store {{ .K8S }} deleted"

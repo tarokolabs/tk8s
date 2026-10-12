@@ -9,8 +9,8 @@ STUB="$TMP/bin"; mkdir -p "$STUB" "$TMP/store"; export STUB STUB_LOG="$TMP/calls
 v() { sed -nE "s/^$1: *\"?([^\"]+)\"?.*/\1/p" versions.yaml; }
 K8S=$(sed -nE 's/^  default: *"([^"]+)"/\1/p' versions.yaml)
 printf '#!/usr/bin/env bash\necho "sudo $*" >> "$STUB_LOG"; exec "$@"\n' > "$STUB/sudo"
-printf '#!/usr/bin/env bash\necho "flock $1" >> "$STUB_LOG"; shift; exec "$@"\n' > "$STUB/flock"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/curl"
+printf '#!/usr/bin/env bash\necho "flock $1" >> "$STUB_LOG"; touch "$1"; shift; exec "$@"\n' > "$STUB/flock"  # flock creates the lock file, so does the stub
+printf '#!/usr/bin/env bash\necho "curl $*" >> "$STUB_LOG"; exit 0\n' > "$STUB/curl"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/tar"
 cat > "$STUB/podman" <<'SH'
 #!/usr/bin/env bash
@@ -68,6 +68,16 @@ assert_contains "$(cat "$STUB_LOG")" "podman build --build-arg VER=$K8S --force-
 rm -f "$STUB/no-node-image" "$STUB/node-unpublished"
 run task images:node K8S="$K8S"
 if grep -qE "podman (pull|build)" "$STUB_LOG"; then echo "FAIL  images:node is a no-op when the image exists"; FAILURES=$((FAILURES+1)); else echo "PASS  images:node is a no-op when the image exists"; fi
+# TK_OFFLINE=1 means never download: a missing node image is refused up front, not pulled and then built.
+touch "$STUB/no-node-image"; run env TK_OFFLINE=1 task images:node K8S="$K8S"
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "images:node offline with no node image fails"
+assert_contains "$out" "TK_OFFLINE" "images:node offline failure names TK_OFFLINE"
+if grep -qE "podman (pull|build)" "$STUB_LOG"; then echo "FAIL  images:node offline pulls and builds nothing"; FAILURES=$((FAILURES+1)); else echo "PASS  images:node offline pulls and builds nothing"; fi
+rm -f "$STUB/no-node-image"
+run env TK_OFFLINE=1 task nodes:cni-plugins
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "nodes:cni-plugins offline with no plugins fails"
+assert_contains "$out" "TK_OFFLINE" "nodes:cni-plugins offline failure names TK_OFFLINE"
+if grep -q "curl" "$STUB_LOG"; then echo "FAIL  nodes:cni-plugins offline downloads nothing"; FAILURES=$((FAILURES+1)); else echo "PASS  nodes:cni-plugins offline downloads nothing"; fi
 # nodes:image delegates, so a cluster's create and tkctl pull images share one implementation.
 mkdir -p "$TMP/clusters/demo"
 cat > "$TMP/clusters/demo/cluster.yaml" <<YAML
@@ -146,7 +156,9 @@ assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "aborted prune exits non-zero"
 run env TK_ASSUME_YES=1 task images:prune K8S="$K8S"
 assert_eq "0" "$rc" "prune exits 0"
 assert_contains "$(cat "$STUB_LOG")" "sudo rm -rf $TMP/images/$K8S" "graphroot removed as root"
-if [ -e "$TMP/images/$K8S" ] || [ -e "$conf" ] || [ -e "$TMP/images/$K8S.lock" ]; then echo "FAIL  prune removes graphroot, conf and lock"; FAILURES=$((FAILURES+1)); else echo "PASS  prune removes graphroot, conf and lock"; fi
+assert_contains "$(cat "$STUB_LOG")" "flock $TMP/images/$K8S.lock" "prune deletes under the same per-version lock ensure pulls under"
+if [ -e "$TMP/images/$K8S" ] || [ -e "$conf" ]; then echo "FAIL  prune removes graphroot and conf"; FAILURES=$((FAILURES+1)); else echo "PASS  prune removes graphroot and conf"; fi
+if [ -e "$TMP/images/$K8S.lock" ]; then echo "PASS  prune keeps the lock file (a waiting ensure must not end up on another inode)"; else echo "FAIL  prune keeps the lock file (a waiting ensure must not end up on another inode)"; FAILURES=$((FAILURES+1)); fi
 run env TK_ASSUME_YES=1 task images:prune K8S=1.30.0
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "prune of a version without a store fails"
 assert_contains "$out" "no image store" "prune of a missing store says so"

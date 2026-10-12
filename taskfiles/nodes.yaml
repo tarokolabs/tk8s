@@ -117,6 +117,7 @@ tasks:
     cmds:
       - |
         set -e
+        [ "${TK_OFFLINE:-}" != 1 ] || { echo "CNI plugins are not installed in {{ .CNI_DIR }} and TK_OFFLINE=1 forbids downloading them" >&2; exit 1; }
         mkdir -p {{ .CNI_DIR }}
         # Plugins installed by an earlier root-run tkctl are root-owned; take them over once.
         if [ -e {{ .CNI_DIR }}/bridge ] && [ ! -w {{ .CNI_DIR }}/bridge ] && [ "$(stat -c %u {{ .CNI_DIR }}/bridge)" = 0 ]; then sudo chown -R "$(id -u):$(id -g)" {{ .CNI_DIR }}; fi
