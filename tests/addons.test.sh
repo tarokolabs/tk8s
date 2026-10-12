@@ -105,7 +105,9 @@ assert_contains "$(cat "$TMP/nodefs/demo-worker1/etc/crio/crio.conf.d/20-gvisor.
 # ---- metrics-server: pinned manifest, kubelet-insecure-tls via a JSON patch, rollout waited
 fixture false; run addons:metrics-server
 assert_eq "0" "$rc" "metrics-server exits 0"
-assert_contains "$(log)" "metrics-server/releases/download/$(v metrics_server)/components.yaml" "metrics-server manifest at the pinned version"
+msv=$(v metrics_server)
+assert_contains "$(log)" "kubectl apply -f $PWD/manifests/metrics-server.${msv#v}.yaml" "metrics-server applied from the vendored manifest at the pinned version"
+if grep -q "releases/download" "$STUB_LOG"; then echo "FAIL  metrics-server fetches nothing"; FAILURES=$((FAILURES+1)); else echo "PASS  metrics-server fetches nothing"; fi
 assert_contains "$(log)" '"--kubelet-insecure-tls"' "kubelet-insecure-tls added (kind nodes have self-signed kubelet certs)"
 assert_contains "$(log)" "rollout status -n kube-system deploy/metrics-server" "waits for the rollout"
 # Deployed but the patch never landed (interrupted create): the rerun must patch, not skip.
@@ -113,7 +115,7 @@ touch "$STUB/ms-exists"; run addons:metrics-server
 assert_eq "0" "$rc" "metrics-server deployed but unpatched: exits 0"
 assert_contains "$(log)" '"--kubelet-insecure-tls"' "metrics-server deployed but unpatched: rerun applies the patch"
 touch "$STUB/ms-patched"; run addons:metrics-server
-if grep -qE "components.yaml|patch deploy" "$STUB_LOG"; then echo "FAIL  metrics-server fully installed is skipped"; FAILURES=$((FAILURES+1)); else echo "PASS  metrics-server fully installed is skipped"; fi
+if grep -qE "manifests/metrics-server|patch deploy" "$STUB_LOG"; then echo "FAIL  metrics-server fully installed is skipped"; FAILURES=$((FAILURES+1)); else echo "PASS  metrics-server fully installed is skipped"; fi
 rm -f "$STUB/ms-exists" "$STUB/ms-patched"
 # ---- local-path: checked-in manifest for the pinned version
 run addons:local-path
