@@ -26,7 +26,6 @@ tasks:
       DEF: { ref: fromYaml .DEF_RAW }
       KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig'
       CP_IP: '{{ (index .DEF.spec.nodes 0).ip }}'
-      API_HOST: '{{ .DEF.spec.network.vip | default (index .DEF.spec.nodes 0).ip }}'
       DATAPATH:
         sh: |
           d="{{ .DEF.spec.datapath }}"
@@ -65,7 +64,7 @@ tasks:
           --set cgroup.autoMount.enabled=false --set cgroup.hostRoot=/sys/fs/cgroup \
           --set securityContext.privileged=true \
           --set ipam.mode=kubernetes --set k8s.requireIPv4PodCIDR=true --set ipam.operator.clusterPoolIPv4MaskSize=24 \
-          --set kubeProxyReplacement=true --set k8sServiceHost={{ .API_HOST }} --set k8sServicePort=6443 \
+          --set kubeProxyReplacement=true --set k8sServiceHost=api.{{ .CLUSTER }}.k8s --set k8sServicePort=6443 \
           --set l2announcements.enabled=true \
           --set routingMode=native --set autoDirectNodeRoutes=true --set ipv4NativeRoutingCIDR={{ .DEF.spec.network.pods }} \
           --set bpf.masquerade=true \
