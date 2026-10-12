@@ -2,6 +2,8 @@
 # and tag. Ubuntu 24.04 runners ship podman 4.9, below the 5.4 floor, and OBS has no podman 5 for Ubuntu,
 # so podman is built from source; the node image is built from this checkout so L3 verifies the recipe
 # being released, not whatever GHCR holds.
+# The create runs offline: the shared image store is filled first, every download host is blocked in
+# /etc/hosts, and the CRI-O journal of each node must show no pull.
 name: l3
 # Least privilege: the job only reads the checkout; the cluster lives on the runner.
 permissions:
@@ -72,19 +74,46 @@ jobs:
         run: TK_VERSION="${GITHUB_REF_NAME}" TK_REPO="$GITHUB_WORKSPACE" TK_RAW="file://$GITHUB_WORKSPACE" sh install.sh
       - name: Build the node image from this checkout
         run: sudo podman build --build-arg VER="${{ matrix.k8s }}" --force-rm -t "ghcr.io/tarokolabs/tk8s/node:v${{ matrix.k8s }}" images/node >/tmp/node-build.log 2>&1 || { tail -30 /tmp/node-build.log; exit 1; }
-      - name: Create a cluster
+      - name: Fill the shared image store (a second run must find it full)
+        run: |
+          set -eux
+          tkctl pull images --k8s "${{ matrix.k8s }}"
+          tkctl pull images --k8s "${{ matrix.k8s }}" | tee /tmp/pull2.txt
+          grep -q "nothing to pull" /tmp/pull2.txt
+          tkctl get images --k8s "${{ matrix.k8s }}"
+          # Everything else a create fetches on the host.
+          task -d /opt/taroko/tk8s nodes:cni-plugins cni:cli
+      - name: Block every host tkctl downloads from
+        run: |
+          # The runner must keep talking to GitHub, so this is a hosts-file block rather than an egress
+          # firewall; node-side pulls are counted from the CRI-O journal after verify.
+          printf '0.0.0.0 %s # tk8s-offline\n' quay.io registry.k8s.io docker.io registry-1.docker.io ghcr.io raw.githubusercontent.com objects.githubusercontent.com dl.k8s.io storage.googleapis.com | sudo tee -a /etc/hosts
+      - name: Create a cluster (offline)
         env:
           DATAPATH: ${{ inputs.datapath || 'auto' }}
+          TK_OFFLINE: "1"
         run: time tkctl create cluster ci --workers 1 --k8s "${{ matrix.k8s }}" --datapath "$DATAPATH"
       - name: Verify
         run: tkctl verify cluster ci
+      - name: No node pulled an image
+        run: |
+          rc=0
+          for n in ci-control-plane ci-worker1; do
+            c=$(sudo podman exec "$n" journalctl -u crio --no-pager | grep -c 'Pulled image' || true)
+            echo "$n: $c pulled"; [ "$c" -eq 0 ] || { sudo podman exec "$n" journalctl -u crio --no-pager | grep 'Pulled image'; rc=1; }
+          done
+          exit $rc
       - name: Collect logs
         if: failure()
         run: |
           mkdir -p logs
           sudo journalctl -u ci.target -u ci-control-plane.service -u ci-worker1.service --no-pager > logs/units.log 2>&1 || true
           sudo podman ps -a > logs/podman-ps.txt 2>&1 || true
-          for n in ci-control-plane ci-worker1; do sudo podman logs "$n" > "logs/$n.log" 2>&1 || true; sudo podman exec "$n" journalctl -u kubelet -u crio --no-pager > "logs/$n-node.log" 2>&1 || true; done
+          for n in ci-control-plane ci-worker1; do
+            sudo podman logs "$n" > "logs/$n.log" 2>&1 || true
+            sudo podman exec "$n" journalctl -u kubelet -u crio --no-pager > "logs/$n-node.log" 2>&1 || true
+            sudo podman exec "$n" journalctl -u crio --no-pager | grep -E 'Pull|pull' > "logs/$n-pulls.log" 2>&1 || true
+          done
           cp /tmp/ci-cilium*.out logs/ 2>/dev/null || true
           export KUBECONFIG=/opt/taroko/clusters/ci/kubeconfig
           kubectl get pods -A -o wide > logs/pods.txt 2>&1 || true
@@ -108,6 +137,9 @@ jobs:
         with:
           name: l3-logs-${{ github.run_id }}-${{ matrix.k8s }}
           path: logs/
+      - name: Restore /etc/hosts
+        if: always()
+        run: sudo sed -i '/# tk8s-offline$/d' /etc/hosts
       - name: Delete the cluster
         if: always()
         run: tkctl delete cluster ci --yes || true
