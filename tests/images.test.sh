@@ -36,7 +36,7 @@ case "$*" in
 esac
 SH
 chmod +x "$STUB"/*
-export K8S CILIUM="$(v cilium)"
+CILIUM=$(v cilium); export K8S CILIUM
 run() { : > "$STUB_LOG"; out=$(PATH="$STUB:$PATH" "$@" 2>&1); rc=$?; }
 
 # ---- scripts/images.sh: the list is derived, sorted, unique, and every source is in it
