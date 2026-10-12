@@ -77,15 +77,12 @@ assert_contains "$lbu" "Volume=$TMP/clusters/demo/lb/haproxy.cfg:/usr/local/etc/
 assert_contains "$lbu" "After=demo-dns.service" "LB starts after DNS"
 w_unit=$(echo "$out" | sed -n '/demo-worker1.container/,/# ---- /p')
 assert_contains "$w_unit" "DNS=172.22.3.253" "worker resolves through the cluster DNS"
-assert_contains "$w_unit" "AddHost=api.demo.k8s:127.0.0.1" "worker reaches the apiserver through its own HAProxy"
-assert_contains "$w_unit" "Volume=$TMP/clusters/demo/nodes/demo-worker1.env:/etc/tk8s/apiserver-lb.env:ro" "worker gets the env file that enables apiserver-lb.service"
+assert_contains "$w_unit" "AddHost=api.demo.k8s:172.22.3.100" "worker reaches the apiserver through the host-side LB (kubeadm HA model: one LB for everyone)"
+if [[ "$w_unit" == *"apiserver-lb"* ]]; then echo "FAIL  worker has no node-local proxy"; FAILURES=$((FAILURES+1)); else echo "PASS  worker has no node-local proxy"; fi
 assert_contains "$w_unit" "After=demo-dns.service" "worker starts after DNS"
 cp2_unit=$(echo "$out" | sed -n '/demo-control-plane2.container/,/# ---- /p')
-assert_contains "$cp2_unit" "AddHost=api.demo.k8s:172.22.3.100" "control plane reaches the apiserver through the host-side LB (its own is not up at join)"
-if [[ "$cp2_unit" == *"apiserver-lb.env"* ]]; then echo "FAIL  control plane has no apiserver-lb env file"; FAILURES=$((FAILURES+1)); else echo "PASS  control plane has no apiserver-lb env file"; fi
-assert_contains "$out" "# ---- $TMP/clusters/demo/nodes/demo-worker1.env" "worker env file rendered"
-assert_contains "$(echo "$out" | sed -n '/nodes\/demo-worker1.env/,/# ---- /p')" "TK_CLUSTER_DOMAIN=demo.k8s" "env file carries the cluster domain"
-if [[ "$out" == *"nodes/demo-control-plane.env"* ]]; then echo "FAIL  no env file for control planes"; FAILURES=$((FAILURES+1)); else echo "PASS  no env file for control planes"; fi
+assert_contains "$cp2_unit" "AddHost=api.demo.k8s:172.22.3.100" "control plane reaches the apiserver through the host-side LB too"
+if [[ "$out" == *"/nodes/"*".env"* ]]; then echo "FAIL  no per-node env files (nothing in the node is role-specific any more)"; FAILURES=$((FAILURES+1)); else echo "PASS  no per-node env files (nothing in the node is role-specific any more)"; fi
 assert_contains "$out" "Wants=demo-dns.service demo-lb.service demo-control-plane.service demo-worker1.service demo-control-plane2.service demo-routes.service" "target wants DNS, LB, every node and the routes unit"
 # nodes:up copies the DNS and LB images into the host store before the target starts, and waits for the LB
 # to have resolved every control plane (which proves DNS, zone and LB config at once).

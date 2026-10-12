@@ -70,7 +70,7 @@ tasks:
         {{- if .DEF.spec.network }}
         hostip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") print $(i+1)}' | head -1)
         echo "Access:"
-        echo "  apiserver:  https://{{ .DEF.spec.network.lb }}:6443 (HAProxy in {{ .CLUSTER }}-lb; workers use their own on 127.0.0.1)"
+        echo "  apiserver:  https://{{ .DEF.spec.network.lb }}:6443 (HAProxy in {{ .CLUSTER }}-lb; every node and this host go through it)"
         echo "  from this host:       LoadBalancer IPs ({{ .DEF.spec.network.lb_range }}) and ClusterIPs ({{ .DEF.spec.network.services }}) are routed"
         echo "  from another machine: sudo ip route add {{ .DEF.spec.network.nodes }} via ${hostip:-<host-ip>}   (and {{ .DEF.spec.network.services }} for ClusterIPs)"
         {{- end }}

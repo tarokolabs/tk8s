@@ -27,7 +27,6 @@ echo "podman $*" >> "$STUB/podman.log"
 case "$*" in
   *"journalctl -u kubelet"*) [ -f "$STUB/kubelet-noisy" ] && echo 'E0929 14:39:56 993 summary_sys_containers.go:91] "Failed to get system container stats" err="failed to get cgroup stats for /system.slice/containerd.service"'; exit 0 ;;
   *"exec demo-lb bash -c"*) printf '# pxname,svname,qcur,qmax,scur,smax,slim,stot,bin,bout,dreq,dresp,ereq,econ,eresp,wretr,wredis,status,weight,act,bck,chkfail,chkdown,lastchg,downtime,qlimit,pid,iid,sid,throttle,lbtot,tracked,type,rate,rate_lim,rate_max,check_status\ncontrol-planes,cp1,0,0,0,0,,0,0,0,,0,,0,0,0,0,%s,1,1,0,0,0,1,0,,1,3,1,,0,,2,0,,0,L7OK\ncontrol-planes,cp2,0,0,0,0,,0,0,0,,0,,0,0,0,0,MAINT (resolution),1,1,0,0,0,1,0,,1,3,2,,0,,2,0,,0,\n' "$([ -f "$STUB/lb-down" ] && echo DOWN || echo UP)" ;;
-  *"exec demo-worker1 curl"*) [ -f "$STUB/worker-lb-down" ] || echo ok ;;
 esac
 exit 0
 SH
@@ -84,7 +83,7 @@ assert_contains "$out" "PASS  PV data on host" "local-path data on host"
 assert_contains "$out" "PASS  RuntimeClass crun (kernel 6.12.0)" "runtimeclass crun"
 assert_contains "$out" "SKIP  RuntimeClass gvisor — not enabled (create the cluster with --gvisor)" "gvisor skipped when not enabled"
 assert_contains "$out" "PASS  apiserver LB 172.22.0.100 healthy (1/1 control planes UP)" "apiserver LB section: LB healthy, every joined control plane UP"
-assert_contains "$out" "PASS  worker demo-worker1 reaches the apiserver through its own HAProxy" "apiserver LB section: worker path"
+if [[ "$out" == *"own HAProxy"* ]]; then echo "FAIL  no worker-side proxy check (there is no worker-side proxy)"; FAILURES=$((FAILURES+1)); else echo "PASS  no worker-side proxy check (there is no worker-side proxy)"; fi
 assert_contains "$out" "PASS  Gateway programmed (172.22.0.200)" "gateway address"
 assert_contains "$out" "PASS  HTTPRoute reachable from host (backend echo-abc)" "httproute"
 assert_contains "$out" "PASS  X-Forwarded-For carries the client IP (172.22.0.254)" "xff"
@@ -115,9 +114,7 @@ touch "$STUB/lb-down"; run
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "LB with no healthy backend: exit 1"
 assert_contains "$out" "FAIL  apiserver LB 172.22.0.100" "LB failure named"
 assert_contains "$out" "FAIL 1" "summary counts exactly the LB failure"
-rm -f "$STUB/lb-down"; touch "$STUB/worker-lb-down"; run
-assert_contains "$out" "FAIL  worker demo-worker1 reaches the apiserver" "worker-side HAProxy failure named"
-rm -f "$STUB/worker-lb-down"
+rm -f "$STUB/lb-down"
 
 touch "$STUB/stopped"; run
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "stopped cluster: refused"

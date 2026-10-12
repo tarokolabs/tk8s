@@ -22,19 +22,8 @@ assert_contains "$(cat taskfiles/nodes.yaml)" ":/var/lib/containers/shared:ro" "
 # unless CRI-O is told to use kubeadm's. L3 run 38252624650 (1.36.4) failed exactly there.
 assert_contains "$(cat $f)" "kubeadm config images list" "the image build reads the pause image from kubeadm"
 assert_contains "$(cat $f)" 'pause_image = ' "CRI-O's pause_image is set to kubeadm's pause in a crio.conf.d drop-in"
-# Workers run their own apiserver load balancer; it has to be in the image (apt at runtime is lost on restart).
-assert_contains "$(cat $f)" "haproxy gettext-base" "Containerfile installs haproxy and envsubst"
-assert_contains "$(cat $f)" "systemctl disable haproxy" "the package's own unit stays off"
-assert_contains "$(cat $f)" "systemctl enable apiserver-lb.service" "the node-local LB unit is enabled (its condition decides per role)"
-u=images/node/systemd/apiserver-lb.service
-assert_contains "$(cat $u)" "ConditionPathExists=/etc/tk8s/apiserver-lb.env" "only workers (which get the env file mounted) run it"
-assert_contains "$(cat $u)" "EnvironmentFile=/etc/tk8s/apiserver-lb.env" "cluster domain comes from the env file"
-assert_contains "$(cat $u)" "envsubst < /etc/haproxy/apiserver-lb.cfg.tmpl > /run/haproxy/apiserver-lb.cfg" "config rendered at start"
-assert_contains "$(cat $u)" "Type=notify" "haproxy -Ws notifies systemd"
-t=images/node/haproxy/apiserver-lb.cfg.tmpl
-assert_contains "$(cat $t)" 'server-template cp 5 _apiserver._tcp.${TK_CLUSTER_DOMAIN}' "SRV name from the cluster domain"
-assert_contains "$(cat $t)" "bind 127.0.0.1:6443" "node-local LB listens on loopback only"
-assert_contains "$(cat $t)" "bind 127.0.0.1:8404" "stats on loopback"
-assert_contains "$(cat images/node/systemd/kubelet.service.d/20-apiserver-lb.conf)" "Wants=apiserver-lb.service" "kubelet pulls the LB in"
-assert_contains "$(cat images/node/systemd/kubelet.service.d/20-apiserver-lb.conf)" "After=apiserver-lb.service" "and starts after it"
+# The apiserver LB is a host-side container (kubeadm HA model: one LB in front of the control planes);
+# the node image carries no proxy of its own.
+assert_eq "" "$(grep -n 'haproxy\|apiserver-lb' $f || true)" "node image has no haproxy or apiserver-lb"
+if [ -e images/node/systemd ] || [ -e images/node/haproxy ]; then echo "FAIL  no node-local LB files in images/node"; FAILURES=$((FAILURES+1)); else echo "PASS  no node-local LB files in images/node"; fi
 finish

@@ -154,8 +154,8 @@ tasks:
         {{ end }}
 
         sect apiserver-lb
-        # Every cluster has the HAProxy LB at spec.network.lb and one HAProxy per worker; the LB's stats CSV
-        # (column 18 = status) says how many control planes it sees UP.
+        # Every cluster has the HAProxy LB at spec.network.lb and every node goes through it; the LB's stats
+        # CSV (column 18 = status) says how many control planes it sees UP.
         LB={{ .DEF.spec.network.lb }}
         joined_cp={{ $n := 0 }}{{ range .DEF.spec.nodes }}{{ if and (eq .role "control-plane") (ne (toString .join) "false") }}{{ $n = add $n 1 }}{{ end }}{{ end }}{{ $n }}
         stats=$(sudo podman exec {{ .CLUSTER }}-lb bash -c 'exec 3<>/dev/tcp/127.0.0.1/8404; printf "GET /stats;csv HTTP/1.0\r\n\r\n" >&3; cat <&3' 2>/dev/null | grep '^control-planes,cp')
@@ -166,13 +166,6 @@ tasks:
         else
           ng "apiserver LB $LB" "readyz='$lb_ready', $up of $joined_cp control planes UP (podman logs {{ .CLUSTER }}-lb)"
         fi
-        {{ range .DEF.spec.nodes }}{{ if eq .role "worker" }}
-        if [ "$(sudo podman exec {{ .name }} curl -sk --max-time 5 https://127.0.0.1:6443/readyz 2>/dev/null)" = ok ]; then
-          ok "worker {{ .name }} reaches the apiserver through its own HAProxy"
-        else
-          ng "worker {{ .name }} reaches the apiserver through its own HAProxy" "podman exec {{ .name }} systemctl status apiserver-lb"
-        fi
-        {{ end }}{{ end }}
 
         sect gateway-api
         {{ if ne .DEF.spec.cni "cilium" }}

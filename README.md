@@ -17,7 +17,7 @@
 | CNI | **cilium** 1.20.2，kube-proxy replacement；datapath 預設在核心 ≥ 6.8 用 netkit，`--datapath veth` 可切 |
 | 負載平衡 | cilium LB-IPAM 加 L2 announcement，LoadBalancer IP 從節點網段的 `.200`–`.219` 配發 |
 | Gateway API | cilium 內建 controller，GatewayClass `cilium`，Gateway API v1.6.1 CRD（experimental channel，含 TCPRoute、UDPRoute） |
-| 高可用 | 每個叢集都有 apiserver LB（HAProxy 容器，節點網段 `.100`）與 DNS（`.253`）；worker 經節點內的 HAProxy 連 control plane；`--control-planes 3` 以上才有多台 control plane（上限 5），多出來的可以先不加入，留給練習 |
+| 高可用 | 每個叢集都有 apiserver LB（HAProxy 容器，節點網段 `.100`）與 DNS（`.253`），所有節點與主機都經它連 control plane；`--control-planes 3` 以上才有多台 control plane（上限 5），多出來的可以先不加入，留給練習 |
 | 節點生命週期 | Podman Quadlet 加 systemd：主機重開機叢集自動回來 |
 | RuntimeClass | `crun`（CRI-O 內建）；`--gvisor` 的叢集多一個 `gvisor`（handler `runsc`） |
 | gVisor（選配） | `--gvisor` 時建叢集當場裝進每個節點，不烤在 image；需要 veth datapath，會自動選 |
@@ -102,7 +102,7 @@ tkctl version
 幾個規則：
 
 - 名稱省略是 `tk8s`。名稱進節點名（`tk8s-control-plane`、`tk8s-worker1`）與叢集 DNS 網域（`tk8s.k8s`），格式 `^[a-z][a-z0-9-]{0,15}$`。
-- `--control-planes` 要是奇數、最多 5；不論幾台，apiserver 的入口都是 `api.<叢集>.k8s:6443`，由 `.100` 的 HAProxy 容器與每個 worker 自己的 HAProxy 分別服務。
+- `--control-planes` 要是奇數、最多 5；不論幾台，apiserver 的入口都是 `api.<叢集>.k8s:6443`，由 `.100` 的 HAProxy 容器服務。
 - `--defer-join`：第一個以外的 control plane 建起來但不 join，之後用 `tkctl join node` 加入。這是 HA 練習用的。
 - `--gvisor` 需要 veth datapath，會自動選；明確指定 `--datapath netkit` 加 `--gvisor` 會被拒絕。
 - `--memory` 接受 `4G`、`4096M` 這種寫法，`4Gi` 不行。
@@ -157,7 +157,7 @@ tkctl create cluster -f tkdt.yaml
 /opt/taroko/clusters/<名稱>/     # 叢集狀態：cluster.yaml、kubeconfig、init-config.yaml、storage/、logs/
 /opt/taroko/cni/                 # CNI plugins，所有叢集共用
 /opt/taroko/images/<K8s 版本>/   # 共用 image store，節點唯讀掛載；<版本>.conf 是它的 storage.conf
-/opt/taroko/clusters/<名稱>/{dns,lb,nodes}/   # DNS zone、LB 設定、worker 的 env 檔，都由 cluster.yaml 渲染
+/opt/taroko/clusters/<名稱>/{dns,lb}/   # DNS zone 與 LB 設定，都由 cluster.yaml 渲染
 /etc/containers/systemd/<名稱>/  # Quadlet unit：<名稱>.network、每個節點一個 .container
 /etc/systemd/system/<名稱>.target
 /etc/systemd/system/<名稱>-routes.service   # 主機到 pod 與 service 網段的路由，跟 target 一起啟停
@@ -181,7 +181,7 @@ tkctl create cluster -f tkdt.yaml
 
 ## apiserver 的入口
 
-每個叢集有兩個小容器跟節點一起啟停：`<名稱>-dns`（CoreDNS，`.253`）公布 `_apiserver._tcp.<名稱>.k8s` 的 SRV record，每台 control plane 一筆；`<名稱>-lb`（HAProxy，`.100`）從 SRV 找到 control plane，`/readyz` 健康檢查、round-robin。`controlPlaneEndpoint` 與憑證都是 `api.<名稱>.k8s:6443`：worker 把這個名字指到 `127.0.0.1`，由節點內自己的 HAProxy 服務（kubelet、kube-proxy、Cilium 都走它）；control plane 把它指到 `.100`；主機的 kubeconfig 直接寫 `.100`。一台 control plane 掛掉，約 6 秒內從兩側的後端清單消失，既有連線被切斷、客戶端立刻重連到別台；加減 control plane 只是 zone 檔多一筆少一筆，HAProxy 自己跟上，不重啟。
+每個叢集有兩個小容器跟節點一起啟停：`<名稱>-dns`（CoreDNS，`.253`）公布 `_apiserver._tcp.<名稱>.k8s` 的 SRV record，每台 control plane 一筆；`<名稱>-lb`（HAProxy，`.100`）從 SRV 找到 control plane，`/readyz` 健康檢查、round-robin。`controlPlaneEndpoint` 與憑證都是 `api.<名稱>.k8s:6443`：每個節點把這個名字指到 `.100`（kubelet、kube-proxy、Cilium 都走它），主機的 kubeconfig 直接寫 `.100`——就是 kubeadm 文件畫的那張 HA 圖：一個 load balancer 在 control plane 前面，所有客戶都連它。一台 control plane 掛掉，約 6 秒內從後端清單消失，既有連線被切斷、客戶端立刻重連到別台；加減 control plane 只是 zone 檔多一筆少一筆，HAProxy 自己跟上，不重啟。
 
 跟 VIP 的差別：沒有 ARP、沒有 lease、沒有 static pod；單 control plane 的叢集也走同一條路，所以 `verify` 的 `[apiserver-lb]` 每個叢集都會檢查。
 
