@@ -48,7 +48,7 @@
 | cgroup | v2 |
 | swap | 必須關閉：`sudo swapoff -a`，並註解 `/etc/fstab` 的 swap 行 |
 | 權限 | `sudo` 免密碼。只用在必要處：`podman` 與 `systemctl`（節點是系統層級的 Quadlet unit）、寫 `/etc` 的 unit 與 sysctl 檔、寫 `/usr/local/bin`、第一次建立 `/opt/taroko`（之後歸使用者擁有）、刪叢集時清掉節點以 root 寫下的資料 |
-| 網路 | 需連外：下載節點 image、CNI plugins、cilium CLI、Gateway API CRD |
+| 網路 | 第一次需連外：節點 image、CNI plugins、cilium CLI，以及叢集用的全部 image（`tkctl pull images` 一次拉進共用 store）。之後建叢集不碰外網，見「共用 image store」 |
 | 主機防火牆 | 前置檢查會把主機的 `net.bridge.bridge-nf-call-iptables` 設為 0 並寫入 `/etc/sysctl.d/90-tk8s.conf`：節點之間的橋接流量不經主機 iptables，否則裝了 Docker 的主機（FORWARD 預設 DROP）會擋掉 pod 到其他節點的流量 |
 | 其他 | `curl`、`git` |
 
@@ -91,6 +91,9 @@ tkctl verify cluster <名稱>            # 逐項 PASS/FAIL/SKIP，任一 FAIL �
 tkctl add node <叢集> --role worker|control-plane [--cpu N] [--memory SIZE] [--no-join]
 tkctl join node <叢集> <節點>          # 對建了但沒加入的節點執行 kubeadm join
 tkctl delete node <叢集> <節點> [--yes]
+tkctl pull images [--k8s 版本]       # 把建叢集需要的全部 image 拉進共用 store（create 會自動做）
+tkctl get images [--k8s 版本]        # 列清單與是否已在 store
+tkctl delete images --k8s 版本 [--yes]   # 刪掉該版本的 store；有叢集在用會被拒絕
 tkctl version
 ```
 
@@ -153,14 +156,26 @@ tkctl create cluster -f tkdt.yaml
 ```
 /opt/taroko/clusters/<名稱>/     # 叢集狀態：cluster.yaml、kubeconfig、init-config.yaml、storage/、logs/
 /opt/taroko/cni/                 # CNI plugins，所有叢集共用
+/opt/taroko/images/<K8s 版本>/   # 共用 image store，節點唯讀掛載；<版本>.conf 是它的 storage.conf
 /etc/containers/systemd/<名稱>/  # Quadlet unit：<名稱>.network、每個節點一個 .container
 /etc/systemd/system/<名稱>.target
 /etc/systemd/system/<名稱>-routes.service   # 主機到 pod 與 service 網段的路由，跟 target 一起啟停
 ```
 
-環境變數一律 `TK_` 前綴：`TK_DATA_DIR` 換掉 `/opt/taroko`、`TK_WULIN_DIR` 指定教材位置、`TK_ASSUME_YES=1` 等同 `--yes`、`TK_TASK` 指定 go-task 執行檔。`tkctl --help` 有完整清單。
+環境變數一律 `TK_` 前綴：`TK_DATA_DIR` 換掉 `/opt/taroko`、`TK_WULIN_DIR` 指定教材位置、`TK_ASSUME_YES=1` 等同 `--yes`、`TK_OFFLINE=1` 絕不下載（缺 image 直接報錯）、`TK_TASK` 指定 go-task 執行檔。`tkctl --help` 有完整清單。
 
 節點容器是 Quadlet 管的，每次啟停會重建；節點必須保留的 `/var`、`/etc`、`/usr/local/bin` 放在每節點的 named volume（`<節點>-var`、`-etc`、`-usr-local-bin`），`delete` 會一起清掉。
+
+## 共用 image store
+
+建叢集需要的 image（control plane、Cilium、metrics-server、local-path、kube-vip、`verify` 的測試 image）由主機拉一次，放在 `/opt/taroko/images/<K8s 版本>/`，每個節點容器以唯讀掛在 `/var/lib/containers/shared`，CRI-O 把它當 additional image store：查 image 先看這裡，有就直接用，沒有才照常 pull 進節點自己的 `/var`。所以：
+
+- 第一次 `tkctl create cluster` 多花一次下載（約 2 GB、一兩分鐘），之後每個叢集、每個節點都是零下載；`--k8s` 不同版本各有一個目錄。
+- 斷網的教室先在有網路時 `tkctl pull images`，上課時 `TK_OFFLINE=1 tkctl create cluster`：缺任何 image 會直接列出來而不是卡在 pull。CI 的 L3 就是這樣建的。
+- 唯讀是刻意的：多個 CRI-O 寫同一個 store 沒有安全的用法（節點沒乾淨關機時 `crio wipe` 會清掉整個 storage 目錄）。學員 `kubectl run` 自己拉的 image 進節點本身的 volume，不會污染共用目錄。
+- 清單不是手寫的：`scripts/images.sh <版本>` 從 `versions.yaml`、node image 裡的 `kubeadm config images list`、`cilium install --dry-run` 與 `manifests/` 現算，`tkctl get images` 看得到。
+- 只有 tkctl 寫這個目錄；主機的 `podman image prune`、`podman system reset` 動的是 `/var/lib/containers/storage`，碰不到它。要清就 `tkctl delete images --k8s <版本>`。
+- 節點 image 需是 2026-10 之後的配方（掛載點 `/var/lib/containers/shared`）。更早拉的本機快取用 `sudo podman pull ghcr.io/tarokolabs/tk8s/node:v<版本>` 更新；舊 image 建叢集照樣成功，只是不會用到 store。
 
 ## 從主機與其他機器連進叢集
 
