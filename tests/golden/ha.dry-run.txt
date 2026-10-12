@@ -12,10 +12,11 @@ spec:
     index: 0
     nodes: 172.22.0.0/24
     gateway: 172.22.0.254
+    dns: 172.22.0.253
+    lb: 172.22.0.100
     lb_range: 172.22.0.200-172.22.0.219
     pods: 10.244.0.0/21
     services: 10.98.0.0/24
-    vip: 172.22.0.100
   nodes:
     - role: control-plane
       name: ha-control-plane
@@ -298,7 +299,6 @@ apiVersion: kubeadm.k8s.io/v1beta4
 kind: ClusterConfiguration
 clusterName: ha
 kubernetesVersion: 1.37.0
-controlPlaneEndpoint: "172.22.0.100:6443"
 networking:
   dnsDomain: ha.k8s
   podSubnet: 10.244.0.0/21

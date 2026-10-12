@@ -24,6 +24,8 @@ assert_contains "$out" "pods: 10.244.8.0/21" "pod subnet = 10.244.(8N).0/21"
 assert_contains "$out" "services: 10.98.1.0/24" "service subnet from index"
 assert_contains "$out" "gateway: 172.22.1.254" "gateway .254"
 assert_contains "$out" "lb_range: 172.22.1.200-172.22.1.219" "LB-IPAM range"
+assert_contains "$out" "dns: 172.22.1.253" "cluster DNS address (single control plane too)"
+assert_contains "$out" "lb: 172.22.1.100" "apiserver LB address (single control plane too)"
 assert_contains "$out" "name: demo-control-plane" "first control plane name"
 assert_contains "$out" "name: demo-worker2" "workers expanded from count"
 assert_contains "$out" "ip: 172.22.1.3" "third node ip"
@@ -33,7 +35,9 @@ assert_contains "$out" "join: true" "join defaults to true"
 # HA
 sed -i.bak 's/role: control-plane, cpu: 2/role: control-plane, count: 3, cpu: 2/' "$TMP/in.yaml"
 out=$(task plan:resolve CLUSTER_FILE="$TMP/in.yaml" DRY_RUN=true 2>&1)
-assert_contains "$out" "vip: 172.22.1.100" "vip when control-planes > 1"
+assert_contains "$out" "dns: 172.22.1.253" "cluster DNS address (HA too)"
+assert_contains "$out" "lb: 172.22.1.100" "apiserver LB address (HA too)"
+if [[ "$out" == *"vip:"* ]]; then echo "FAIL  no vip field (kube-vip is gone)"; FAILURES=$((FAILURES+1)); else echo "PASS  no vip field (kube-vip is gone)"; fi
 assert_contains "$out" "name: demo-control-plane3" "third control plane name"
 # deferred join carried per node
 cat > "$TMP/in3.yaml" <<'YAML'
@@ -84,4 +88,33 @@ printf 'metadata: {name: good}\nspec:\n  nodes: [{role: control-plane, memory: 4
 out=$(task plan:resolve CLUSTER_FILE="$TMP/good.yaml" DRY_RUN=true 2>&1); rc=$?
 assert_eq "0" "$rc" "valid -f input passes validation"
 assert_contains "$out" "memory: 4096m" "explicit memory lower-cased"
+# Every cluster has an apiserver LB and a DNS; a file from the kube-vip era is refused, not converted.
+cat > "$TMP/old.yaml" <<'YAML'
+metadata: {name: old}
+spec:
+  network: {nodes: 172.22.7.0/24, vip: 172.22.7.100}
+  nodes: [{role: control-plane}]
+YAML
+out=$(task plan:resolve CLUSTER_FILE="$TMP/old.yaml" DRY_RUN=true 2>&1); rc=$?
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "spec.network.vip is refused"
+assert_contains "$out" "spec.network.vip is no longer supported" "vip refusal names the field"
+# -f may pin dns/lb; omitted ones are derived from the node subnet.
+cat > "$TMP/pin.yaml" <<'YAML'
+metadata: {name: pin}
+spec:
+  network: {nodes: 172.22.9.0/24, dns: 172.22.9.250, lb: 172.22.9.99}
+  nodes: [{role: control-plane}]
+YAML
+out=$(task plan:resolve CLUSTER_FILE="$TMP/pin.yaml" DRY_RUN=true 2>&1)
+assert_contains "$out" "dns: 172.22.9.250" "explicit dns address kept"
+assert_contains "$out" "lb: 172.22.9.99" "explicit lb address kept"
+# HAProxy's server-template has five slots.
+cat > "$TMP/seven.yaml" <<'YAML'
+metadata: {name: seven}
+spec:
+  nodes: [{role: control-plane, count: 7}]
+YAML
+out=$(task plan:resolve CLUSTER_FILE="$TMP/seven.yaml" DRY_RUN=true 2>&1); rc=$?
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "seven control planes are refused"
+assert_contains "$out" "at most 5" "control plane limit named"
 rm -rf "$TMP"; finish
