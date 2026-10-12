@@ -5,6 +5,7 @@ version: '3'
 includes:
   preflight: ./taskfiles/preflight.yaml
   plan: ./taskfiles/plan.yaml
+  images: ./taskfiles/images.yaml
   nodes: ./taskfiles/nodes.yaml
   kubeadm: ./taskfiles/kubeadm.yaml
   cni: ./taskfiles/cni.yaml
@@ -18,6 +19,7 @@ vars:
   TK_DATA_DIR: '{{ .TK_DATA_DIR | default "/opt/taroko" }}'
   CLUSTERS_DIR: '{{ .TK_DATA_DIR }}/clusters'
   CNI_DIR: '{{ .TK_DATA_DIR }}/cni'
+  IMAGES_DIR: '{{ .TK_DATA_DIR }}/images'
   TK_WULIN_DIR: '{{ .TK_WULIN_DIR | default (print .TK_DATA_DIR "/wulin") }}'
   VERSIONS_RAW:
     sh: cat {{ .TK_HOME }}/versions.yaml
