@@ -11,7 +11,7 @@ ARG CRIO_REPO=https://download.opensuse.org/repositories/isv:/cri-o
 
 # 與 taroko image 相同的除錯工具（gpg 是加 CRI-O repo 用的）
 RUN apt-get update && apt-get upgrade -y
-RUN apt-get install -y nano net-tools curl wget iputils-ping jq gpg zstd
+RUN apt-get install -y nano net-tools curl wget iputils-ping jq gpg zstd haproxy gettext-base
 RUN rm /kind/manifests/*.yaml
 
 # CRI-O 的 minor 版本必須對齊 K8s minor：VER=1.35.5 -> v1.35
@@ -48,6 +48,15 @@ RUN set -eux; \
       > /etc/crio/crio.conf.d/20-pause.conf; \
     cat /etc/crio/crio.conf.d/20-pause.conf
 COPY storage.conf /etc/containers/storage.conf
+
+# 每個 worker 自己的 apiserver LB：tkctl 只在 worker 掛進 /etc/tk8s/apiserver-lb.env，unit 的
+# ConditionPathExists 因此只在 worker 成立；control plane 走主機側 LB。套件自帶的 haproxy.service
+# 關掉，免得跟它搶 port。haproxy 一定要在 image 裡：節點重啟後根檔案系統回到 image，執行期
+# apt 裝的東西會消失（/var 裡的 dpkg 資料庫卻記得已安裝）。
+COPY haproxy/apiserver-lb.cfg.tmpl /etc/haproxy/apiserver-lb.cfg.tmpl
+COPY systemd/apiserver-lb.service /etc/systemd/system/apiserver-lb.service
+COPY systemd/kubelet.service.d/20-apiserver-lb.conf /etc/systemd/system/kubelet.service.d/20-apiserver-lb.conf
+RUN systemctl disable haproxy.service && systemctl enable apiserver-lb.service
 
 # 共用唯讀 image store 的掛載點（與主 store /var/lib/containers/storage 並排）。目錄必須先存在：
 # 沒掛任何東西時它是空目錄，CRI-O 照常啟動（退化成沒有共用 store）；目錄不存在的話

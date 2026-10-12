@@ -32,4 +32,9 @@ assert_contains "$(cat scripts/vendor-manifests.sh)" "helm.cilium.io/cilium-" "v
 bb=$(v verify_busybox)
 assert_eq "" "$(grep -nE 'image: *(docker.io/library/)?busybox *$' manifests/*.yaml || true)" "no untagged busybox in the manifests"
 assert_contains "$(cat "manifests/local-path-storage.${lp#v}.yaml")" "image: $bb" "local-path helper pod runs the pinned busybox"
+# The node-local and the host-side HAProxy configs are two copies of one text; the resolver and backend
+# lines must stay identical (the spike found the ssl/check-ssl and hold values the hard way).
+node_cfg=$(grep -E '^\s*(hold |default-server |timeout resolve|resolve_retries)' images/node/haproxy/apiserver-lb.cfg.tmpl 2>/dev/null | sed 's/^ *//')
+host_cfg=$(sed -n '/<<.CFG./,/^ *CFG$/p' taskfiles/nodes.yaml | grep -E '^\s*(hold |default-server |timeout resolve|resolve_retries)' | sed 's/^ *//')
+assert_eq "$node_cfg" "$host_cfg" "node-local and host-side haproxy configs agree on resolver holds and backend options"
 rm -rf "$TMP"; finish
