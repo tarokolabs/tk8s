@@ -8,6 +8,7 @@ STUB="$TMP/bin"; mkdir -p "$STUB" "$TMP/etc/sysctl.d" "$TMP/etc/modules-load.d";
 printf '#!/usr/bin/env bash\n[ "$1" = -n ] && shift; echo "sudo $*" >> "$STUB_LOG"; exec "$@"\n' > "$STUB/sudo"
 printf '#!/usr/bin/env bash\necho "podman version 5.4.2"\n' > "$STUB/podman"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/swapon"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/flock"   # images:ensure needs flock (util-linux); macOS has none
 printf '#!/usr/bin/env bash\ncase "$*" in *%%u*) cat "$STUB/owner";; *%%U*) echo someone;; *) echo cgroup2fs;; esac\n' > "$STUB/stat"   # -fc %T cgroup, -c %u owner
 echo 0 > "$STUB/owner"
 printf '#!/usr/bin/env bash\necho "br_netfilter 32768 0"\n' > "$STUB/lsmod"
@@ -32,6 +33,8 @@ assert_contains "$(cat "$TMP/etc/sysctl.d/90-tk8s.conf" 2>/dev/null)" "net.ipv4.
 assert_contains "$(cat "$TMP/etc/modules-load.d/tk8s.conf" 2>/dev/null)" "br_netfilter" "br_netfilter loaded at boot so the sysctl applies"
 assert_contains "$(cat "$STUB_LOG")" "sudo install -d -o $(id -u) -g $(id -g) $TMP/clusters" "data tree created for the user (clusters)"
 assert_contains "$(cat "$STUB_LOG")" "sudo install -d -o $(id -u) -g $(id -g) $TMP/cni" "data tree created for the user (cni)"
+assert_contains "$(cat "$STUB_LOG")" "sudo install -d -o $(id -u) -g $(id -g) $TMP/images" "data tree created for the user (images)"
+assert_contains "$(cat taskfiles/preflight.yaml)" "command -v flock" "preflight checks for flock (images:ensure serialises on it)"
 if [ -d "$TMP/clusters" ] && [ -w "$TMP/cache" ]; then echo "PASS  data tree exists and is writable"; else echo "FAIL  data tree exists and is writable"; FAILURES=$((FAILURES+1)); fi
 assert_contains "$out" "preflight ok" "summary line"
 # Ownership handover only from root (an earlier root-run tkctl); another user's directory is refused, not taken.

@@ -91,6 +91,16 @@ touch "$STUB/no-node-image"; run task nodes:image CLUSTER=demo
 assert_contains "$(cat "$STUB_LOG")" "podman pull ghcr.io/tarokolabs/tk8s/node:v$K8S" "nodes:image delegates to images:node"
 rm -f "$STUB/no-node-image"
 
+# ---- a root-owned IMAGES_DIR (podman created the bind-mount source for an added node before any
+# ensure ran) is taken over like preflight takes over the data dir, not written into as the user.
+mkdir -p "$TMP/images"; chmod 555 "$TMP/images"; printf '#!/usr/bin/env bash\necho 0\n' > "$STUB/stat"
+printf '#!/usr/bin/env bash\nchmod u+w "${@: -1}"\n' > "$STUB/chown"; chmod +x "$STUB/stat" "$STUB/chown"   # root -> user handover makes the dir writable
+run task images:ensure K8S="$K8S"
+assert_eq "0" "$rc" "ensure with a root-owned images dir exits 0"
+assert_contains "$(cat "$STUB_LOG")" "sudo chown $(id -u):$(id -g) $TMP/images" "root-owned images dir is taken over"
+if [ -f "$TMP/images/$K8S.conf" ]; then echo "PASS  conf written after the takeover"; else echo "FAIL  conf written after the takeover"; FAILURES=$((FAILURES+1)); fi
+rm -f "$STUB/stat" "$STUB/chown"; chmod 755 "$TMP/images"; rm -rf "$TMP/images/$K8S" "$TMP/images/$K8S.conf" "$TMP/images/$K8S.lock" "$TMP/store"/*
+
 # ---- images:list before anything is pulled: header, every image missing, no download of the CLI
 run task images:list K8S="$K8S"
 assert_eq "0" "$rc" "images:list exits 0"

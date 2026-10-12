@@ -82,6 +82,9 @@ chmod +x "$STUB"/*
 out=$(PATH="$STUB:$PATH" "$REAL_TASK" node:add CLUSTER=demo ROLE=worker JOIN=false 2>&1); rc=$?
 assert_eq "0" "$rc" "node:add (stubbed host) exits 0"
 assert_contains "$(cat "$STUB_LOG")" "addons:runtimeclass CLUSTER=demo" "node:add installs crun where the runtime needs it"
+# The new node mounts the shared store of the cluster's version; fill it first so the node pulls nothing.
+assert_contains "$(cat "$STUB_LOG")" "images:ensure K8S=1.37.0" "node:add fills the shared image store"
+if [ "$(grep -n 'images:ensure' "$STUB_LOG" | head -1 | cut -d: -f1)" -lt "$(grep -n 'nodes:render' "$STUB_LOG" | head -1 | cut -d: -f1)" ]; then echo "PASS  store filled before the node is rendered and started"; else echo "FAIL  store filled before the node is rendered and started"; FAILURES=$((FAILURES+1)); fi
 assert_contains "$(cat "$STUB_LOG")" "addons:gvisor CLUSTER=demo" "node:add installs gVisor on --gvisor clusters"
 if [ "$(grep -n 'nodes:render' "$STUB_LOG" | head -1 | cut -d: -f1)" -lt "$(grep -n 'addons:runtimeclass' "$STUB_LOG" | head -1 | cut -d: -f1)" ]; then echo "PASS  addons run after the node is up"; else echo "FAIL  addons run after the node is up"; FAILURES=$((FAILURES+1)); fi
 rm -rf "$TMP"; finish

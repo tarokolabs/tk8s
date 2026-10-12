@@ -25,7 +25,15 @@ tasks:
     silent: true
     requires: { vars: [K8S] }
     cmds:
-      - '[ -d {{ .IMAGES_DIR }} ] || sudo install -d -o "$(id -u)" -g "$(id -g)" {{ .IMAGES_DIR }}'
+      # The conf and lock files are the user's. A root-owned dir is taken over (podman creates a missing
+      # bind-mount source as root when a node starts before any ensure ran); another user's is refused.
+      - |
+        d={{ .IMAGES_DIR }}
+        if [ ! -d "$d" ]; then sudo install -d -o "$(id -u)" -g "$(id -g)" "$d"
+        elif [ ! -w "$d" ]; then
+          if [ "$(stat -c %u "$d")" = 0 ]; then sudo chown "$(id -u):$(id -g)" "$d"
+          else echo "$d is owned by $(stat -c %U "$d"), not $(id -un); fix its ownership or set TK_DATA_DIR" >&2; exit 1; fi
+        fi
       - sudo mkdir -p {{ .IMAGES_DIR }}/{{ .K8S }}
       - |
         [ -f {{ .IMAGES_DIR }}/{{ .K8S }}.conf ] || cat > {{ .IMAGES_DIR }}/{{ .K8S }}.conf <<'CONF'
