@@ -56,6 +56,7 @@ rm -f "$STUB/nodes-notready"; run
 assert_eq "0" "$rc" "healthy path exits 0"
 assert_contains "$out" "cilium $(v cilium) ok (install)" "healthy path reports cilium"
 assert_contains "$(cat "$STUB_LOG")" "--set bpf.lbExternalClusterIP=true" "ClusterIPs are reachable from the host and routed machines"
+assert_contains "$(cat "$STUB_LOG")" "--chart-directory $PWD/manifests/cilium-$(v cilium)" "cilium installs from the vendored chart, not helm.cilium.io"
 assert_contains "$(cat "$STUB_LOG")" "cilium-cli/releases/download/$(v cilium_cli)/cilium-linux-amd64.tar.gz" "cilium CLI downloaded at the pinned version"
 gw=$(v gateway_api)
 assert_contains "$(cat "$STUB_LOG")" "kubectl apply --server-side -f $PWD/manifests/gateway-api.${gw#v}.yaml" "Gateway API CRDs applied from the vendored file"

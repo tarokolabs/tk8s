@@ -173,7 +173,8 @@ tkctl create cluster -f tkdt.yaml
 - 第一次 `tkctl create cluster` 多花一次下載（約 2 GB、一兩分鐘），之後每個叢集、每個節點都是零下載；`--k8s` 不同版本各有一個目錄。
 - 斷網的教室先在有網路時 `tkctl pull images`，上課時 `TK_OFFLINE=1 tkctl create cluster`：缺任何 image 會直接列出來而不是卡在 pull。CI 的 L3 就是這樣建的。
 - 唯讀是刻意的：多個 CRI-O 寫同一個 store 沒有安全的用法（節點沒乾淨關機時 `crio wipe` 會清掉整個 storage 目錄）。學員 `kubectl run` 自己拉的 image 進節點本身的 volume，不會污染共用目錄。
-- 清單不是手寫的：`scripts/images.sh <版本>` 從 `versions.yaml`、node image 裡的 `kubeadm config images list`、`cilium install --dry-run` 與 `manifests/` 現算，`tkctl get images` 看得到。
+- 清單不是手寫的：`scripts/images.sh <版本>` 從 `versions.yaml`、node image 裡的 `kubeadm config images list`、`cilium install --dry-run` 與 `manifests/` 現算，`tkctl get images` 看得到（因此 `get images` 會先確保 node image 與 cilium CLI 在手上，沒有會先拉）。
+- 建叢集時主機要套的東西也都在 repo 裡：Gateway API CRD、metrics-server manifest 與 Cilium 的 Helm chart 由 `scripts/vendor-manifests.sh` 放進 `manifests/`，升版時重跑一次；cilium CLI 不會再去 helm.cilium.io 抓 chart。
 - 只有 tkctl 寫這個目錄；主機的 `podman image prune`、`podman system reset` 動的是 `/var/lib/containers/storage`，碰不到它。要清就 `tkctl delete images --k8s <版本>`。
 - 節點 image 需是 2026-10 之後的配方（掛載點 `/var/lib/containers/shared`）。更早拉的本機快取用 `sudo podman pull ghcr.io/tarokolabs/tk8s/node:v<版本>` 更新；舊 image 建叢集照樣成功，只是不會用到 store。
 

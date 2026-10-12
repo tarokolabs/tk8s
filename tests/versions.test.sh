@@ -23,6 +23,11 @@ assert_eq "10" "$(grep -c '^kind: CustomResourceDefinition' "$f" 2>/dev/null)" "
 ms=$(v metrics_server); f="manifests/metrics-server.${ms#v}.yaml"
 if [ -f "$f" ] && grep -q "image: registry.k8s.io/metrics-server/metrics-server:$ms" "$f"; then echo "PASS  metrics-server manifest vendored at $ms"; else echo "FAIL  metrics-server manifest vendored at $ms"; FAILURES=$((FAILURES+1)); fi
 assert_contains "$(cat scripts/vendor-manifests.sh)" "config/crd/experimental" "vendor script fetches the experimental channel cni:install used to fetch"
+# cilium-cli embeds only the chart of the cilium release it was built against; any other --version
+# is fetched from helm.cilium.io and cached per user. The chart is vendored so cni:install never fetches.
+cv=$(v cilium); f="manifests/cilium-$cv/Chart.yaml"
+if [ -f "$f" ] && grep -qx "version: $cv" "$f"; then echo "PASS  cilium Helm chart vendored at $cv"; else echo "FAIL  cilium Helm chart vendored at $cv"; FAILURES=$((FAILURES+1)); fi
+assert_contains "$(cat scripts/vendor-manifests.sh)" "helm.cilium.io/cilium-" "vendor script fetches the cilium chart cni:install passes with --chart-directory"
 # Helper pods run the pinned verify image; a floating busybox tag would be the one pull left in a create.
 bb=$(v verify_busybox)
 assert_eq "" "$(grep -nE 'image: *(docker.io/library/)?busybox *$' manifests/*.yaml || true)" "no untagged busybox in the manifests"

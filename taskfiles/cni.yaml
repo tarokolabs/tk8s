@@ -2,7 +2,7 @@ version: '3'
 # CNI and Gateway API. cilium (default) provides kube-proxy replacement, LB-IPAM
 # with L2 announcements, and the Gateway API controller. canal is kept as an
 # alternative without Gateway API.
-# The Gateway API CRDs and the cilium CLI are pinned in versions.yaml; the CRDs are vendored under manifests/.
+# The Gateway API CRDs, the cilium chart and the cilium CLI are pinned in versions.yaml; the CRDs and the chart are vendored under manifests/.
 tasks:
   cli:
     desc: Install the cilium CLI into /usr/local/bin when it is missing (pinned in versions.yaml)
@@ -41,6 +41,8 @@ tasks:
     preconditions:
       - sh: 'test -f {{ .TK_HOME }}/manifests/gateway-api.{{ .VERSIONS.gateway_api | trimPrefix "v" }}.yaml'
         msg: "manifests/gateway-api.{{ .VERSIONS.gateway_api | trimPrefix \"v\" }}.yaml is missing; versions.yaml pins gateway_api {{ .VERSIONS.gateway_api }} but scripts/vendor-manifests.sh was not rerun"
+      - sh: 'test -f {{ .TK_HOME }}/manifests/cilium-{{ .VERSIONS.cilium }}/Chart.yaml'
+        msg: "manifests/cilium-{{ .VERSIONS.cilium }}/ is missing; versions.yaml pins cilium {{ .VERSIONS.cilium }} but scripts/vendor-manifests.sh was not rerun"
     status:
       # cilium counts as installed only once its LB-IPAM pool exists: a first attempt that timed
       # out waiting for the DaemonSet leaves the DaemonSet behind but never reached the pool.
@@ -57,7 +59,8 @@ tasks:
         # A partially installed release (interrupted create) is upgraded in place instead of failing.
         action=install
         kubectl -n kube-system get secret -l owner=helm,name=cilium --no-headers 2>/dev/null | grep -q . && action=upgrade
-        cilium $action --version {{ .VERSIONS.cilium }} \
+        # The chart is vendored: cilium-cli would otherwise fetch any version it does not embed from helm.cilium.io.
+        cilium $action --version {{ .VERSIONS.cilium }} --chart-directory {{ .TK_HOME }}/manifests/cilium-{{ .VERSIONS.cilium }} \
           --set bpf.datapathMode={{ .DATAPATH }} \
           --set cgroup.autoMount.enabled=false --set cgroup.hostRoot=/sys/fs/cgroup \
           --set securityContext.privileged=true \
