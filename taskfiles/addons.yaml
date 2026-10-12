@@ -82,14 +82,18 @@ tasks:
     requires: { vars: [CLUSTER] }
     vars:
       STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      MANIFEST: '{{ .TK_HOME }}/manifests/metrics-server.{{ .VERSIONS.metrics_server | trimPrefix "v" }}.yaml'
     env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
+    preconditions:
+      - sh: 'test -f {{ .MANIFEST }}'
+        msg: "{{ .MANIFEST }} is missing; versions.yaml pins metrics_server {{ .VERSIONS.metrics_server }} but scripts/vendor-manifests.sh was not rerun"
     status:
       # Done means deployed AND patched: an interrupted create must not skip the patch on rerun.
       - kubectl get deploy -n kube-system metrics-server -o jsonpath='{.spec.template.spec.containers[0].args}' 2>/dev/null | grep -q kubelet-insecure-tls
     cmds:
       - |
         set -e
-        kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/{{ .VERSIONS.metrics_server }}/components.yaml >/dev/null
+        kubectl apply -f {{ .MANIFEST }} >/dev/null
         # Node kubelet certs are self-signed in kind images; patch instead of sed on the upstream text.
         if ! kubectl get deploy -n kube-system metrics-server -o jsonpath='{.spec.template.spec.containers[0].args}' | grep -q kubelet-insecure-tls; then
           kubectl -n kube-system patch deploy metrics-server --type=json \

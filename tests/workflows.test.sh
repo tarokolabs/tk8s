@@ -10,6 +10,17 @@ for w in .github/workflows/*.y*ml; do
   if awk '/^permissions:/{p=1;next} p&&/^  /{print;next} p{exit}' "$w" | grep -qx '  contents: read'; then echo "PASS  $w top-level token is read-only"; else echo "FAIL  $w top-level token is read-only"; FAILURES=$((FAILURES+1)); fi
 done
 assert_contains "$(cat .github/workflows/release.yml)" "scripts/wait-l3.sh" "release gate uses the tested wait script"
+# L3 proves the offline create: the store is filled (and found full on a rerun), every host that tkctl
+# downloads from is blocked in /etc/hosts, create runs with TK_OFFLINE=1, and no node pulled an image.
+p=$(grep -n 'tkctl pull images' $l3 | head -1 | cut -d: -f1); o=$(grep -n 'tk8s-offline' $l3 | head -1 | cut -d: -f1)
+if [ -n "$p" ] && [ -n "$o" ] && [ "$b" -lt "$p" ] && [ "$p" -lt "$o" ] && [ "$o" -lt "$c" ]; then echo "PASS  L3 fills the store, then blocks downloads, then creates"; else echo "FAIL  L3 fills the store, then blocks downloads, then creates"; FAILURES=$((FAILURES+1)); fi
+assert_contains "$(cat $l3)" "nothing to pull" "L3 asserts the second pull images finds the store full (digest refs are recognised)"
+assert_contains "$(cat $l3)" "TK_OFFLINE: \"1\"" "L3 creates with TK_OFFLINE=1"
+assert_contains "$(cat $l3)" "Pulled image" "L3 counts CRI-O pulls in every node"
+assert_contains "$(cat $l3)" "nodes:cni-plugins cni:cli" "L3 pre-installs the CNI plugins and the cilium CLI before going offline"
+assert_contains "$(cat $l3)" " helm.cilium.io " "L3 blocks the cilium Helm repository too (the CLI fetches charts it does not embed)"
+r=$(grep -n 'tk8s-offline$/d' $l3 | head -1 | cut -d: -f1); a=$(grep -n 'upload-artifact' $l3 | head -1 | cut -d: -f1)
+if [ -n "$r" ] && [ -n "$a" ] && [ "$r" -lt "$a" ]; then echo "PASS  L3 restores /etc/hosts before uploading logs"; else echo "FAIL  L3 restores /etc/hosts before uploading logs"; FAILURES=$((FAILURES+1)); fi
 finish
 
 # ci.yaml: lint and unit tests are separate jobs, so a red check names what actually failed

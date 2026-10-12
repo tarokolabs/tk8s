@@ -55,6 +55,10 @@ tasks:
         Volume={{ .name }}-var:/var:suid,exec,dev,rbind
         Volume={{ .name }}-etc:/etc
         Volume={{ .name }}-usr-local-bin:/usr/local/bin
+        # The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
+        # reads it as an additional image store, so nothing a create needs is pulled; read-only
+        # because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
+        Volume={{ $.IMAGES_DIR }}/{{ $.DEF.spec.kubernetes }}:/var/lib/containers/shared:ro
         Volume={{ $.STATE_DIR }}:/opt/taroko
         Volume={{ $.TK_WULIN_DIR }}:/opt/taroko/wulin
         StopTimeout=60
@@ -98,28 +102,22 @@ tasks:
         UNIT
 
   image:
-    desc: Pull the node image, or build it locally when the tag is not published
+    desc: Pull or build the node image of the cluster's Kubernetes version (images:node)
     requires: { vars: [CLUSTER] }
     vars:
       STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
       CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
       DEF_RAW: { sh: 'cat {{ .CLUSTER_YAML }}' }
       DEF: { ref: fromYaml .DEF_RAW }
-      IMAGE: 'ghcr.io/tarokolabs/tk8s/node:v{{ .DEF.spec.kubernetes }}'
-    status:
-      - sudo podman image exists {{ .IMAGE }}
     cmds:
-      - |
-        if sudo podman pull {{ .IMAGE }} >/dev/null 2>&1; then echo "{{ .IMAGE }} pulled"; else
-          echo "{{ .IMAGE }} is not published; building locally (the first build takes a few minutes)"
-          sudo podman build --build-arg VER={{ .DEF.spec.kubernetes }} --force-rm -t {{ .IMAGE }} {{ .TK_HOME }}/images/node
-        fi
+      - task --silent -d {{ .TK_HOME }} images:node K8S={{ .DEF.spec.kubernetes }}
 
   cni-plugins:
     desc: Install or refresh the CNI plugins in CNI_DIR (copied in place, never rm -r)
     cmds:
       - |
         set -e
+        [ "${TK_OFFLINE:-}" != 1 ] || { echo "CNI plugins are not installed in {{ .CNI_DIR }} and TK_OFFLINE=1 forbids downloading them" >&2; exit 1; }
         mkdir -p {{ .CNI_DIR }}
         # Plugins installed by an earlier root-run tkctl are root-owned; take them over once.
         if [ -e {{ .CNI_DIR }}/bridge ] && [ ! -w {{ .CNI_DIR }}/bridge ] && [ "$(stat -c %u {{ .CNI_DIR }}/bridge)" = 0 ]; then sudo chown -R "$(id -u):$(id -g)" {{ .CNI_DIR }}; fi

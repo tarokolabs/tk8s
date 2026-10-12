@@ -76,5 +76,23 @@ out=$($T create cluster -f "$TMP/later.yaml" --dry-run 2>&1); rc=$?
 assert_eq "0" "$rc" "-f with spec before metadata is accepted"
 assert_contains "$out" "/clusters/later/cluster.yaml" "cluster name comes from metadata.name, not the first name: line"
 assert_fails "-f combined with topology flags is rejected" $T create cluster -f "$TMP/c.yaml" --workers 3 --dry-run
+# Image store verbs: the task invocation is what matters, so go-task is replaced by a stub that prints it.
+printf '#!/usr/bin/env bash\necho "task $*"; echo "yes=${TK_ASSUME_YES:-}"\n' > "$TMP/task-stub"; chmod +x "$TMP/task-stub"
+out=$(TK_TASK="$TMP/task-stub" $T pull images 2>&1); rc=$?
+assert_eq "0" "$rc" "pull images exits 0"
+assert_contains "$out" "images:ensure" "pull images runs images:ensure"
+assert_eq "0" "$(echo "$out" | grep -c 'K8S=')" "pull images without --k8s leaves the version to the taskfile default"
+out=$(TK_TASK="$TMP/task-stub" $T pull images --k8s 1.36.4 2>&1); assert_contains "$out" "images:ensure K8S=1.36.4" "pull images --k8s"
+out=$(TK_TASK="$TMP/task-stub" $T get images 2>&1); assert_contains "$out" "images:list" "get images runs images:list"
+out=$(TK_TASK="$TMP/task-stub" $T get images --k8s 1.36.4 2>&1); assert_contains "$out" "images:list K8S=1.36.4" "get images --k8s"
+out=$(TK_TASK="$TMP/task-stub" $T delete images --k8s 1.36.4 --yes 2>&1)
+assert_contains "$out" "images:prune K8S=1.36.4" "delete images runs images:prune"
+assert_contains "$out" "yes=1" "delete images --yes sets TK_ASSUME_YES"
+assert_fails "delete images without --k8s is rejected" env TK_TASK="$TMP/task-stub" $T delete images --yes
+assert_fails "get images with a malformed --k8s is rejected" env TK_TASK="$TMP/task-stub" $T get images --k8s 1.36
+assert_fails "pull images with an unknown flag is rejected" env TK_TASK="$TMP/task-stub" $T pull images --now
+assert_fails "pull without images is rejected" env TK_TASK="$TMP/task-stub" $T pull cluster
+out=$($T --help 2>&1); assert_contains "$out" "pull images" "help lists pull images"
+assert_contains "$out" "TK_OFFLINE" "help documents TK_OFFLINE"
 out=$($T version 2>&1); assert_contains "$out" "kubernetes default 1.37.0" "version shows default kubernetes"
 rm -rf "$TMP"; finish

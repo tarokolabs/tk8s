@@ -29,6 +29,7 @@ assert_contains "$out" "Volume=demo-worker1-var:/var:suid,exec,dev,rbind" "per-n
 assert_contains "$out" "Volume=demo-worker1-etc:/etc" "per-node /etc volume (kubeadm certs and configs survive restarts)"
 assert_contains "$out" "Volume=demo-worker1-usr-local-bin:/usr/local/bin" "per-node /usr/local/bin volume (installed runtimes survive restarts)"
 assert_contains "$out" "Volume=$TMP/clusters/demo:/opt/taroko" "state dir mounted as /opt/taroko"
+assert_contains "$out" "Volume=$TMP/images/1.37.0:/var/lib/containers/shared:ro" "shared image store of the cluster's Kubernetes version mounted read-only"
 assert_contains "$out" "# ---- /etc/systemd/system/demo.target" "target path"
 assert_contains "$out" "Wants=demo-control-plane.service demo-worker1.service demo-routes.service" "target wants every node and the routes unit"
 # Host routes to the pod and service subnets live in a unit so they come back after a reboot.

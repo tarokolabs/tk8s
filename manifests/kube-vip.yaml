@@ -6,7 +6,7 @@ metadata:
 spec:
   initContainers:
   - name: init-container
-    image: busybox
+    image: docker.io/library/busybox:1.37.0
     imagePullPolicy: IfNotPresent
     command: ["/bin/sh", "-c", "echo '127.0.0.1  kubernetes' >> /etc/hosts"]
   containers:

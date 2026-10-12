@@ -27,6 +27,9 @@ Usage:
   tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] [--no-join]
   tkctl delete node CLUSTER NODE [--yes]
   tkctl join node CLUSTER NODE
+  tkctl pull images [--k8s VERSION]
+  tkctl get images [--k8s VERSION]
+  tkctl delete images --k8s VERSION [--yes]
   tkctl version
 
 Create flags:
@@ -49,6 +52,7 @@ Environment:
   TK_DATA_DIR            where clusters, CNI plugins and materials live (default /opt/taroko)
   TK_WULIN_DIR           teaching materials mounted into every node (default TK_DATA_DIR/wulin)
   TK_ASSUME_YES=1        skip confirmation prompts (same as --yes)
+  TK_OFFLINE=1           never download: create and pull images fail on a missing image instead of pulling
   TK_TASK                path to the go-task binary (default: task from PATH)
   TK_VERIFY_TIMEOUT      seconds to wait for each verify check (default 180)
 USAGE
@@ -79,6 +83,7 @@ normalize_memory() {  # 4G|4g|4096M|4096m -> lower-case podman format
   [[ "$1" =~ ^[0-9]+[GgMm]$ ]] || die "invalid --memory '$1': use a number followed by G or M, e.g. 4G or 4096M"
   echo "${1,,}"
 }
+validate_k8s() { [[ "$1" =~ ^1\.[0-9]+\.[0-9]+$ ]] || die "--k8s must look like 1.37.0"; }
 
 cmd_create() {
   local name="" cps=1 workers=2 cpu=2 memory="4G" k8s="" gvisor=false datapath="" file="" dry=false overlap=false topo_flags=0 defer=0
@@ -112,7 +117,7 @@ cmd_create() {
     [ -z "$datapath" ] && datapath=veth
   fi
   [ -n "$datapath" ] || datapath=auto
-  [ -z "$k8s" ] || [[ "$k8s" =~ ^1\.[0-9]+\.[0-9]+$ ]] || die "--k8s must look like 1.37.0"
+  [ -z "$k8s" ] || validate_k8s "$k8s"
 
   # Global on purpose: the EXIT trap runs after this function's locals are gone.
   TMP_CLUSTER_FILE=$(mktemp -t tkctl-cluster.XXXXXX)
@@ -173,6 +178,21 @@ cmd_add_node() {
   run_task node:add CLUSTER="$cl" ROLE="$role" CPU="$ncpu" MEMORY="$nmem" JOIN="$njoin"
 }
 
+cmd_images() {  # verb task [--k8s VERSION] [--yes]
+  local verb=$1 task=$2 k8s="" usage; shift 2
+  usage="usage: tkctl $verb images [--k8s VERSION]"; [ "$verb" != delete ] || usage="usage: tkctl delete images --k8s VERSION [--yes]"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --k8s) k8s=${2:-}; shift 2 ;;
+      --yes) [ "$verb" == delete ] || die "$usage"; export TK_ASSUME_YES=1; shift ;;
+      *) die "$usage" ;;
+    esac
+  done
+  [ -z "$k8s" ] || validate_k8s "$k8s"
+  [ "$verb" != delete ] || [ -n "$k8s" ] || die "$usage"
+  if [ -n "$k8s" ]; then run_task "$task" K8S="$k8s"; else run_task "$task"; fi
+}
+
 main() {
   [ $# -gt 0 ] || { usage; exit 1; }
   case "$1" in
@@ -182,7 +202,8 @@ main() {
                 cluster) [ "${3:-}" != --yes ] || export TK_ASSUME_YES=1; cmd_named delete lifecycle:delete "$1" "${2:-}" ;;
                 node) [ -n "${2:-}" ] && [ -n "${3:-}" ] || die "usage: tkctl delete node CLUSTER NODE [--yes]"; validate_name "$2"
                       [ "${4:-}" != --yes ] || export TK_ASSUME_YES=1; run_task node:delete CLUSTER="$2" NODE="$3" ;;
-                *) die "usage: tkctl delete cluster NAME | tkctl delete node CLUSTER NODE" ;;
+                images) shift; cmd_images delete images:prune "$@" ;;
+                *) die "usage: tkctl delete cluster NAME | tkctl delete node CLUSTER NODE | tkctl delete images --k8s VERSION" ;;
               esac ;;
     stop)     shift; cmd_named stop lifecycle:stop "$@" ;;
     start)    shift; cmd_named start lifecycle:start "$@" ;;
@@ -192,7 +213,13 @@ main() {
               local name=${1:-}; [ -n "$name" ] || die "usage: tkctl describe cluster NAME [-o yaml]"; validate_name "$name"; shift
               local fmt=""; [ "${1:-}" == "-o" ] && fmt=${2:-}
               run_task lifecycle:describe CLUSTER="$name" OUTPUT="$fmt" ;;
-    get)      shift; [ "${1:-}" == clusters ] || die "usage: tkctl get clusters"; run_task lifecycle:list ;;
+    get)      shift
+              case "${1:-}" in
+                clusters) run_task lifecycle:list ;;
+                images) shift; cmd_images get images:list "$@" ;;
+                *) die "usage: tkctl get clusters | tkctl get images [--k8s VERSION]" ;;
+              esac ;;
+    pull)     shift; [ "${1:-}" == images ] || die "usage: tkctl pull images [--k8s VERSION]"; shift; cmd_images pull images:ensure "$@" ;;
     add)      shift; cmd_add_node "$@" ;;
     join)     shift; [ "${1:-}" == node ] || die "usage: tkctl join node CLUSTER NODE"
               [ -n "${2:-}" ] && [ -n "${3:-}" ] || die "usage: tkctl join node CLUSTER NODE"; validate_name "$2"

@@ -102,6 +102,10 @@ tasks:
       - task: append
         vars: { CLUSTER: '{{ .CLUSTER }}', ROLE: '{{ .ROLE }}', NODE: '{{ .NODE }}', IP: '{{ .IP }}', CPU: '{{ .NODE_CPU }}', MEMORY: '{{ .NODE_MEMORY }}', JOIN: '{{ .JOIN }}' }
       # Cross-namespace task references resolve inside this include, so call task explicitly.
+      # The new node mounts the shared store of the cluster's version; fill it first so it pulls nothing.
+      - |
+        k8s=$(sed -nE 's/^ *kubernetes: *"?([0-9.]+)"?.*/\1/p' {{ .STATE_DIR }}/cluster.yaml | head -1)
+        task --silent -d {{ .TK_HOME }} images:ensure K8S=$k8s
       - task --silent -d {{ .TK_HOME }} nodes:render CLUSTER={{ .CLUSTER }}
       - sudo systemctl daemon-reload && sudo systemctl start {{ .NODE }}.service
       - |

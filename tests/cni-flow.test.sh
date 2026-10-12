@@ -56,7 +56,22 @@ rm -f "$STUB/nodes-notready"; run
 assert_eq "0" "$rc" "healthy path exits 0"
 assert_contains "$out" "cilium $(v cilium) ok (install)" "healthy path reports cilium"
 assert_contains "$(cat "$STUB_LOG")" "--set bpf.lbExternalClusterIP=true" "ClusterIPs are reachable from the host and routed machines"
+assert_contains "$(cat "$STUB_LOG")" "--chart-directory $PWD/manifests/cilium-$(v cilium)" "cilium installs from the vendored chart, not helm.cilium.io"
 assert_contains "$(cat "$STUB_LOG")" "cilium-cli/releases/download/$(v cilium_cli)/cilium-linux-amd64.tar.gz" "cilium CLI downloaded at the pinned version"
+gw=$(v gateway_api)
+assert_contains "$(cat "$STUB_LOG")" "kubectl apply --server-side -f $PWD/manifests/gateway-api.${gw#v}.yaml" "Gateway API CRDs applied from the vendored file"
+if grep -q "raw.githubusercontent.com" "$STUB_LOG"; then echo "FAIL  cni:install fetches nothing from raw.githubusercontent.com"; FAILURES=$((FAILURES+1)); else echo "PASS  cni:install fetches nothing from raw.githubusercontent.com"; fi
+# The CLI install is its own task so images:status can run it before any node exists.
+rm -f "$STUB/cilium"; : > "$STUB_LOG"
+out=$(TK_OFFLINE=1 PATH="$STUB:$PATH" task cni:cli 2>&1); rc=$?
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "cni:cli with TK_OFFLINE=1 and no CLI fails"
+assert_contains "$out" "TK_OFFLINE" "cni:cli offline failure names TK_OFFLINE"
+if grep -q "curl" "$STUB_LOG"; then echo "FAIL  cni:cli offline downloads nothing"; FAILURES=$((FAILURES+1)); else echo "PASS  cni:cli offline downloads nothing"; fi
+out=$(PATH="$STUB:$PATH" task cni:cli 2>&1); rc=$?
+assert_eq "0" "$rc" "cni:cli installs the CLI"
+assert_contains "$(cat "$STUB_LOG")" "cilium-cli/releases/download/$(v cilium_cli)/cilium-linux-amd64.tar.gz" "cni:cli downloads the pinned release"
+: > "$STUB_LOG"; out=$(PATH="$STUB:$PATH" task cni:cli 2>&1)
+if grep -q "curl" "$STUB_LOG"; then echo "FAIL  cni:cli is a no-op when the CLI is present"; FAILURES=$((FAILURES+1)); else echo "PASS  cni:cli is a no-op when the CLI is present"; fi
 assert_contains "$(cat "$TMP/clusters/demo/cluster.yaml")" "datapath_resolved: veth" "datapath_resolved recorded"
 run  # second run on the same file must not duplicate the key
 assert_eq "1" "$(grep -c datapath_resolved "$TMP/clusters/demo/cluster.yaml")" "datapath_resolved written once"
