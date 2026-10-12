@@ -456,11 +456,18 @@ apiVersion: kubeadm.k8s.io/v1beta4
 kind: ClusterConfiguration
 clusterName: ha
 kubernetesVersion: 1.37.0
+controlPlaneEndpoint: "api.ha.k8s:6443"
 networking:
   dnsDomain: ha.k8s
   podSubnet: 10.244.0.0/21
   serviceSubnet: 10.98.0.0/24
 apiServer:
+  certSANs:
+    - api.ha.k8s
+    - 172.22.0.100
+    - 172.22.0.1
+    - 172.22.0.2
+    - 172.22.0.3
   extraArgs:
     - name: audit-log-format
       value: legacy
