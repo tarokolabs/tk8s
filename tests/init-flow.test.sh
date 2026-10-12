@@ -38,7 +38,8 @@ assert_eq "600" "$(if stat -c %a /dev/null >/dev/null 2>&1; then stat -c %a "$TM
 assert_contains "$(cat "$STUB/curl.log")" "https://172.22.0.100:6443/readyz" "init waits for the LB's readyz"
 assert_contains "$(cat "$TMP/clusters/demo/kubeconfig")" "server: https://172.22.0.100:6443" "kubeconfig handed to the host points at the LB, not the DNS name"
 if [[ "$(cat "$TMP/clusters/demo/kubeconfig")" == *"api.demo.k8s"* ]]; then echo "FAIL  no DNS name left in the host kubeconfig"; FAILURES=$((FAILURES+1)); else echo "PASS  no DNS name left in the host kubeconfig"; fi
-if ls "$TMP/clusters/demo/" | grep -q 'kubeconfig.*-e$\|kubeconfig.*\.bak$'; then echo "FAIL  no sed backup file next to the kubeconfig"; FAILURES=$((FAILURES+1)); else echo "PASS  no sed backup file next to the kubeconfig"; fi
+leftover=""; for f in "$TMP/clusters/demo"/kubeconfig*; do case "$f" in */kubeconfig) ;; *) leftover="$leftover $f" ;; esac; done
+assert_eq "" "$leftover" "no sed backup file next to the kubeconfig"
 rm -f "$TMP/clusters/demo/kubeconfig"; touch "$STUB/lb-dead"
 out=$(PATH="$STUB:$PATH" task kubeadm:init CLUSTER=demo 2>&1); rc=$?
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "init fails when the LB never reports a healthy control plane"
