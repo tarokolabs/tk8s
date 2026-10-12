@@ -32,7 +32,7 @@ tasks:
       - task --list
 
   cluster:create:
-    desc: Create a cluster from CLUSTER_FILE (plan, preflight, nodes, kubeadm, cni)
+    desc: Create a cluster from CLUSTER_FILE (plan, preflight, images, nodes, kubeadm, cni, addons)
     silent: true
     requires: { vars: [CLUSTER_FILE] }
     vars:
@@ -54,6 +54,9 @@ tasks:
         {{ else }}
         task --silent -d {{ .TK_HOME }} preflight:check
         task --silent -d {{ .TK_HOME }} plan:resolve CLUSTER_FILE={{ .CLUSTER_FILE }} ALLOW_OVERLAP={{ .ALLOW_OVERLAP }}
+        # Every image the cluster needs goes into the shared store first, so the nodes pull nothing.
+        k8s=$(sed -nE 's/^ *kubernetes: *"?([0-9.]+)"?.*/\1/p' {{ .STATE_DIR }}/cluster.yaml | head -1)
+        task --silent -d {{ .TK_HOME }} images:ensure K8S=$k8s
         task --silent -d {{ .TK_HOME }} nodes:up CLUSTER={{ .CLUSTER }}
         task --silent -d {{ .TK_HOME }} kubeadm:bootstrap CLUSTER={{ .CLUSTER }}
         task --silent -d {{ .TK_HOME }} cni:install CLUSTER={{ .CLUSTER }}

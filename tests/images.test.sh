@@ -151,4 +151,8 @@ run env TK_ASSUME_YES=1 task images:prune K8S=1.30.0
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "prune of a version without a store fails"
 assert_contains "$out" "no image store" "prune of a missing store says so"
 
+# ---- cluster:create fills the store after the plan is resolved and before the nodes start
+e=$(grep -n 'images:ensure' Taskfile.yaml | head -1 | cut -d: -f1); p=$(grep -n 'plan:resolve CLUSTER_FILE' Taskfile.yaml | tail -1 | cut -d: -f1); u=$(grep -n 'nodes:up CLUSTER' Taskfile.yaml | head -1 | cut -d: -f1)
+if [ -n "$e" ] && [ "$p" -lt "$e" ] && [ "$e" -lt "$u" ]; then echo "PASS  cluster:create runs images:ensure between plan:resolve and nodes:up"; else echo "FAIL  cluster:create runs images:ensure between plan:resolve and nodes:up"; FAILURES=$((FAILURES+1)); fi
+
 rm -rf "$TMP"; finish
