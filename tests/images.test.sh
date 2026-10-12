@@ -100,6 +100,10 @@ run task images:ensure K8S="$K8S"
 assert_eq "0" "$rc" "ensure with a root-owned images dir exits 0"
 assert_contains "$(cat "$STUB_LOG")" "sudo chown $(id -u):$(id -g) $TMP/images" "root-owned images dir is taken over"
 if [ -f "$TMP/images/$K8S.conf" ]; then echo "PASS  conf written after the takeover"; else echo "FAIL  conf written after the takeover"; FAILURES=$((FAILURES+1)); fi
+# tkctl pull images is the first thing run on a fresh host (before any create, so before preflight):
+# it must build the same user-owned data tree preflight builds, or nodes:cni-plugins fails right after.
+assert_contains "$(cat "$STUB_LOG")" "sudo install -d -o $(id -u) -g $(id -g) $TMP/cni" "ensure creates the data tree preflight would (cni)"
+if [ -d "$TMP/clusters" ] && [ -w "$TMP/cni" ] && [ -w "$TMP/images" ]; then echo "PASS  data tree exists and is writable after a bare ensure"; else echo "FAIL  data tree exists and is writable after a bare ensure"; FAILURES=$((FAILURES+1)); fi
 rm -f "$STUB/stat" "$STUB/chown"; chmod 755 "$TMP/images"; rm -rf "$TMP/images/$K8S" "$TMP/images/$K8S.conf" "$TMP/images/$K8S.lock" "$TMP/store"/*
 
 # ---- images:list before anything is pulled: header, every image missing, no download of the CLI
