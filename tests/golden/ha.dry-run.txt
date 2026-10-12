@@ -78,6 +78,10 @@ Volume=/lib/modules:/lib/modules:ro
 Volume=ha-control-plane-var:/var:suid,exec,dev,rbind
 Volume=ha-control-plane-etc:/etc
 Volume=ha-control-plane-usr-local-bin:/usr/local/bin
+# The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
+# reads it as an additional image store, so nothing a create needs is pulled; read-only
+# because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
+Volume=<TMP>/images/1.37.0:/var/lib/containers/shared:ro
 Volume=<TMP>/clusters/ha:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 StopTimeout=60
@@ -114,6 +118,10 @@ Volume=/lib/modules:/lib/modules:ro
 Volume=ha-control-plane2-var:/var:suid,exec,dev,rbind
 Volume=ha-control-plane2-etc:/etc
 Volume=ha-control-plane2-usr-local-bin:/usr/local/bin
+# The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
+# reads it as an additional image store, so nothing a create needs is pulled; read-only
+# because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
+Volume=<TMP>/images/1.37.0:/var/lib/containers/shared:ro
 Volume=<TMP>/clusters/ha:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 StopTimeout=60
@@ -150,6 +158,10 @@ Volume=/lib/modules:/lib/modules:ro
 Volume=ha-control-plane3-var:/var:suid,exec,dev,rbind
 Volume=ha-control-plane3-etc:/etc
 Volume=ha-control-plane3-usr-local-bin:/usr/local/bin
+# The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
+# reads it as an additional image store, so nothing a create needs is pulled; read-only
+# because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
+Volume=<TMP>/images/1.37.0:/var/lib/containers/shared:ro
 Volume=<TMP>/clusters/ha:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 StopTimeout=60
@@ -186,6 +198,10 @@ Volume=/lib/modules:/lib/modules:ro
 Volume=ha-worker1-var:/var:suid,exec,dev,rbind
 Volume=ha-worker1-etc:/etc
 Volume=ha-worker1-usr-local-bin:/usr/local/bin
+# The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
+# reads it as an additional image store, so nothing a create needs is pulled; read-only
+# because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
+Volume=<TMP>/images/1.37.0:/var/lib/containers/shared:ro
 Volume=<TMP>/clusters/ha:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 StopTimeout=60
@@ -222,6 +238,10 @@ Volume=/lib/modules:/lib/modules:ro
 Volume=ha-worker2-var:/var:suid,exec,dev,rbind
 Volume=ha-worker2-etc:/etc
 Volume=ha-worker2-usr-local-bin:/usr/local/bin
+# The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
+# reads it as an additional image store, so nothing a create needs is pulled; read-only
+# because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
+Volume=<TMP>/images/1.37.0:/var/lib/containers/shared:ro
 Volume=<TMP>/clusters/ha:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 StopTimeout=60

@@ -55,6 +55,10 @@ tasks:
         Volume={{ .name }}-var:/var:suid,exec,dev,rbind
         Volume={{ .name }}-etc:/etc
         Volume={{ .name }}-usr-local-bin:/usr/local/bin
+        # The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
+        # reads it as an additional image store, so nothing a create needs is pulled; read-only
+        # because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
+        Volume={{ $.IMAGES_DIR }}/{{ $.DEF.spec.kubernetes }}:/var/lib/containers/shared:ro
         Volume={{ $.STATE_DIR }}:/opt/taroko
         Volume={{ $.TK_WULIN_DIR }}:/opt/taroko/wulin
         StopTimeout=60

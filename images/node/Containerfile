@@ -40,10 +40,10 @@ COPY crio.conf.d/ /etc/crio/crio.conf.d/
 COPY crictl.yaml /etc/crictl.yaml
 COPY storage.conf /etc/containers/storage.conf
 
-# 共用唯讀 image store 的掛載點。目錄必須先存在：沒掛任何東西時它是空目錄，
-# CRI-O 照常啟動（退化成沒有共用 store）；目錄不存在的話 containers/storage
-# 會報 can't stat imageStore dir，crio 起不來。
-RUN mkdir -p /var/lib/shared
+# 共用唯讀 image store 的掛載點（與主 store /var/lib/containers/storage 並排）。目錄必須先存在：
+# 沒掛任何東西時它是空目錄，CRI-O 照常啟動（退化成沒有共用 store）；目錄不存在的話
+# containers/storage 會報 can't stat imageStore dir，crio 起不來。
+RUN mkdir -p /var/lib/containers/shared
 
 # 換掉 CRI：關閉 containerd，改由 crio 提供 CRI socket。kind 在 /etc/default/kubelet 把 kubelet 的
 # --runtime-cgroups 指向 containerd 的 cgroup；跟著換成 crio 的，否則 kubelet 每幾秒就報
