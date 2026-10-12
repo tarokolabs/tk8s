@@ -90,6 +90,11 @@ tasks:
           {{ if .DEF.spec.nodes }}[ "{{ (index .DEF.spec.nodes 0).role }}" = control-plane ] || { echo 'the first entry in spec.nodes must be a control-plane (it runs kubeadm init)'; exit 0; }{{ end }}
           [ $(( {{ .CP_COUNT }} % 2 )) -eq 1 ] || { echo 'control-plane count {{ .CP_COUNT }} must be odd (1, 3, 5) for etcd quorum'; exit 0; }
           [ {{ .CP_COUNT }} -le 5 ] || { echo 'control-plane count {{ .CP_COUNT }} exceeds the limit: at most 5 (the apiserver LB has five backend slots)'; exit 0; }
+          # Custom DNS/LB addresses live in .220-.253 of the node subnet: nodes take .1-.199, LB-IPAM .200-.219, the gateway .254.
+          for a in "{{ .WANT_DNS }}" "{{ .WANT_LB }}"; do
+            [ -z "$a" ] || echo "$a" | grep -qE '^172\.22\.{{ .INDEX }}\.(2[2-4][0-9]|25[0-3])$' || { echo "spec.network address $a must be 172.22.{{ .INDEX }}.220-253 (custom dns/lb; defaults are .253 and .100)"; exit 0; }
+          done
+          [ -z "{{ .WANT_DNS }}" ] || [ "{{ .WANT_DNS }}" != "{{ .WANT_LB }}" ] || { echo 'spec.network.dns and spec.network.lb must differ'; exit 0; }
     preconditions:
       - sh: '[ -n "{{ .CLUSTER }}" ]'
         msg: "metadata.name is required in {{ .CLUSTER_FILE }}"
@@ -129,7 +134,7 @@ tasks:
         {{- $idx := .INDEX }}{{ $ip := 0 }}{{ $cp := 0 }}{{ $wk := 0 }}
         {{- range .NODES }}{{ $grp := . }}
         {{- range $i := until (int (default 1 $grp.count)) }}
-        {{- $ip = add $ip 1 }}
+        {{- $ip = add $ip 1 }}{{ if eq (int $ip) 100 }}{{ $ip = 101 }}{{ end }}
         {{- if eq $grp.role "control-plane" }}{{ $cp = add $cp 1 }}
             - role: control-plane
               name: {{ if $grp.name }}{{ $grp.name }}{{ else }}{{ $.CLUSTER }}-control-plane{{ if gt (int $cp) 1 }}{{ $cp }}{{ end }}{{ end }}

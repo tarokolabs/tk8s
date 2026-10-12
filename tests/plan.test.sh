@@ -102,12 +102,39 @@ assert_contains "$out" "spec.network.vip is no longer supported" "vip refusal na
 cat > "$TMP/pin.yaml" <<'YAML'
 metadata: {name: pin}
 spec:
-  network: {nodes: 172.22.9.0/24, dns: 172.22.9.250, lb: 172.22.9.99}
+  network: {nodes: 172.22.9.0/24, dns: 172.22.9.250, lb: 172.22.9.240}
   nodes: [{role: control-plane}]
 YAML
 out=$(task plan:resolve CLUSTER_FILE="$TMP/pin.yaml" DRY_RUN=true 2>&1)
 assert_contains "$out" "dns: 172.22.9.250" "explicit dns address kept"
-assert_contains "$out" "lb: 172.22.9.99" "explicit lb address kept"
+assert_contains "$out" "lb: 172.22.9.240" "explicit lb address kept"
+# Custom addresses live in .220-.253 (nodes take .1-.199, the LB-IPAM pool .200-.219, the gateway .254).
+cat > "$TMP/clash.yaml" <<'YAML'
+metadata: {name: clash}
+spec:
+  network: {nodes: 172.22.9.0/24, lb: 172.22.9.99}
+  nodes: [{role: control-plane}]
+YAML
+out=$(task plan:resolve CLUSTER_FILE="$TMP/clash.yaml" DRY_RUN=true 2>&1); rc=$?
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "an lb address inside the node range is refused"
+assert_contains "$out" "220" "refusal names the allowed range"
+cat > "$TMP/same.yaml" <<'YAML'
+metadata: {name: same}
+spec:
+  network: {nodes: 172.22.9.0/24, dns: 172.22.9.230, lb: 172.22.9.230}
+  nodes: [{role: control-plane}]
+YAML
+out=$(task plan:resolve CLUSTER_FILE="$TMP/same.yaml" DRY_RUN=true 2>&1); rc=$?
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "dns and lb on the same address are refused"
+# Node allocation never hands out the LB's default address.
+cat > "$TMP/big.yaml" <<'YAML'
+metadata: {name: big}
+spec:
+  nodes: [{role: control-plane}, {role: worker, count: 100}]
+YAML
+out=$(task plan:resolve CLUSTER_FILE="$TMP/big.yaml" DRY_RUN=true 2>&1)
+if [[ "$out" == *"ip: 172.22.1.100"* ]]; then echo "FAIL  node allocation skips the LB address .100"; FAILURES=$((FAILURES+1)); else echo "PASS  node allocation skips the LB address .100"; fi
+assert_contains "$out" "ip: 172.22.1.101" "the 100th node takes .101"
 # HAProxy's server-template has five slots.
 cat > "$TMP/seven.yaml" <<'YAML'
 metadata: {name: seven}

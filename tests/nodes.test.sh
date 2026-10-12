@@ -61,6 +61,7 @@ lbcfg=$(echo "$out" | sed -n '/# ---- .*\/lb\/haproxy.cfg/,/# ---- /p')
 assert_contains "$lbcfg" "server-template cp 5 _apiserver._tcp.demo.k8s" "LB discovers control planes through SRV"
 assert_contains "$lbcfg" "check-ssl verify none init-addr none resolvers dns" "health check over TLS, traffic passthrough, starts without DNS"
 assert_contains "$lbcfg" "hold obsolete 120s" "resolver outage tolerated for two minutes"
+assert_contains "$lbcfg" "on-marked-down shutdown-sessions" "a control plane marked DOWN loses its established connections (clients reconnect elsewhere)"
 assert_contains "$lbcfg" "bind *:6443" "LB listens on the container address"
 assert_contains "$lbcfg" "bind 127.0.0.1:8404" "stats only on loopback"
 dnsu=$(echo "$out" | sed -n '/demo-dns.container/,/# ---- /p')
@@ -90,6 +91,14 @@ up=$(sed -n '/^  up:/,/^  [a-z-]*:$/p' taskfiles/nodes.yaml)
 assert_contains "$up" "images:host K8S=" "nodes:up calls images:host"
 if [ "$(echo "$up" | grep -n 'images:host' | head -1 | cut -d: -f1)" -lt "$(echo "$up" | grep -n 'enable --now' | head -1 | cut -d: -f1)" ]; then echo "PASS  images are in the host store before the target starts"; else echo "FAIL  images are in the host store before the target starts"; FAILURES=$((FAILURES+1)); fi
 assert_contains "$up" "MAINT (resolution)" "nodes:up waits until the LB has resolved the control planes"
+# A cluster.yaml from before the apiserver LB (no lb/dns) must be refused, not rendered with empty addresses:
+# add node / delete node re-render every unit of a live cluster.
+mkdir -p "$TMP/clusters/old"
+sed -e 's/name: demo/name: old/' -e 's/demo-/old-/g' -e 's/, dns: 172.22.3.253, lb: 172.22.3.100//' "$TMP/clusters/demo/cluster.yaml" > "$TMP/clusters/old/cluster.yaml"
+out=$(task nodes:render CLUSTER=old DRY_RUN=true 2>&1); rc=$?
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "render refuses a cluster created before the apiserver LB"
+assert_contains "$out" "created before the apiserver LB" "refusal explains why"
+if [[ "$out" == *"AddHost="* ]]; then echo "FAIL  nothing rendered for the old cluster"; FAILURES=$((FAILURES+1)); else echo "PASS  nothing rendered for the old cluster"; fi
 cp_unit=$(echo "$out" | sed -n '/demo-control-plane.container/,/demo-worker1.container/p')
 if [[ "$cp_unit" == *"After=demo-control-plane.service"* ]]; then echo "FAIL  control plane must not wait for itself"; FAILURES=$((FAILURES+1)); else echo "PASS  control plane has no After on itself"; fi
 rm -rf "$TMP"; finish
