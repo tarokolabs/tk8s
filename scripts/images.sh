@@ -12,6 +12,7 @@ ms=$(v metrics_server); lp=$(v local_path_provisioner)
 # The cilium CLI wants a home directory even in --dry-run (none under a guest agent).
 export HOME="${HOME:-/tmp}"
 {
+  # The pause image here is also CRI-O's sandbox image: the node image sets pause_image from this list.
   sudo podman run --rm --entrypoint kubeadm "ghcr.io/tarokolabs/tk8s/node:v$K8S" config images list --kubernetes-version "v$K8S"
   # The --set flags of cni:install toggle datapath, IPAM and the Gateway API; none changes the image
   # set (agent, operator, envoy). L3 asserts that no node pulled anything, which catches drift here.

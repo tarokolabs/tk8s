@@ -17,4 +17,9 @@ assert_contains "$(cat $s)" '"/var/lib/containers/shared"' "storage.conf lists /
 assert_contains "$(cat $f)" "mkdir -p /var/lib/containers/shared" "the mount point is created in the image"
 assert_eq "" "$(grep -n '/var/lib/shared' $s $f || true)" "the v1 mount point /var/lib/shared is gone"
 assert_contains "$(cat taskfiles/nodes.yaml)" ":/var/lib/containers/shared:ro" "nodes mount the store at the path CRI-O looks at"
+# CRI-O's built-in sandbox image (pause:3.10.1 in CRI-O 1.36) and kubeadm's listed pause (3.10.2 for
+# 1.36.4) drift apart; the store only holds kubeadm's, so an offline create cannot start any sandbox
+# unless CRI-O is told to use kubeadm's. L3 run 38252624650 (1.36.4) failed exactly there.
+assert_contains "$(cat $f)" "kubeadm config images list" "the image build reads the pause image from kubeadm"
+assert_contains "$(cat $f)" 'pause_image = ' "CRI-O's pause_image is set to kubeadm's pause in a crio.conf.d drop-in"
 finish

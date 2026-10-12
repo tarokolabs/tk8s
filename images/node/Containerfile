@@ -38,6 +38,15 @@ RUN printf 'fs.inotify.max_user_instances=8192\nfs.inotify.max_user_watches=5242
 
 COPY crio.conf.d/ /etc/crio/crio.conf.d/
 COPY crictl.yaml /etc/crictl.yaml
+
+# CRI-O 與 kubeadm 必須用同一個 sandbox（pause）image。CRI-O 內建的預設（1.36 是 pause:3.10.1）
+# 會跟 kubeadm 列的（1.36.4 是 3.10.2）漂移；共用 image store 只有 kubeadm 列的那個，離線時
+# CRI-O 拉不到自己的預設就建不出任何 pod sandbox。build 時從 kubeadm 讀，寫進獨立的 drop-in。
+RUN set -eux; \
+    pause=$(kubeadm config images list --kubernetes-version "v${VER}" | grep '/pause:'); \
+    printf '# Written at image build: CRI-O uses the same pause image kubeadm %s lists.\n[crio.image]\npause_image = "%s"\n' "v${VER}" "$pause" \
+      > /etc/crio/crio.conf.d/20-pause.conf; \
+    cat /etc/crio/crio.conf.d/20-pause.conf
 COPY storage.conf /etc/containers/storage.conf
 
 # 共用唯讀 image store 的掛載點（與主 store /var/lib/containers/storage 並排）。目錄必須先存在：
