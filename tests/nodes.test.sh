@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 source "$(dirname "$0")/lib.sh"
+cd "$(dirname "$0")/.." || exit 1
+v() { sed -nE "s/^$1: *\"?([^\"]+)\"?.*/\1/p" versions.yaml; }
 TMP=$(mktemp -d); export TK_DATA_DIR="$TMP"
 mkdir -p "$TMP/clusters/demo"
 cat > "$TMP/clusters/demo/cluster.yaml" <<'YAML'
@@ -8,10 +10,11 @@ kind: Cluster
 metadata: {name: demo}
 spec:
   kubernetes: "1.37.0"
-  network: {index: 3, nodes: 172.22.3.0/24, gateway: 172.22.3.254, pods: 10.244.24.0/21, services: 10.98.3.0/24, lb_range: 172.22.3.200-172.22.3.219}
+  network: {index: 3, nodes: 172.22.3.0/24, gateway: 172.22.3.254, dns: 172.22.3.253, lb: 172.22.3.100, pods: 10.244.24.0/21, services: 10.98.3.0/24, lb_range: 172.22.3.200-172.22.3.219}
   nodes:
     - {role: control-plane, name: demo-control-plane, ip: 172.22.3.1, cpu: 2, memory: 4g, join: true}
     - {role: worker, name: demo-worker1, ip: 172.22.3.2, cpu: 4, memory: 8g, join: true}
+    - {role: control-plane, name: demo-control-plane2, ip: 172.22.3.3, cpu: 2, memory: 4g, join: false}
 YAML
 out=$(task nodes:render CLUSTER=demo DRY_RUN=true 2>&1)
 assert_contains "$out" "# ---- /etc/containers/systemd/demo/demo.network" "network unit path"
@@ -31,7 +34,6 @@ assert_contains "$out" "Volume=demo-worker1-usr-local-bin:/usr/local/bin" "per-n
 assert_contains "$out" "Volume=$TMP/clusters/demo:/opt/taroko" "state dir mounted as /opt/taroko"
 assert_contains "$out" "Volume=$TMP/images/1.37.0:/var/lib/containers/shared:ro" "shared image store of the cluster's Kubernetes version mounted read-only"
 assert_contains "$out" "# ---- /etc/systemd/system/demo.target" "target path"
-assert_contains "$out" "Wants=demo-control-plane.service demo-worker1.service demo-routes.service" "target wants every node and the routes unit"
 # Host routes to the pod and service subnets live in a unit so they come back after a reboot.
 routes=$(echo "$out" | sed -n '/demo-routes.service/,$p')
 assert_contains "$out" "# ---- /etc/systemd/system/demo-routes.service" "routes unit path"
@@ -41,6 +43,50 @@ assert_contains "$routes" "ExecStop=-ip route del 10.244.24.0/21" "routes remove
 assert_contains "$routes" "After=demo-control-plane.service" "routes wait for the control plane (its bridge address)"
 assert_contains "$routes" "PartOf=demo.target" "routes unit belongs to the cluster target"
 assert_contains "$routes" "RemainAfterExit=yes" "oneshot stays active so stop runs ExecStop"
+# ---- apiserver LB: cluster DNS (SRV for every control plane) and the host-side HAProxy at .100
+zone=$(echo "$out" | sed -n '/# ---- .*\/dns\/db.demo.k8s/,/# ---- /p')
+assert_contains "$out" "# ---- $TMP/clusters/demo/dns/db.demo.k8s" "zone file path"
+assert_contains "$zone" '$ORIGIN demo.k8s.' "zone origin"
+assert_eq "2" "$(echo "$zone" | grep -c '_apiserver._tcp *IN SRV')" "one SRV per control plane, joined or not"
+assert_contains "$zone" "IN SRV   0 100 6443 demo-control-plane2.demo.k8s." "SRV target is the node name"
+assert_eq "3" "$(echo "$zone" | grep -cE '^demo-[a-z0-9-]+ +IN A ')" "one A per node"
+assert_contains "$zone" "api                  IN A     172.22.3.100" "api name points at the LB"
+assert_contains "$zone" "dns                  IN A     172.22.3.253" "dns name points at itself"
+assert_contains "$zone" "( 1 10 10 60 10 )" "dry-run uses a fixed SOA serial"
+corefile=$(echo "$out" | sed -n '/# ---- .*\/dns\/Corefile/,/# ---- /p')
+assert_contains "$corefile" "file /etc/coredns/db.demo.k8s" "Corefile serves the zone"
+assert_contains "$corefile" "reload 10s" "zone reloads on serial change"
+assert_contains "$corefile" "forward . 172.22.3.254" "everything else goes to aardvark"
+lbcfg=$(echo "$out" | sed -n '/# ---- .*\/lb\/haproxy.cfg/,/# ---- /p')
+assert_contains "$lbcfg" "server-template cp 5 _apiserver._tcp.demo.k8s" "LB discovers control planes through SRV"
+assert_contains "$lbcfg" "check-ssl verify none init-addr none resolvers dns" "health check over TLS, traffic passthrough, starts without DNS"
+assert_contains "$lbcfg" "hold obsolete 120s" "resolver outage tolerated for two minutes"
+assert_contains "$lbcfg" "bind *:6443" "LB listens on the container address"
+assert_contains "$lbcfg" "bind 127.0.0.1:8404" "stats only on loopback"
+dnsu=$(echo "$out" | sed -n '/demo-dns.container/,/# ---- /p')
+assert_contains "$dnsu" "Image=$(v coredns)" "DNS unit runs the pinned CoreDNS"
+assert_contains "$dnsu" "IP=172.22.3.253" "DNS at .253"
+assert_contains "$dnsu" "Volume=$TMP/clusters/demo/dns:/etc/coredns:ro" "zone and Corefile mounted read-only"
+assert_contains "$dnsu" "Exec=-conf /etc/coredns/Corefile" "CoreDNS reads the Corefile"
+assert_contains "$dnsu" "PartOf=demo.target" "DNS unit belongs to the target"
+lbu=$(echo "$out" | sed -n '/demo-lb.container/,/# ---- /p')
+assert_contains "$lbu" "Image=$(v haproxy)" "LB unit runs the pinned HAProxy"
+assert_contains "$lbu" "IP=172.22.3.100" "LB at .100"
+assert_contains "$lbu" "DNS=172.22.3.253" "LB resolves through the cluster DNS"
+assert_contains "$lbu" "Volume=$TMP/clusters/demo/lb/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro" "LB config mounted where the image reads it"
+assert_contains "$lbu" "After=demo-dns.service" "LB starts after DNS"
+w_unit=$(echo "$out" | sed -n '/demo-worker1.container/,/# ---- /p')
+assert_contains "$w_unit" "DNS=172.22.3.253" "worker resolves through the cluster DNS"
+assert_contains "$w_unit" "AddHost=api.demo.k8s:127.0.0.1" "worker reaches the apiserver through its own HAProxy"
+assert_contains "$w_unit" "Volume=$TMP/clusters/demo/nodes/demo-worker1.env:/etc/tk8s/apiserver-lb.env:ro" "worker gets the env file that enables apiserver-lb.service"
+assert_contains "$w_unit" "After=demo-dns.service" "worker starts after DNS"
+cp2_unit=$(echo "$out" | sed -n '/demo-control-plane2.container/,/# ---- /p')
+assert_contains "$cp2_unit" "AddHost=api.demo.k8s:172.22.3.100" "control plane reaches the apiserver through the host-side LB (its own is not up at join)"
+if [[ "$cp2_unit" == *"apiserver-lb.env"* ]]; then echo "FAIL  control plane has no apiserver-lb env file"; FAILURES=$((FAILURES+1)); else echo "PASS  control plane has no apiserver-lb env file"; fi
+assert_contains "$out" "# ---- $TMP/clusters/demo/nodes/demo-worker1.env" "worker env file rendered"
+assert_contains "$(echo "$out" | sed -n '/nodes\/demo-worker1.env/,/# ---- /p')" "TK_CLUSTER_DOMAIN=demo.k8s" "env file carries the cluster domain"
+if [[ "$out" == *"nodes/demo-control-plane.env"* ]]; then echo "FAIL  no env file for control planes"; FAILURES=$((FAILURES+1)); else echo "PASS  no env file for control planes"; fi
+assert_contains "$out" "Wants=demo-dns.service demo-lb.service demo-control-plane.service demo-worker1.service demo-control-plane2.service demo-routes.service" "target wants DNS, LB, every node and the routes unit"
 cp_unit=$(echo "$out" | sed -n '/demo-control-plane.container/,/demo-worker1.container/p')
 if [[ "$cp_unit" == *"After=demo-control-plane.service"* ]]; then echo "FAIL  control plane must not wait for itself"; FAILURES=$((FAILURES+1)); else echo "PASS  control plane has no After on itself"; fi
 rm -rf "$TMP"; finish

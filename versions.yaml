@@ -13,6 +13,9 @@ local_path_provisioner: "v0.0.37"
 gvisor: "20261005.0"
 gateway_api: "v1.6.3"
 kube_vip: "v1.0.1"
+# apiserver LB per cluster (host-side container at .100) and the cluster DNS that serves its SRV records
+haproxy: "docker.io/library/haproxy:3.3.16-trixie"
+coredns: "registry.k8s.io/coredns/coredns:v1.14.6"
 task: "v3.54.0"
 # crun for the L3 runner only (Ubuntu 24.04 ships 1.14, too old for podman 5); nodes get crun from CRI-O
 crun: "1.30.1"

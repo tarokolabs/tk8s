@@ -31,7 +31,7 @@ out=$($T create cluster demo --control-planes 3 --workers 4 --cpu 4 --memory 8G 
 assert_contains "$out" "name: demo-control-plane3" "control-planes flag"
 assert_contains "$out" "name: demo-worker4" "workers flag"
 assert_contains "$out" 'kubernetes: "1.36.4"' "k8s flag"
-assert_contains "$out" "vip: 172.22." "HA gets a vip"
+assert_contains "$out" "lb: 172.22." "HA gets the apiserver LB address"
 out=$($T create cluster demo --control-planes 3 --defer-join --dry-run 2>&1)
 assert_eq "2" "$(echo "$out" | grep -c "join: false")" "--defer-join marks the extra control planes"
 assert_fails "--defer-join without extra control planes is rejected" $T create cluster demo --defer-join --dry-run
