@@ -93,6 +93,11 @@ assert_fails "get images with a malformed --k8s is rejected" env TK_TASK="$TMP/t
 assert_fails "pull images with an unknown flag is rejected" env TK_TASK="$TMP/task-stub" $T pull images --now
 assert_fails "pull without images is rejected" env TK_TASK="$TMP/task-stub" $T pull cluster
 out=$($T --help 2>&1); assert_contains "$out" "pull images" "help lists pull images"
+if [[ "$out" == *"kube-vip"* ]]; then echo "FAIL  help does not mention kube-vip"; FAILURES=$((FAILURES+1)); else echo "PASS  help does not mention kube-vip"; fi
+assert_contains "$out" "at most 5" "help states the control plane limit"
+assert_fails "--control-planes 7 is rejected" $T create cluster --control-planes 7 --dry-run
+# kube-vip is gone from the whole platform, release notes included (README only recalls it under the v1 differences).
+assert_eq "" "$(grep -rn 'kube-vip\|kube_vip' taskfiles scripts bin versions.yaml manifests 2>/dev/null || true)" "no kube-vip left in taskfiles, scripts, tkctl, pins or manifests (plan:resolve still names spec.network.vip to refuse it)"
 assert_contains "$out" "TK_OFFLINE" "help documents TK_OFFLINE"
 out=$($T version 2>&1); assert_contains "$out" "kubernetes default 1.37.0" "version shows default kubernetes"
 rm -rf "$TMP"; finish

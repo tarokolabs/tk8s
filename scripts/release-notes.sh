@@ -32,7 +32,7 @@ $(sort "$digests"/*.digest | awk '{printf "| `%s` | `%s` |\n", $1, $2}')
 | Container runtime | CRI-O（對齊 K8s minor；單一節點 image）|
 | CNI | cilium $(v cilium)（kube-proxy replacement、LB-IPAM、L2 announcement、netkit/veth）|
 | Gateway API | cilium 內建 controller（Gateway API $(v gateway_api)，experimental channel CRD）|
-| 高可用 | kube-vip $(v kube_vip)（\`--control-planes 3\`）|
+| apiserver 入口 | 每叢集 HAProxy LB（$(v haproxy)）+ CoreDNS SRV（$(v coredns)）；worker 內 HAProxy；\`--control-planes 3\` 以上多 control plane |
 | RuntimeClass | crun（CRI-O 內建）；gVisor $(v gvisor)（\`--gvisor\`，建叢集時裝進節點）|
 | 監控與儲存 | metrics-server $(v metrics_server)、local-path-provisioner $(v local_path_provisioner) |
 | 工具 | go-task $(v task)、kubectl ${d}（install.sh 下載）|

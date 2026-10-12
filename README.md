@@ -17,7 +17,7 @@
 | CNI | **cilium** 1.20.2，kube-proxy replacement；datapath 預設在核心 ≥ 6.8 用 netkit，`--datapath veth` 可切 |
 | 負載平衡 | cilium LB-IPAM 加 L2 announcement，LoadBalancer IP 從節點網段的 `.200`–`.219` 配發 |
 | Gateway API | cilium 內建 controller，GatewayClass `cilium`，Gateway API v1.6.1 CRD（experimental channel，含 TCPRoute、UDPRoute） |
-| 高可用 | `--control-planes 3` 以上自動配 kube-vip VIP；多出來的 control plane 可以先不加入，留給練習 |
+| 高可用 | 每個叢集都有 apiserver LB（HAProxy 容器，節點網段 `.100`）與 DNS（`.253`）；worker 經節點內的 HAProxy 連 control plane；`--control-planes 3` 以上才有多台 control plane（上限 5），多出來的可以先不加入，留給練習 |
 | 節點生命週期 | Podman Quadlet 加 systemd：主機重開機叢集自動回來 |
 | RuntimeClass | `crun`（CRI-O 內建）；`--gvisor` 的叢集多一個 `gvisor`（handler `runsc`） |
 | gVisor（選配） | `--gvisor` 時建叢集當場裝進每個節點，不烤在 image；需要 veth datapath，會自動選 |
@@ -102,11 +102,11 @@ tkctl version
 幾個規則：
 
 - 名稱省略是 `tk8s`。名稱進節點名（`tk8s-control-plane`、`tk8s-worker1`）與叢集 DNS 網域（`tk8s.k8s`），格式 `^[a-z][a-z0-9-]{0,15}$`。
-- `--control-planes` 要是奇數；大於 1 時自動啟用 kube-vip，VIP 在節點網段的 `.100`。
+- `--control-planes` 要是奇數、最多 5；不論幾台，apiserver 的入口都是 `api.<叢集>.k8s:6443`，由 `.100` 的 HAProxy 容器與每個 worker 自己的 HAProxy 分別服務。
 - `--defer-join`：第一個以外的 control plane 建起來但不 join，之後用 `tkctl join node` 加入。這是 HA 練習用的。
 - `--gvisor` 需要 veth datapath，會自動選；明確指定 `--datapath netkit` 加 `--gvisor` 會被拒絕。
 - `--memory` 接受 `4G`、`4096M` 這種寫法，`4Gi` 不行。
-- 加 control plane 只能加在有 VIP 的叢集（kubeadm 需要 `controlPlaneEndpoint`）。
+- control plane 可以加在任何叢集上（上限 5）。
 - `create` 中斷後再跑同一個指令會從沒做完的地方續行；已完成的叢集再 `create` 會被拒絕。
 - `--dry-run` 印出解析後的 `cluster.yaml`、全部 Quadlet unit 與 kubeadm 設定，不動主機。
 
@@ -151,12 +151,13 @@ tkctl create cluster -f tkdt.yaml
 
 ## 網段與狀態目錄
 
-網段自動分配，每個叢集拿一個索引 N，彼此不重疊：節點 `172.22.N.0/24`（閘道 `.254`、LB 池 `.200`–`.219`、VIP `.100`）、pod `10.244.(8N).0/21`、service `10.98.N.0/24`。要自己指定就寫在 `spec.network`，與既有叢集重疊會被擋，`--allow-overlap` 放行。
+網段自動分配，每個叢集拿一個索引 N，彼此不重疊：節點 `172.22.N.0/24`（閘道 `.254`、DNS `.253`、apiserver LB `.100`、LB 池 `.200`–`.219`）、pod `10.244.(8N).0/21`、service `10.98.N.0/24`。要自己指定就寫在 `spec.network`，與既有叢集重疊會被擋，`--allow-overlap` 放行。
 
 ```
 /opt/taroko/clusters/<名稱>/     # 叢集狀態：cluster.yaml、kubeconfig、init-config.yaml、storage/、logs/
 /opt/taroko/cni/                 # CNI plugins，所有叢集共用
 /opt/taroko/images/<K8s 版本>/   # 共用 image store，節點唯讀掛載；<版本>.conf 是它的 storage.conf
+/opt/taroko/clusters/<名稱>/{dns,lb,nodes}/   # DNS zone、LB 設定、worker 的 env 檔，都由 cluster.yaml 渲染
 /etc/containers/systemd/<名稱>/  # Quadlet unit：<名稱>.network、每個節點一個 .container
 /etc/systemd/system/<名稱>.target
 /etc/systemd/system/<名稱>-routes.service   # 主機到 pod 與 service 網段的路由，跟 target 一起啟停
@@ -168,7 +169,7 @@ tkctl create cluster -f tkdt.yaml
 
 ## 共用 image store
 
-建叢集需要的 image（control plane、Cilium、metrics-server、local-path、kube-vip、`verify` 的測試 image）由主機拉一次，放在 `/opt/taroko/images/<K8s 版本>/`，每個節點容器以唯讀掛在 `/var/lib/containers/shared`，CRI-O 把它當 additional image store：查 image 先看這裡，有就直接用，沒有才照常 pull 進節點自己的 `/var`。所以：
+建叢集需要的 image（control plane、Cilium、metrics-server、local-path、HAProxy、CoreDNS、`verify` 的測試 image）由主機拉一次，放在 `/opt/taroko/images/<K8s 版本>/`，每個節點容器以唯讀掛在 `/var/lib/containers/shared`，CRI-O 把它當 additional image store：查 image 先看這裡，有就直接用，沒有才照常 pull 進節點自己的 `/var`。所以：
 
 - 第一次 `tkctl create cluster` 多花一次下載（約 2 GB、一兩分鐘），之後每個叢集、每個節點都是零下載；`--k8s` 不同版本各有一個目錄。
 - 斷網的教室先在有網路時 `tkctl pull images`，上課時 `TK_OFFLINE=1 tkctl create cluster`：缺任何 image 會直接列出來而不是卡在 pull。CI 的 L3 就是這樣建的。
@@ -177,6 +178,12 @@ tkctl create cluster -f tkdt.yaml
 - 建叢集時主機要套的東西也都在 repo 裡：Gateway API CRD、metrics-server manifest 與 Cilium 的 Helm chart 由 `scripts/vendor-manifests.sh` 放進 `manifests/`，升版時重跑一次；cilium CLI 不會再去 helm.cilium.io 抓 chart。
 - 只有 tkctl 寫這個目錄；主機的 `podman image prune`、`podman system reset` 動的是 `/var/lib/containers/storage`，碰不到它。要清就 `tkctl delete images --k8s <版本>`。
 - 節點 image 需是 2026-10 之後的配方（掛載點 `/var/lib/containers/shared`）。更早拉的本機快取用 `sudo podman pull ghcr.io/tarokolabs/tk8s/node:v<版本>` 更新；舊 image 建叢集照樣成功，只是不會用到 store。
+
+## apiserver 的入口
+
+每個叢集有兩個小容器跟節點一起啟停：`<名稱>-dns`（CoreDNS，`.253`）公布 `_apiserver._tcp.<名稱>.k8s` 的 SRV record，每台 control plane 一筆；`<名稱>-lb`（HAProxy，`.100`）從 SRV 找到 control plane，`/readyz` 健康檢查、round-robin。`controlPlaneEndpoint` 與憑證都是 `api.<名稱>.k8s:6443`：worker 把這個名字指到 `127.0.0.1`，由節點內自己的 HAProxy 服務（kubelet、kube-proxy、Cilium 都走它）；control plane 把它指到 `.100`；主機的 kubeconfig 直接寫 `.100`。一台 control plane 掛掉，約 6 秒內從兩側的後端清單消失，既有連線被切斷、客戶端立刻重連到別台；加減 control plane 只是 zone 檔多一筆少一筆，HAProxy 自己跟上，不重啟。
+
+跟 VIP 的差別：沒有 ARP、沒有 lease、沒有 static pod；單 control plane 的叢集也走同一條路，所以 `verify` 的 `[apiserver-lb]` 每個叢集都會檢查。
 
 ## 從主機與其他機器連進叢集
 
@@ -203,7 +210,7 @@ v1 叢集不自動轉換：以 v2026.9.1 的工具備份或拆除，PVC 資料�
 - 沒有 `kto`、`kls` 這些短命令，也沒有 `tkctl cluster create` 這種名詞在前的寫法。
 - 不需要 source profile，不需要 `bc`、`jq`、`envsubst`、`nc`。
 - 節點由 systemd 管，主機重開機叢集自動回來；v1 要手動 `kci`。
-- 多 control plane 真的會 join（v1 只放 kube-vip）。
+- 多 control plane 真的會 join；apiserver 入口是每叢集的 HAProxy 與 DNS，不是 VIP（v1 用 kube-vip）。
 - 不再有 macvlan 外接節點、`tkport` DNAT 註解、`route-add`、`expose`；對外曝露改用 LoadBalancer 或 Gateway。
 - 只支援 systemd 主機，Alpine 不在範圍內；節點只有 CRI-O，不再有 containerd 變體。
 
