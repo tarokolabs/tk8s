@@ -87,6 +87,12 @@ assert_contains "$out" "# ---- $TMP/clusters/demo/nodes/demo-worker1.env" "worke
 assert_contains "$(echo "$out" | sed -n '/nodes\/demo-worker1.env/,/# ---- /p')" "TK_CLUSTER_DOMAIN=demo.k8s" "env file carries the cluster domain"
 if [[ "$out" == *"nodes/demo-control-plane.env"* ]]; then echo "FAIL  no env file for control planes"; FAILURES=$((FAILURES+1)); else echo "PASS  no env file for control planes"; fi
 assert_contains "$out" "Wants=demo-dns.service demo-lb.service demo-control-plane.service demo-worker1.service demo-control-plane2.service demo-routes.service" "target wants DNS, LB, every node and the routes unit"
+# nodes:up copies the DNS and LB images into the host store before the target starts, and waits for the LB
+# to have resolved every control plane (which proves DNS, zone and LB config at once).
+up=$(sed -n '/^  up:/,/^  [a-z-]*:$/p' taskfiles/nodes.yaml)
+assert_contains "$up" "images:host K8S=" "nodes:up calls images:host"
+if [ "$(echo "$up" | grep -n 'images:host' | head -1 | cut -d: -f1)" -lt "$(echo "$up" | grep -n 'enable --now' | head -1 | cut -d: -f1)" ]; then echo "PASS  images are in the host store before the target starts"; else echo "FAIL  images are in the host store before the target starts"; FAILURES=$((FAILURES+1)); fi
+assert_contains "$up" "MAINT (resolution)" "nodes:up waits until the LB has resolved the control planes"
 cp_unit=$(echo "$out" | sed -n '/demo-control-plane.container/,/demo-worker1.container/p')
 if [[ "$cp_unit" == *"After=demo-control-plane.service"* ]]; then echo "FAIL  control plane must not wait for itself"; FAILURES=$((FAILURES+1)); else echo "PASS  control plane has no After on itself"; fi
 rm -rf "$TMP"; finish

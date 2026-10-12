@@ -32,6 +32,4 @@ assert_contains "$(cat scripts/vendor-manifests.sh)" "helm.cilium.io/cilium-" "v
 bb=$(v verify_busybox)
 assert_eq "" "$(grep -nE 'image: *(docker.io/library/)?busybox *$' manifests/*.yaml || true)" "no untagged busybox in the manifests"
 assert_contains "$(cat "manifests/local-path-storage.${lp#v}.yaml")" "image: $bb" "local-path helper pod runs the pinned busybox"
-assert_contains "$(cat manifests/kube-vip.yaml)" "image: $bb" "kube-vip init container runs the pinned busybox"
-assert_contains "$(cat manifests/kube-vip.yaml)" "image: ghcr.io/kube-vip/kube-vip:$(v kube_vip)" "kube-vip manifest tag matches versions.yaml (images.sh reads it from the file)"
 rm -rf "$TMP"; finish

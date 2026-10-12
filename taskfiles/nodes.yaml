@@ -283,6 +283,7 @@ tasks:
     cmds:
       - task: render
         vars: { CLUSTER: '{{ .CLUSTER }}' }
+      - task --silent -d {{ .TK_HOME }} images:host K8S={{ .DEF.spec.kubernetes }}
       - mkdir -p {{ .STATE_DIR }}/storage {{ .STATE_DIR }}/logs
       - '[ -d {{ .TK_WULIN_DIR }} ] || sudo install -d -o "$(id -u)" -g "$(id -g)" {{ .TK_WULIN_DIR }}'
       - |
@@ -313,4 +314,13 @@ tasks:
             [ $i -eq 60 ] && { echo "$n: crio did not become active (podman exec $n journalctl -u crio)" >&2; exit 1; }
             sleep 2
           done
+        done
+        # The LB resolving every control plane through the SRV record proves the DNS serves the zone and
+        # the LB config is good; the backends stay DOWN until kubeadm brings an apiserver up.
+        want={{ $n := 0 }}{{ range .NODES }}{{ if eq .role "control-plane" }}{{ $n = add $n 1 }}{{ end }}{{ end }}{{ $n }}
+        for i in $(seq 1 30); do
+          got=$(sudo podman exec {{ .CLUSTER }}-lb bash -c 'exec 3<>/dev/tcp/127.0.0.1/8404; printf "GET /stats;csv HTTP/1.0\r\n\r\n" >&3; cat <&3' 2>/dev/null | grep '^control-planes,cp' | grep -vc 'MAINT (resolution)' || true)
+          [ "${got:-0}" -ge "$want" ] && { echo "{{ .CLUSTER }}-lb: $got control plane(s) resolved through {{ .DEF.spec.network.dns }}"; break; }
+          [ $i -eq 30 ] && { echo "{{ .CLUSTER }}-lb resolved ${got:-0} of $want control planes within 60 s (podman logs {{ .CLUSTER }}-dns; podman logs {{ .CLUSTER }}-lb)" >&2; exit 1; }
+          sleep 2
         done
