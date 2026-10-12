@@ -76,6 +76,7 @@ assert_contains "$lbu" "IP=172.22.3.100" "LB at .100"
 assert_contains "$lbu" "DNS=172.22.3.253" "LB resolves through the cluster DNS"
 assert_contains "$lbu" "Volume=$TMP/clusters/demo/lb/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro" "LB config mounted where the image reads it"
 assert_contains "$lbu" "After=demo-dns.service" "LB starts after DNS"
+assert_contains "$lbu" "StopSignal=SIGTERM" "LB stops hard on cluster stop (the image's SIGUSR1 drains for up to 10 min and podman kills it after 10 s)"
 w_unit=$(echo "$out" | sed -n '/demo-worker1.container/,/# ---- /p')
 assert_contains "$w_unit" "DNS=172.22.3.253" "worker resolves through the cluster DNS"
 assert_contains "$w_unit" "AddHost=api.demo.k8s:172.22.3.100" "worker reaches the apiserver through the host-side LB (kubeadm HA model: one LB for everyone)"

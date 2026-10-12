@@ -151,6 +151,9 @@ tasks:
         IP={{ .LB_IP }}
         DNS={{ .DNS_IP }}
         Volume={{ .STATE_DIR }}/lb/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+        # The image's stop signal is SIGUSR1 (graceful: keep serving established connections for up to
+        # timeout client), so a cluster stop would end in podman's SIGKILL and a failed unit.
+        StopSignal=SIGTERM
 
         [Service]
         Restart=always
