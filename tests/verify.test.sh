@@ -16,8 +16,8 @@ spec:
   gvisor: false
   network: {index: 0, nodes: 172.22.0.0/24, gateway: 172.22.0.254, lb: 172.22.0.100, pods: 10.244.0.0/21, services: 10.98.0.0/24, lb_range: 172.22.0.200-172.22.0.219}
   nodes:
-    - {role: control-plane, name: demo-control-plane, ip: 172.22.0.1, cpu: 2, memory: 4g, join: true}
-    - {role: worker, name: demo-worker1, ip: 172.22.0.2, cpu: 2, memory: 4g, join: true}
+    - {role: control-plane, name: demo-cp-1, ip: 172.22.0.1, cpu: 2, memory: 4g, join: true}
+    - {role: worker, name: demo-worker-1, ip: 172.22.0.2, cpu: 2, memory: 4g, join: true}
 YAML
 printf '#!/usr/bin/env bash\nexec "$@"\n' > "$STUB/sudo"
 # podman exec <node> journalctl -u kubelet …: quiet unless the test plants kubelet-noisy
@@ -26,7 +26,7 @@ cat > "$STUB/podman" <<'SH'
 echo "podman $*" >> "$STUB/podman.log"
 case "$*" in
   *"journalctl -u kubelet"*) [ -f "$STUB/kubelet-noisy" ] && echo 'E0929 14:39:56 993 summary_sys_containers.go:91] "Failed to get system container stats" err="failed to get cgroup stats for /system.slice/containerd.service"'; exit 0 ;;
-  *"exec demo-lb bash -c"*) printf '# pxname,svname,qcur,qmax,scur,smax,slim,stot,bin,bout,dreq,dresp,ereq,econ,eresp,wretr,wredis,status,weight,act,bck,chkfail,chkdown,lastchg,downtime,qlimit,pid,iid,sid,throttle,lbtot,tracked,type,rate,rate_lim,rate_max,check_status\ncontrol-planes,demo-control-plane,0,0,0,0,,0,0,0,,0,,0,0,0,0,%s,1,1,0,0,0,1,0,,1,3,1,,0,,2,0,,0,L7OK\ncontrol-planes,BACKEND,0,0,0,0,200,0,0,0,0,0,,0,0,0,0,UP,1,1,0,,0,1,0,,1,3,0,,0,,1,0,,0,\n' "$(if [ -f "$STUB/lb-down" ]; then echo DOWN; elif [ -f "$STUB/lb-rising" ]; then echo "UP 1/2"; else echo UP; fi)" ;;
+  *"exec demo-lb bash -c"*) printf '# pxname,svname,qcur,qmax,scur,smax,slim,stot,bin,bout,dreq,dresp,ereq,econ,eresp,wretr,wredis,status,weight,act,bck,chkfail,chkdown,lastchg,downtime,qlimit,pid,iid,sid,throttle,lbtot,tracked,type,rate,rate_lim,rate_max,check_status\ncontrol-planes,demo-cp-1,0,0,0,0,,0,0,0,,0,,0,0,0,0,%s,1,1,0,0,0,1,0,,1,3,1,,0,,2,0,,0,L7OK\ncontrol-planes,BACKEND,0,0,0,0,200,0,0,0,0,0,,0,0,0,0,UP,1,1,0,,0,1,0,,1,3,0,,0,,1,0,,0,\n' "$(if [ -f "$STUB/lb-down" ]; then echo DOWN; elif [ -f "$STUB/lb-rising" ]; then echo "UP 1/2"; else echo UP; fi)" ;;
 esac
 exit 0
 SH
@@ -45,8 +45,8 @@ cat > "$STUB/kubectl" <<'SH'
 #!/usr/bin/env bash
 echo "kubectl $*" >> "$STUB/kubectl.log"
 case "$*" in
-  *"get nodes --no-headers"*) printf 'demo-control-plane Ready control-plane 1m v1.37.1\ndemo-worker1 Ready <none> 1m v1.37.1\n' ;;
-  *"get nodes -o custom-columns"*) echo "  demo-control-plane v1.37.1 cri-o://1.37.2 6.12" ;;
+  *"get nodes --no-headers"*) printf 'demo-cp-1 Ready control-plane 1m v1.37.1\ndemo-worker-1 Ready <none> 1m v1.37.1\n' ;;
+  *"get nodes -o custom-columns"*) echo "  demo-cp-1 v1.37.1 cri-o://1.37.2 6.12" ;;
   *"get pods -n kube-system --no-headers"*)
      # Right after a boot the system pods are still starting; the first answer is not Running.
      n=$(cat "$STUB/pods-calls" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB/pods-calls"
@@ -76,7 +76,7 @@ assert_contains "$out" "PASS  nodes: 2/2 Ready" "nodes section"
 assert_contains "$out" "PASS  kube-system pods all Running" "system pods (waited for pods still starting after a boot)"
 assert_contains "$out" "PASS  cilium status" "cilium status"
 assert_contains "$out" "PASS  kubelet: no runtime cgroup errors" "kubelet section"
-assert_contains "$(cat "$STUB/podman.log")" "exec demo-control-plane journalctl -u kubelet" "kubelet log read on the control plane"
+assert_contains "$(cat "$STUB/podman.log")" "exec demo-cp-1 journalctl -u kubelet" "kubelet log read on the control plane"
 assert_contains "$out" "PASS  kubectl top nodes" "metrics-server (retried until the first scrape landed)"
 assert_contains "$out" "PASS  PVC bound and pod wrote data" "local-path write"
 assert_contains "$out" "PASS  PV data on host" "local-path data on host"

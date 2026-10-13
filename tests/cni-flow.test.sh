@@ -13,7 +13,7 @@ spec:
   cni: $1
   datapath: veth
   network: {index: 0, nodes: 172.22.0.0/24, pods: 10.244.0.0/21, services: 10.98.0.0/24, lb_range: 172.22.0.200-172.22.0.219}
-  nodes: [{role: control-plane, name: demo-control-plane, ip: 172.22.0.1}]
+  nodes: [{role: control-plane, name: demo-cp-1, ip: 172.22.0.1}]
 YAML
 }
 printf '#!/usr/bin/env bash\nexec "$@"\n' > "$STUB/sudo"
@@ -36,7 +36,7 @@ case "$*" in
   *"get ciliumloadbalancerippool"*) [ -f "$STUB/pool-exists" ] ;;
   *"get secret"*) [ -f "$STUB/ds-exists" ] && echo "sh.helm.release.v1.cilium.v1 helm.sh/release.v1 1 1m"; exit 0 ;;
   *"wait gatewayclass"*) [ ! -f "$STUB/gw-fail" ] ;;
-  *"get nodes"*) if [ -f "$STUB/nodes-notready" ]; then echo "demo-worker1 NotReady <none> 1m v1.37.1"; fi; echo "demo-control-plane Ready control-plane 1m v1.37.1" ;;
+  *"get nodes"*) if [ -f "$STUB/nodes-notready" ]; then echo "demo-worker-1 NotReady <none> 1m v1.37.1"; fi; echo "demo-cp-1 Ready control-plane 1m v1.37.1" ;;
   *) echo "kubectl $*" >> "$STUB_LOG"; exit 0 ;;
 esac
 SH

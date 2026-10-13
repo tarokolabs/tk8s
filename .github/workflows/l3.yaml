@@ -101,7 +101,7 @@ jobs:
       - name: No node pulled an image
         run: |
           rc=0
-          for n in ci-control-plane ci-worker1; do
+          for n in ci-cp-1 ci-worker-1; do
             c=$(sudo podman exec "$n" journalctl -u crio --no-pager | grep -c 'Pulled image' || true)
             echo "$n: $c pulled"; [ "$c" -eq 0 ] || { sudo podman exec "$n" journalctl -u crio --no-pager | grep 'Pulled image'; rc=1; }
           done
@@ -110,9 +110,9 @@ jobs:
         if: failure()
         run: |
           mkdir -p logs
-          sudo journalctl -u ci.target -u ci-control-plane.service -u ci-worker1.service --no-pager > logs/units.log 2>&1 || true
+          sudo journalctl -u ci.target -u ci-cp-1.service -u ci-worker-1.service --no-pager > logs/units.log 2>&1 || true
           sudo podman ps -a > logs/podman-ps.txt 2>&1 || true
-          for n in ci-control-plane ci-worker1; do
+          for n in ci-cp-1 ci-worker-1; do
             sudo podman logs "$n" > "logs/$n.log" 2>&1 || true
             sudo podman exec "$n" journalctl -u kubelet -u crio --no-pager > "logs/$n-node.log" 2>&1 || true
             sudo podman exec "$n" journalctl -u crio --no-pager | grep -E 'Pull|pull' > "logs/$n-pulls.log" 2>&1 || true
@@ -122,14 +122,14 @@ jobs:
           kubectl get pods -A -o wide > logs/pods.txt 2>&1 || true
           # pod-level reachability of the API ClusterIP from each node, cilium service map, host firewall
           probe_img=$(sed -nE 's/^verify_alpine: *"([^"]+)"/\1/p' versions.yaml)
-          for n in ci-control-plane ci-worker1; do
+          for n in ci-cp-1 ci-worker-1; do
             kubectl run "probe-$n" --image="$probe_img" --restart=Never --overrides="{\"spec\":{\"nodeName\":\"$n\"}}" -- sh -c 'wget -qO- -T 5 --no-check-certificate https://10.98.0.1/version 2>&1 | head -c 200; echo; wget -qO- -T 5 --no-check-certificate https://172.22.0.1:6443/version 2>&1 | head -c 200' >/dev/null 2>&1 || true
           done; sleep 20
-          for n in ci-control-plane ci-worker1; do { echo "== probe on $n (ClusterIP then node IP)"; kubectl logs "probe-$n" 2>&1; } >> logs/probes.txt; done
+          for n in ci-cp-1 ci-worker-1; do { echo "== probe on $n (ClusterIP then node IP)"; kubectl logs "probe-$n" 2>&1; } >> logs/probes.txt; done
           c=$(kubectl -n kube-system get pods -l k8s-app=cilium -o jsonpath='{.items[0].metadata.name}'); kubectl -n kube-system exec "$c" -- cilium-dbg service list > logs/cilium-services.txt 2>&1 || true
           kubectl -n kube-system exec "$c" -- cilium-dbg status --verbose > logs/cilium-verbose.txt 2>&1 || true
           sudo nft list ruleset > logs/nft.txt 2>&1 || true; sudo iptables -S 2>/dev/null > logs/iptables.txt || true
-          sudo podman exec ci-worker1 sysctl net.ipv4.ip_forward net.ipv4.conf.all.rp_filter net.bridge.bridge-nf-call-iptables > logs/worker-sysctl.txt 2>&1 || true
+          sudo podman exec ci-worker-1 sysctl net.ipv4.ip_forward net.ipv4.conf.all.rp_filter net.bridge.bridge-nf-call-iptables > logs/worker-sysctl.txt 2>&1 || true
           sysctl net.ipv4.ip_forward net.ipv4.conf.all.rp_filter net.bridge.bridge-nf-call-iptables > logs/host-sysctl.txt 2>&1 || true
           # describe and logs of every pod that is not Running/Completed
           kubectl get pods -A --no-headers 2>/dev/null | awk '$4!="Running" && $4!="Completed"{print $1, $2}' | while read -r ns pod; do

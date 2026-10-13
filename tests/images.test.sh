@@ -105,7 +105,7 @@ metadata: {name: demo}
 spec:
   kubernetes: "$K8S"
   network: {index: 0, nodes: 172.22.0.0/24, gateway: 172.22.0.254, pods: 10.244.0.0/21, services: 10.98.0.0/24, lb_range: 172.22.0.200-172.22.0.219}
-  nodes: [{role: control-plane, name: demo-control-plane, ip: 172.22.0.1, cpu: 2, memory: 4g, join: true}]
+  nodes: [{role: control-plane, name: demo-cp-1, ip: 172.22.0.1, cpu: 2, memory: 4g, join: true}]
 YAML
 touch "$STUB/no-node-image"; run task nodes:image CLUSTER=demo
 assert_contains "$(cat "$STUB_LOG")" "podman pull ghcr.io/tarokolabs/tk8s/node:v$K8S" "nodes:image delegates to images:node"

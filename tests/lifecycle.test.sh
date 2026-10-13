@@ -23,13 +23,13 @@ spec:
     lb: 172.22.3.100
   nodes:
     - role: control-plane
-      name: demo-control-plane
+      name: demo-cp-1
       ip: 172.22.3.1
       cpu: 2
       memory: 4g
       join: true
     - role: worker
-      name: demo-worker1
+      name: demo-worker-1
       ip: 172.22.3.2
       cpu: 2
       memory: 4g
@@ -41,7 +41,7 @@ assert_contains "$out" "1+1" "list shows control-planes+workers"
 assert_contains "$out" "172.22.3.0/24" "list shows subnet"
 assert_contains "$out" "netkit" "list shows resolved datapath"
 out=$(task lifecycle:describe CLUSTER=demo 2>&1)
-assert_contains "$out" "demo-worker1" "describe lists nodes"
+assert_contains "$out" "demo-worker-1" "describe lists nodes"
 assert_contains "$out" "172.22.3.2" "describe lists node ip"
 assert_contains "$out" "/etc/containers/systemd/demo" "describe shows unit dir"
 assert_contains "$out" "datapath: netkit" "describe shows resolved datapath"

@@ -22,8 +22,8 @@ tasks:
         [ $ip -le 199 ] || { echo "no free node address left in 172.22.$idx.0/24 (.200-.219 is the LB pool)" >&2; exit 1; }
         # Number past the highest existing suffix, not by count: a deleted node must not
         # have its name reused while a higher-numbered node still exists.
-        if [ "{{ .ROLE }}" = control-plane ]; then base="{{ .CLUSTER }}-control-plane"; else base="{{ .CLUSTER }}-worker"; fi
-        n=$(grep -oE "name: ${base}[0-9]*$" $f | sed -E "s/name: ${base}//; s/^$/1/" | sort -n | tail -1)
+        if [ "{{ .ROLE }}" = control-plane ]; then base="{{ .CLUSTER }}-cp-"; else base="{{ .CLUSTER }}-worker-"; fi
+        n=$(grep -oE "name: ${base}[0-9]+$" $f | sed -E "s/name: ${base}//" | sort -n | tail -1)
         name="${base}$(( ${n:-0} + 1 ))"
         if grep -q "name: ${name}$" $f; then echo "node ${name} already exists in cluster {{ .CLUSTER }}" >&2; exit 1; fi
         cpu="{{ .CPU }}"; mem="{{ .MEMORY }}"
@@ -64,9 +64,10 @@ tasks:
     vars:
       STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
       CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
+      CP_NAME: { sh: "awk '/^ *- role:/{f=1} f&&/name:/{print $2; exit}' {{ .CLUSTER_YAML }} 2>/dev/null" }  # first entry in spec.nodes: the control plane kubeadm init ran on
     preconditions:
-      - sh: '[ "{{ .NODE }}" != "{{ .CLUSTER }}-control-plane" ]'
-        msg: "the first control plane {{ .CLUSTER }}-control-plane cannot be deleted; delete the cluster instead"
+      - sh: '[ "{{ .NODE }}" != "{{ .CP_NAME }}" ]'
+        msg: "the first control plane {{ .CP_NAME }} cannot be deleted; delete the cluster instead"
       - sh: 'grep -q "name: {{ .NODE }}$" {{ .CLUSTER_YAML }}'
         msg: "node {{ .NODE }} not found in cluster {{ .CLUSTER }}"
     cmds:
@@ -125,6 +126,7 @@ tasks:
       CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
       ROLE: { sh: "awk -v n={{ .NODE }} '/- role:/{r=$3} /name:/{if ($2==n) {print r; exit}}' {{ .CLUSTER_YAML }} 2>/dev/null" }
       IP: { sh: "awk -v n={{ .NODE }} '/name:/{f=($2==n)} f&&/ip:/{print $2; exit}' {{ .CLUSTER_YAML }} 2>/dev/null" }
+      CP_NAME: { sh: "awk '/^ *- role:/{f=1} f&&/name:/{print $2; exit}' {{ .CLUSTER_YAML }} 2>/dev/null" }  # first entry in spec.nodes: the control plane kubeadm init ran on
     env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
     preconditions:
       - sh: '[ -n "{{ .ROLE }}" ]'
@@ -135,11 +137,11 @@ tasks:
       - |
         set -e
         if kubectl get node {{ .NODE }} >/dev/null 2>&1; then echo "{{ .NODE }} already joined"; exit 0; fi
-        join=$(sudo podman exec {{ .CLUSTER }}-control-plane kubeadm token create --print-join-command | tr -d '\r')
+        join=$(sudo podman exec {{ .CP_NAME }} kubeadm token create --print-join-command | tr -d '\r')
         if [ "{{ .ROLE }}" = control-plane ]; then
           # Certificate keys expire after two hours; always upload a fresh one.
-          key=$(sudo podman exec {{ .CLUSTER }}-control-plane kubeadm init phase upload-certs --upload-certs 2>/dev/null | tail -1)
-          [ -n "$key" ] || { echo "could not obtain a certificate key from {{ .CLUSTER }}-control-plane" >&2; exit 1; }
+          key=$(sudo podman exec {{ .CP_NAME }} kubeadm init phase upload-certs --upload-certs 2>/dev/null | tail -1)
+          [ -n "$key" ] || { echo "could not obtain a certificate key from {{ .CP_NAME }}" >&2; exit 1; }
           install -m 600 /dev/null {{ .STATE_DIR }}/.certificate-key && printf '%s\n' "$key" > {{ .STATE_DIR }}/.certificate-key
           sudo podman exec {{ .NODE }} bash -c "$join --control-plane --certificate-key $key --apiserver-advertise-address {{ .IP }} --ignore-preflight-errors=SystemVerification" >/tmp/{{ .NODE }}.join 2>&1 || { tail -20 /tmp/{{ .NODE }}.join >&2; exit 1; }
           kubectl taint node {{ .NODE }} node-role.kubernetes.io/control-plane:NoSchedule- >/dev/null 2>&1 || true
@@ -159,10 +161,11 @@ tasks:
       STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
       CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
       ROLE: { sh: "awk -v n={{ .NODE }} '/- role:/{r=$3} /name:/{if ($2==n) {print r; exit}}' {{ .CLUSTER_YAML }} 2>/dev/null" }
+      CP_NAME: { sh: "awk '/^ *- role:/{f=1} f&&/name:/{print $2; exit}' {{ .CLUSTER_YAML }} 2>/dev/null" }  # first entry in spec.nodes: the control plane kubeadm init ran on
     env: { KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig' }
     preconditions:
-      - sh: '[ "{{ .NODE }}" != "{{ .CLUSTER }}-control-plane" ]'
-        msg: "the first control plane cannot be deleted; delete the cluster instead"
+      - sh: '[ "{{ .NODE }}" != "{{ .CP_NAME }}" ]'
+        msg: "the first control plane {{ .CP_NAME }} cannot be deleted; delete the cluster instead"
       - sh: '[ -n "{{ .ROLE }}" ]'
         msg: "node {{ .NODE }} not found in cluster {{ .CLUSTER }}"
     cmds:
