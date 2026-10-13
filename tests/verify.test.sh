@@ -26,7 +26,7 @@ cat > "$STUB/podman" <<'SH'
 echo "podman $*" >> "$STUB/podman.log"
 case "$*" in
   *"journalctl -u kubelet"*) [ -f "$STUB/kubelet-noisy" ] && echo 'E0929 14:39:56 993 summary_sys_containers.go:91] "Failed to get system container stats" err="failed to get cgroup stats for /system.slice/containerd.service"'; exit 0 ;;
-  *"exec demo-lb bash -c"*) printf '# pxname,svname,qcur,qmax,scur,smax,slim,stot,bin,bout,dreq,dresp,ereq,econ,eresp,wretr,wredis,status,weight,act,bck,chkfail,chkdown,lastchg,downtime,qlimit,pid,iid,sid,throttle,lbtot,tracked,type,rate,rate_lim,rate_max,check_status\ncontrol-planes,cp1,0,0,0,0,,0,0,0,,0,,0,0,0,0,%s,1,1,0,0,0,1,0,,1,3,1,,0,,2,0,,0,L7OK\ncontrol-planes,cp2,0,0,0,0,,0,0,0,,0,,0,0,0,0,MAINT (resolution),1,1,0,0,0,1,0,,1,3,2,,0,,2,0,,0,\n' "$(if [ -f "$STUB/lb-down" ]; then echo DOWN; elif [ -f "$STUB/lb-rising" ]; then echo "UP 1/2"; else echo UP; fi)" ;;
+  *"exec demo-lb bash -c"*) printf '# pxname,svname,qcur,qmax,scur,smax,slim,stot,bin,bout,dreq,dresp,ereq,econ,eresp,wretr,wredis,status,weight,act,bck,chkfail,chkdown,lastchg,downtime,qlimit,pid,iid,sid,throttle,lbtot,tracked,type,rate,rate_lim,rate_max,check_status\ncontrol-planes,demo-control-plane,0,0,0,0,,0,0,0,,0,,0,0,0,0,%s,1,1,0,0,0,1,0,,1,3,1,,0,,2,0,,0,L7OK\ncontrol-planes,BACKEND,0,0,0,0,200,0,0,0,0,0,,0,0,0,0,UP,1,1,0,,0,1,0,,1,3,0,,0,,1,0,,0,\n' "$(if [ -f "$STUB/lb-down" ]; then echo DOWN; elif [ -f "$STUB/lb-rising" ]; then echo "UP 1/2"; else echo UP; fi)" ;;
 esac
 exit 0
 SH
