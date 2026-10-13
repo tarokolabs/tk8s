@@ -68,4 +68,11 @@ assert_contains "$c" "nano vim iputils-ping less jq tcpdump strace" "editor and 
 assert_eq "" "$(grep -nw 'yq' $f || true)" "no yq"
 # The CRI-O drop-in's comments describe the bundle, not a deb
 assert_eq "" "$(grep -n '套件\|kcn' images/node/crio.conf.d/10-taroko.conf || true)" "10-taroko.conf no longer talks about a package or kcn"
+# README describes the image students get: base, sources, what is not in it.
+r=$(cat README.md)
+assert_contains "$r" "## 節點 image" "README has a node image section"
+assert_contains "$r" "debian:13-slim" "README names the base"
+assert_contains "$r" "dl.k8s.io" "README names the Kubernetes source"
+assert_contains "$r" "static bundle" "README names the CRI-O source"
+assert_eq "" "$(grep -n 'kindest' README.md || true)" "README does not mention kindest"
 finish
