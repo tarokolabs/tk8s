@@ -16,10 +16,7 @@ tasks:
         set -e
         f={{ .CLUSTER_YAML }}
         idx=$(grep -oE 'index: *[0-9]+' $f | head -1 | awk '{print $2}')
-        if [ "{{ .ROLE }}" = control-plane ] && ! grep -qE '^ +vip:' $f; then
-          echo "cluster {{ .CLUSTER }} has no VIP (controlPlaneEndpoint); kubeadm cannot add control planes to it. Create HA clusters with --control-planes 3 (use --defer-join to add them by hand later)." >&2; exit 1
-        fi
-        # \b keeps 'vip:' from matching 'ip:'.
+        # \b keeps 'lb:' and 'ip:' apart in the grep below.
         last=$(grep -oE '\bip: *172\.22\.[0-9]+\.[0-9]+' $f | awk -F. '{print $4}' | sort -n | tail -1)
         ip=$((last + 1)); [ $ip -eq 100 ] && ip=101
         [ $ip -le 199 ] || { echo "no free node address left in 172.22.$idx.0/24 (.200-.219 is the LB pool)" >&2; exit 1; }
@@ -132,8 +129,6 @@ tasks:
         msg: "node {{ .NODE }} not found in cluster {{ .CLUSTER }}"
       - sh: 'systemctl is-active --quiet {{ .NODE }}.service'
         msg: "node {{ .NODE }} is not running (systemctl status {{ .NODE }})"
-      - sh: '[ "{{ .ROLE }}" != control-plane ] || grep -qE "^ +vip:" {{ .CLUSTER_YAML }}'
-        msg: "cluster {{ .CLUSTER }} has no VIP (controlPlaneEndpoint); kubeadm cannot add control planes to it"
     cmds:
       - |
         set -e
@@ -145,7 +140,6 @@ tasks:
           [ -n "$key" ] || { echo "could not obtain a certificate key from {{ .CLUSTER }}-control-plane" >&2; exit 1; }
           install -m 600 /dev/null {{ .STATE_DIR }}/.certificate-key && printf '%s\n' "$key" > {{ .STATE_DIR }}/.certificate-key
           sudo podman exec {{ .NODE }} bash -c "$join --control-plane --certificate-key $key --apiserver-advertise-address {{ .IP }} --ignore-preflight-errors=SystemVerification" >/tmp/{{ .NODE }}.join 2>&1 || { tail -20 /tmp/{{ .NODE }}.join >&2; exit 1; }
-          task --silent -d {{ .TK_HOME }} kubeadm:kube-vip CLUSTER={{ .CLUSTER }} NODE={{ .NODE }}
           kubectl taint node {{ .NODE }} node-role.kubernetes.io/control-plane:NoSchedule- >/dev/null 2>&1 || true
         else
           sudo podman exec {{ .NODE }} bash -c "$join --ignore-preflight-errors=SystemVerification" >/tmp/{{ .NODE }}.join 2>&1 || { tail -20 /tmp/{{ .NODE }}.join >&2; exit 1; }

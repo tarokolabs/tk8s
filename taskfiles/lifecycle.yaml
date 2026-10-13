@@ -50,7 +50,7 @@ tasks:
         echo "Name:        {{ .CLUSTER }}"
         echo "State:       $state"
         echo "Kubernetes:  {{ .DEF.spec.kubernetes }}   cni: {{ .DEF.spec.cni }}   datapath: {{ .DEF.spec.datapath_resolved | default .DEF.spec.datapath }}   gvisor: {{ .DEF.spec.gvisor }}"
-        echo "Network:     nodes {{ .DEF.spec.network.nodes }} (gateway {{ .DEF.spec.network.gateway }})  pods {{ .DEF.spec.network.pods }}  services {{ .DEF.spec.network.services }}  lb {{ .DEF.spec.network.lb_range }}{{ if .DEF.spec.network.vip }}  vip {{ .DEF.spec.network.vip }}{{ end }}"
+        echo "Network:     nodes {{ .DEF.spec.network.nodes }} (gateway {{ .DEF.spec.network.gateway }})  pods {{ .DEF.spec.network.pods }}  services {{ .DEF.spec.network.services }}  lb-ipam {{ .DEF.spec.network.lb_range }}  lb {{ .DEF.spec.network.lb }}  dns {{ .DEF.spec.network.dns }}"
         echo "Nodes:"
         printf '  %-24s %-14s %-14s %-14s %s\n' NAME ROLE IP RESOURCES JOIN
         {{ range .DEF.spec.nodes }}
@@ -70,6 +70,7 @@ tasks:
         {{- if .DEF.spec.network }}
         hostip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") print $(i+1)}' | head -1)
         echo "Access:"
+        echo "  apiserver:  https://{{ .DEF.spec.network.lb }}:6443 (HAProxy in {{ .CLUSTER }}-lb; every node and this host go through it)"
         echo "  from this host:       LoadBalancer IPs ({{ .DEF.spec.network.lb_range }}) and ClusterIPs ({{ .DEF.spec.network.services }}) are routed"
         echo "  from another machine: sudo ip route add {{ .DEF.spec.network.nodes }} via ${hostip:-<host-ip>}   (and {{ .DEF.spec.network.services }} for ClusterIPs)"
         {{- end }}

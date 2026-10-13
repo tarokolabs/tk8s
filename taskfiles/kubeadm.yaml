@@ -1,7 +1,7 @@
 version: '3'
 # Bootstrap Kubernetes on the running nodes with kubeadm.
-# render -> kube-vip (HA only) -> init (first control plane, --upload-certs)
-#        -> join (remaining control planes with --control-plane, then workers)
+# render -> init (first control plane, --upload-certs; the apiserver LB at spec.network.lb answers
+#        api.<cluster>.k8s) -> join (remaining control planes with --control-plane, then workers)
 tasks:
   render:
     desc: Render the kubeadm init configuration into the cluster state directory
@@ -16,7 +16,8 @@ tasks:
       CP_IP: '{{ (index .DEF.spec.nodes 0).ip }}'
       PODS: '{{ .DEF.spec.network.pods }}'
       SERVICES: '{{ .DEF.spec.network.services }}'
-      VIP: '{{ .DEF.spec.network.vip | default "" }}'
+      LB_IP: '{{ .DEF.spec.network.lb }}'
+      DOMAIN: '{{ .CLUSTER }}.k8s'
       CRI_SOCKET: 'unix:///var/run/crio/crio.sock'
       OUT: '{{ if eq .DRY_RUN "true" }}/dev/stdout{{ else }}{{ .STATE_DIR }}/init-config.yaml{{ end }}'
     cmds:
@@ -38,14 +39,18 @@ tasks:
         kind: ClusterConfiguration
         clusterName: {{ .CLUSTER }}
         kubernetesVersion: {{ .K8S }}
-        {{- if .VIP }}
-        controlPlaneEndpoint: "{{ .VIP }}:6443"
-        {{- end }}
+        controlPlaneEndpoint: "api.{{ .DOMAIN }}:6443"
         networking:
           dnsDomain: {{ .CLUSTER }}.k8s
           podSubnet: {{ .PODS }}
           serviceSubnet: {{ .SERVICES }}
         apiServer:
+          certSANs:
+            - api.{{ .DOMAIN }}
+            - {{ .LB_IP }}
+        {{- range .DEF.spec.nodes }}{{ if eq .role "control-plane" }}
+            - {{ .ip }}
+        {{- end }}{{ end }}
           extraArgs:
             - name: audit-log-format
               value: legacy
@@ -91,43 +96,19 @@ tasks:
         cp {{ .TK_HOME }}/manifests/audit-policy.yaml {{ .STATE_DIR }}/logs/apiserver/
         {{ end }}
 
-  kube-vip:
-    desc: Place the kube-vip static pod on a control plane (NODE, default the first; multi-control-plane clusters only)
-    silent: true
-    requires: { vars: [CLUSTER] }
-    vars:
-      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
-      CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
-      DEF_RAW: { sh: 'cat {{ .CLUSTER_YAML }}' }
-      DEF: { ref: fromYaml .DEF_RAW }
-      VIP: '{{ .DEF.spec.network.vip | default "" }}'
-      TARGET_NODE: '{{ .NODE | default (print .CLUSTER "-control-plane") }}'
-    status:
-      - '[ -z "{{ .VIP }}" ] || sudo podman exec {{ .TARGET_NODE }} test -f /etc/kubernetes/manifests/kube-vip.yaml'
-    cmds:
-      - |
-        [ -n "{{ .VIP }}" ] || exit 0
-        # Every control plane runs kube-vip so the VIP fails over when one of them is down.
-        # kubeadm >= 1.29: the init node must use super-admin.conf (admin.conf has no rights until
-        # RBAC is bootstrapped); joined control planes only have admin.conf.
-        kc=super-admin.conf; [ "{{ .TARGET_NODE }}" = "{{ .CLUSTER }}-control-plane" ] || kc=admin.conf
-        sed -e 's/\$KUBEVIP/{{ .VIP }}/' -e 's#ghcr.io/kube-vip/kube-vip:v[0-9.]*#ghcr.io/kube-vip/kube-vip:{{ .VERSIONS.kube_vip }}#' -e "s#path: /etc/kubernetes/super-admin.conf#path: /etc/kubernetes/$kc#" {{ .TK_HOME }}/manifests/kube-vip.yaml \
-          | sudo podman exec -i {{ .TARGET_NODE }} sh -c 'mkdir -p /etc/kubernetes/manifests && cat > /etc/kubernetes/manifests/kube-vip.yaml'
-        echo "kube-vip {{ .VERSIONS.kube_vip }} static pod placed on {{ .TARGET_NODE }} (vip {{ .VIP }})"
-
   init:
     desc: kubeadm init on the first control plane; store kubeconfig and the certificate key
     silent: true
     requires: { vars: [CLUSTER] }
     deps:
       - { task: render, vars: { CLUSTER: '{{ .CLUSTER }}' } }
-      - { task: kube-vip, vars: { CLUSTER: '{{ .CLUSTER }}' } }
     vars:
       STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
       CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
       DEF_RAW: { sh: 'cat {{ .CLUSTER_YAML }}' }
       DEF: { ref: fromYaml .DEF_RAW }
-      VIP: '{{ .DEF.spec.network.vip | default "" }}'
+      LB_IP: '{{ .DEF.spec.network.lb }}'
+      DOMAIN: '{{ .CLUSTER }}.k8s'
     status:
       - test -s {{ .STATE_DIR }}/kubeconfig
     cmds:
@@ -141,20 +122,26 @@ tasks:
           if ! out=$(sudo podman exec $cp kubeadm init --config=/opt/taroko/init-config.yaml --upload-certs --ignore-preflight-errors=SystemVerification 2>&1); then
             echo "$out" | tail -30 >&2; exit 1
           fi
-          # kubeadm prints the certificate key only when controlPlaneEndpoint is set (multi-control-plane).
+          # Every cluster sets controlPlaneEndpoint, so kubeadm always prints the certificate key.
           key=$(echo "$out" | sed -nE 's/.*--certificate-key ([0-9a-f]+).*/\1/p' | head -1)
-          if [ -n "$key" ]; then
-            install -m 600 /dev/null {{ .STATE_DIR }}/.certificate-key && printf '%s\n' "$key" > {{ .STATE_DIR }}/.certificate-key
-          elif [ -n "{{ .VIP }}" ]; then
-            echo "certificate key not found in kubeadm output" >&2; exit 1
-          fi
+          [ -n "$key" ] || { echo "certificate key not found in kubeadm output" >&2; exit 1; }
+          install -m 600 /dev/null {{ .STATE_DIR }}/.certificate-key && printf '%s\n' "$key" > {{ .STATE_DIR }}/.certificate-key
           echo "$cp initialized"
         fi
+        # kubeadm talked to the apiserver through the LB (api.<cluster>.k8s resolves to it on the control
+        # plane); make sure the LB reports it healthy before anything else uses the endpoint.
+        for i in $(seq 1 30); do
+          [ "$(curl -sk --max-time 3 https://{{ .LB_IP }}:6443/readyz 2>/dev/null)" = ok ] && break
+          [ $i -eq 30 ] && { echo "the apiserver LB at {{ .LB_IP }} has no healthy control plane after 60 s (podman logs {{ .CLUSTER }}-lb)" >&2; exit 1; }
+          sleep 2
+        done
         # Write the kubeconfig 0600 through a temp file: a failed read must not leave an empty
         # file behind, or the status check above would skip init on the next run.
         install -m 600 /dev/null {{ .STATE_DIR }}/kubeconfig.tmp
         sudo podman exec $cp cat /etc/kubernetes/admin.conf > {{ .STATE_DIR }}/kubeconfig.tmp || {
           rm -f {{ .STATE_DIR }}/kubeconfig.tmp; echo "could not read /etc/kubernetes/admin.conf from $cp" >&2; exit 1; }
+        # The host cannot resolve api.<cluster>.k8s; its kubeconfig points straight at the LB.
+        sed -i.bak -e 's#server: https://api\.{{ .DOMAIN }}:6443#server: https://{{ .LB_IP }}:6443#' {{ .STATE_DIR }}/kubeconfig.tmp && rm -f {{ .STATE_DIR }}/kubeconfig.tmp.bak
         mv {{ .STATE_DIR }}/kubeconfig.tmp {{ .STATE_DIR }}/kubeconfig
 
   join-plan:
@@ -169,7 +156,7 @@ tasks:
     cmds:
       - |
         {{ range .DEF.spec.nodes }}{{ if ne .name (print $.CLUSTER "-control-plane") }}
-        echo "{{ .name }} {{ .role }} {{ if eq (toString .join) "false" }}skip{{ else }}join{{ if and (eq .role "control-plane") $.DEF.spec.network.vip }} kube-vip{{ end }}{{ end }}"
+        echo "{{ .name }} {{ .role }} {{ if eq (toString .join) "false" }}skip{{ else }}join{{ end }}"
         {{- end }}{{ end }}
 
   join:
@@ -182,7 +169,6 @@ tasks:
       CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
       DEF_RAW: { sh: 'cat {{ .CLUSTER_YAML }}' }
       DEF: { ref: fromYaml .DEF_RAW }
-      VIP: '{{ .DEF.spec.network.vip | default "" }}'
       HAS_CP_JOIN: '{{ $n := 0 }}{{ range .DEF.spec.nodes }}{{ if and (eq .role "control-plane") (ne .name (print $.CLUSTER "-control-plane")) (ne (toString .join) "false") }}{{ $n = add $n 1 }}{{ end }}{{ end }}{{ $n }}'
     env:
       KUBECONFIG: '{{ .STATE_DIR }}/kubeconfig'
@@ -204,7 +190,6 @@ tasks:
         if kubectl get node {{ .name }} >/dev/null 2>&1; then echo "{{ .name }} already joined"; else
           {{ if eq .role "control-plane" }}
           sudo podman exec {{ .name }} bash -c "$join --control-plane --certificate-key $key --apiserver-advertise-address {{ .ip }} --ignore-preflight-errors=SystemVerification" >/tmp/{{ .name }}.join 2>&1 || { tail -20 /tmp/{{ .name }}.join >&2; exit 1; }
-          task --silent -d {{ $.TK_HOME }} kubeadm:kube-vip CLUSTER={{ $.CLUSTER }} NODE={{ .name }}
           {{ else }}
           sudo podman exec {{ .name }} bash -c "$join --ignore-preflight-errors=SystemVerification" >/tmp/{{ .name }}.join 2>&1 || { tail -20 /tmp/{{ .name }}.join >&2; exit 1; }
           {{ end }}
@@ -217,7 +202,7 @@ tasks:
         done
 
   bootstrap:
-    desc: render -> kube-vip -> init -> join
+    desc: render -> init -> join
     requires: { vars: [CLUSTER] }
     cmds:
       - task: join

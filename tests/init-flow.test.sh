@@ -9,7 +9,7 @@ cat > "$TMP/clusters/demo/cluster.yaml" <<'YAML'
 metadata: {name: demo}
 spec:
   kubernetes: "1.37.0"
-  network: {index: 0, nodes: 172.22.0.0/24, gateway: 172.22.0.254, pods: 10.244.0.0/21, services: 10.98.0.0/24}
+  network: {index: 0, nodes: 172.22.0.0/24, gateway: 172.22.0.254, dns: 172.22.0.253, lb: 172.22.0.100, pods: 10.244.0.0/21, services: 10.98.0.0/24}
   nodes: [{role: control-plane, name: demo-control-plane, ip: 172.22.0.1, join: true}]
 YAML
 printf '#!/usr/bin/env bash\nexec "$@"\n' > "$STUB/sudo"
@@ -17,10 +17,13 @@ cat > "$STUB/podman" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
   *"test -f /etc/kubernetes/admin.conf"*) exit 0 ;;
-  *"cat /etc/kubernetes/admin.conf"*) if [ -f "$STUB/cat-fail" ]; then echo "container not running" >&2; exit 125; fi; echo "apiVersion: v1"; echo "kind: Config" ;;
+  *"cat /etc/kubernetes/admin.conf"*) if [ -f "$STUB/cat-fail" ]; then echo "container not running" >&2; exit 125; fi; echo "apiVersion: v1"; echo "kind: Config"; echo "    server: https://api.demo.k8s:6443" ;;
   *) exit 0 ;;
 esac
 SH
+# init waits for the apiserver LB to report the new control plane healthy; the host never resolves api.<cluster>.k8s.
+printf '#!/usr/bin/env bash\necho "curl $*" >> "$STUB/curl.log"; [ -f "$STUB/lb-dead" ] || echo ok\n' > "$STUB/curl"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/sleep"
 chmod +x "$STUB"/*
 touch "$STUB/cat-fail"
 out=$(PATH="$STUB:$PATH" task kubeadm:init CLUSTER=demo 2>&1); rc=$?
@@ -32,4 +35,13 @@ out=$(PATH="$STUB:$PATH" task kubeadm:init CLUSTER=demo 2>&1); rc=$?
 assert_eq "0" "$rc" "init succeeds when admin.conf is readable"
 assert_contains "$(cat "$TMP/clusters/demo/kubeconfig")" "kind: Config" "kubeconfig holds admin.conf"
 assert_eq "600" "$(if stat -c %a /dev/null >/dev/null 2>&1; then stat -c %a "$TMP/clusters/demo/kubeconfig"; else stat -f %Lp "$TMP/clusters/demo/kubeconfig"; fi)" "kubeconfig is 0600"
+assert_contains "$(cat "$STUB/curl.log")" "https://172.22.0.100:6443/readyz" "init waits for the LB's readyz"
+assert_contains "$(cat "$TMP/clusters/demo/kubeconfig")" "server: https://172.22.0.100:6443" "kubeconfig handed to the host points at the LB, not the DNS name"
+if [[ "$(cat "$TMP/clusters/demo/kubeconfig")" == *"api.demo.k8s"* ]]; then echo "FAIL  no DNS name left in the host kubeconfig"; FAILURES=$((FAILURES+1)); else echo "PASS  no DNS name left in the host kubeconfig"; fi
+leftover=""; for f in "$TMP/clusters/demo"/kubeconfig*; do case "$f" in */kubeconfig) ;; *) leftover="$leftover $f" ;; esac; done
+assert_eq "" "$leftover" "no sed backup file next to the kubeconfig"
+rm -f "$TMP/clusters/demo/kubeconfig"; touch "$STUB/lb-dead"
+out=$(PATH="$STUB:$PATH" task kubeadm:init CLUSTER=demo 2>&1); rc=$?
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "init fails when the LB never reports a healthy control plane"
+assert_contains "$out" "apiserver LB at 172.22.0.100 has no healthy control plane" "LB failure names the address"
 rm -rf "$TMP"; finish

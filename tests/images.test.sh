@@ -19,7 +19,10 @@ cat > "$STUB/podman" <<'SH'
 echo "podman${CONTAINERS_STORAGE_CONF:+ [store]} $*" >> "$STUB_LOG"
 key() { echo "$1" | tr '/:@' '___'; }
 case "$*" in
-  "image exists "*) if [ -n "${CONTAINERS_STORAGE_CONF:-}" ]; then [ -f "$STUB/../store/$(key "$3")" ]; else [ ! -f "$STUB/no-node-image" ]; fi ;;
+  "image exists "*) if [ -n "${CONTAINERS_STORAGE_CONF:-}" ]; then [ -f "$STUB/../store/$(key "$3")" ];
+                    else case "$3" in ghcr.io/tarokolabs/tk8s/node:*) [ ! -f "$STUB/no-node-image" ] ;; *) [ -f "$STUB/host-has-images" ] ;; esac; fi ;;
+  "save "*) [ -f "$STUB/../store/$(key "$2")" ] || exit 125; echo "saved $2" ;;
+  "load") cat >/dev/null; [ ! -f "$STUB/load-fail" ] || exit 125 ;;
   "pull "*) img=${!#}
             if [ -n "${CONTAINERS_STORAGE_CONF:-}" ]; then [ ! -f "$STUB/pull-fail" ] || exit 125; touch "$STUB/../store/$(key "$img")"
             else [ ! -f "$STUB/node-unpublished" ] || exit 125; fi ;;
@@ -43,7 +46,7 @@ run() { : > "$STUB_LOG"; out=$(PATH="$STUB:$PATH" "$@" 2>&1); rc=$?; }
 run scripts/images.sh "$K8S"
 assert_eq "0" "$rc" "images.sh exits 0"
 assert_eq "$(echo "$out" | sort -u)" "$out" "list is sorted and unique"
-assert_eq "16" "$(echo "$out" | wc -l | tr -d ' ')" "16 images: 7 control plane, 3 cilium, metrics-server, local-path, kube-vip, busybox, alpine, agnhost"
+assert_eq "16" "$(echo "$out" | wc -l | tr -d ' ')" "16 images: 7 control plane, 3 cilium, metrics-server, local-path, haproxy, busybox, alpine, agnhost (coredns is already kubeadm's)"
 assert_contains "$out" "registry.k8s.io/kube-apiserver:v$K8S" "control plane images from kubeadm in the node image"
 assert_contains "$(cat "$STUB_LOG")" "podman run --rm --entrypoint kubeadm ghcr.io/tarokolabs/tk8s/node:v$K8S config images list --kubernetes-version v$K8S" "kubeadm is run from the node image, offline"
 assert_contains "$out" "quay.io/cilium/cilium:v$CILIUM@sha256:aaaa" "cilium images, digest-pinned, from the dry-run"
@@ -51,8 +54,9 @@ assert_contains "$(cat "$STUB_LOG")" "cilium install --version $CILIUM --chart-d
 assert_contains "$(cat "$STUB_LOG")" "--chart-directory $PWD/manifests/cilium-$CILIUM" "cilium dry-run reads the vendored chart (no helm.cilium.io fetch, no per-user cache)"
 assert_contains "$out" "registry.k8s.io/metrics-server/metrics-server:$(v metrics_server)" "metrics-server image from the vendored manifest"
 assert_contains "$out" "docker.io/rancher/local-path-provisioner:$(v local_path_provisioner)" "local-path image from the manifest"
-assert_contains "$out" "ghcr.io/kube-vip/kube-vip:$(v kube_vip)" "kube-vip image (HA control planes)"
-assert_eq "1" "$(echo "$out" | grep -c "$(v verify_busybox)")" "busybox once: verify image, local-path helper and kube-vip init are the same pinned tag"
+assert_contains "$out" "$(v haproxy)" "host-side apiserver LB image"
+assert_eq "1" "$(echo "$out" | grep -c coredns)" "coredns once: kubeadm's and the pinned cluster DNS are the same tag for the default version"
+assert_eq "1" "$(echo "$out" | grep -c "$(v verify_busybox)")" "busybox once: verify image and the local-path helper are the same pinned tag"
 assert_contains "$out" "$(v verify_alpine)" "verify alpine"
 assert_contains "$out" "$(v verify_agnhost)" "verify agnhost"
 touch "$STUB/kubeadm-fail"; run scripts/images.sh "$K8S"
@@ -177,6 +181,19 @@ if [ -e "$TMP/images/$K8S.lock" ]; then echo "PASS  prune keeps the lock file (a
 run env TK_ASSUME_YES=1 task images:prune K8S=1.30.0
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "prune of a version without a store fails"
 assert_contains "$out" "no image store" "prune of a missing store says so"
+
+# ---- images:host: the DNS and LB containers run from the host's own store; copy from the shared store
+rm -rf "$TMP/store"/*; run task images:ensure K8S="$K8S"
+run task images:host K8S="$K8S"
+assert_eq "0" "$rc" "images:host exits 0"
+assert_eq "2" "$(grep -c 'podman \[store\] save ' "$STUB_LOG")" "haproxy and coredns are read from the shared store"
+assert_contains "$(cat "$STUB_LOG")" "sudo env CONTAINERS_STORAGE_CONF=$conf podman save $(v haproxy)" "save goes through the store's storage.conf"
+assert_eq "2" "$(grep -c '^sudo podman load' "$STUB_LOG")" "and loaded into the host store"
+touch "$STUB/host-has-images"; run task images:host K8S="$K8S"
+if grep -q 'podman load' "$STUB_LOG"; then echo "FAIL  images:host is a no-op when the host store has both"; FAILURES=$((FAILURES+1)); else echo "PASS  images:host is a no-op when the host store has both"; fi
+rm -f "$STUB/host-has-images"; rm -f "$TMP/store/$(echo "$(v haproxy)" | tr '/:@' '___')"; run task images:host K8S="$K8S"
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "a shared store without haproxy fails images:host"
+assert_contains "$out" "tkctl pull images --k8s $K8S" "and tells the user how to fill it"
 
 # ---- cluster:create fills the store after the plan is resolved and before the nodes start
 e=$(grep -n 'images:ensure' Taskfile.yaml | head -1 | cut -d: -f1); p=$(grep -n 'plan:resolve CLUSTER_FILE' Taskfile.yaml | tail -1 | cut -d: -f1); u=$(grep -n 'nodes:up CLUSTER' Taskfile.yaml | head -1 | cut -d: -f1)

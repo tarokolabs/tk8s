@@ -18,7 +18,9 @@ export HOME="${HOME:-/tmp}"
   # set (agent, operator, envoy). L3 asserts that no node pulled anything, which catches drift here.
   KUBECONFIG=/nonexistent cilium install --version "$(v cilium)" --chart-directory "$TK_HOME/manifests/cilium-$(v cilium)" --dry-run | images
   images "$TK_HOME/manifests/metrics-server.${ms#v}.yaml" \
-         "$TK_HOME/manifests/local-path-storage.${lp#v}.yaml" \
-         "$TK_HOME/manifests/kube-vip.yaml"
+         "$TK_HOME/manifests/local-path-storage.${lp#v}.yaml"
   v verify_busybox; v verify_alpine; v verify_agnhost
+  # The host-side apiserver LB and the cluster DNS run on the host from its own store; images:host copies
+  # them out of the shared store, so they are pulled here like everything else.
+  v haproxy; v coredns
 } | sort -u

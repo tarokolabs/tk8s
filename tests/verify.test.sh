@@ -14,14 +14,22 @@ spec:
   datapath: auto
   datapath_resolved: veth
   gvisor: false
-  network: {index: 0, nodes: 172.22.0.0/24, gateway: 172.22.0.254, pods: 10.244.0.0/21, services: 10.98.0.0/24, lb_range: 172.22.0.200-172.22.0.219}
+  network: {index: 0, nodes: 172.22.0.0/24, gateway: 172.22.0.254, dns: 172.22.0.253, lb: 172.22.0.100, pods: 10.244.0.0/21, services: 10.98.0.0/24, lb_range: 172.22.0.200-172.22.0.219}
   nodes:
     - {role: control-plane, name: demo-control-plane, ip: 172.22.0.1, cpu: 2, memory: 4g, join: true}
     - {role: worker, name: demo-worker1, ip: 172.22.0.2, cpu: 2, memory: 4g, join: true}
 YAML
 printf '#!/usr/bin/env bash\nexec "$@"\n' > "$STUB/sudo"
 # podman exec <node> journalctl -u kubelet …: quiet unless the test plants kubelet-noisy
-printf '#!/usr/bin/env bash\necho "podman $*" >> "$STUB/podman.log"\n[ -f "$STUB/kubelet-noisy" ] && echo \x27E0929 14:39:56 993 summary_sys_containers.go:91] "Failed to get system container stats" err="failed to get cgroup stats for /system.slice/containerd.service"\x27\nexit 0\n' > "$STUB/podman"
+cat > "$STUB/podman" <<'SH'
+#!/usr/bin/env bash
+echo "podman $*" >> "$STUB/podman.log"
+case "$*" in
+  *"journalctl -u kubelet"*) [ -f "$STUB/kubelet-noisy" ] && echo 'E0929 14:39:56 993 summary_sys_containers.go:91] "Failed to get system container stats" err="failed to get cgroup stats for /system.slice/containerd.service"'; exit 0 ;;
+  *"exec demo-lb bash -c"*) printf '# pxname,svname,qcur,qmax,scur,smax,slim,stot,bin,bout,dreq,dresp,ereq,econ,eresp,wretr,wredis,status,weight,act,bck,chkfail,chkdown,lastchg,downtime,qlimit,pid,iid,sid,throttle,lbtot,tracked,type,rate,rate_lim,rate_max,check_status\ncontrol-planes,cp1,0,0,0,0,,0,0,0,,0,,0,0,0,0,%s,1,1,0,0,0,1,0,,1,3,1,,0,,2,0,,0,L7OK\ncontrol-planes,cp2,0,0,0,0,,0,0,0,,0,,0,0,0,0,MAINT (resolution),1,1,0,0,0,1,0,,1,3,2,,0,,2,0,,0,\n' "$(if [ -f "$STUB/lb-down" ]; then echo DOWN; elif [ -f "$STUB/lb-rising" ]; then echo "UP 1/2"; else echo UP; fi)" ;;
+esac
+exit 0
+SH
 printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/sleep"
 printf '#!/usr/bin/env bash\n[ "$1" = is-active ] && [ ! -f "$STUB/stopped" ]\n' > "$STUB/systemctl"
 printf '#!/usr/bin/env bash\n[ "$1" = status ] && [ ! -f "$STUB/cilium-bad" ]\n' > "$STUB/cilium"
@@ -30,6 +38,7 @@ cat > "$STUB/curl" <<'SH'
 case "$*" in
   *"/hostname"*) echo "echo-abc" ;;
   *"X-Forwarded-For"*) echo "172.22.0.254" ;;
+  *"172.22.0.100:6443/readyz"*) [ -f "$STUB/lb-down" ] || echo ok ;;
 esac
 SH
 cat > "$STUB/kubectl" <<'SH'
@@ -73,6 +82,8 @@ assert_contains "$out" "PASS  PVC bound and pod wrote data" "local-path write"
 assert_contains "$out" "PASS  PV data on host" "local-path data on host"
 assert_contains "$out" "PASS  RuntimeClass crun (kernel 6.12.0)" "runtimeclass crun"
 assert_contains "$out" "SKIP  RuntimeClass gvisor — not enabled (create the cluster with --gvisor)" "gvisor skipped when not enabled"
+assert_contains "$out" "PASS  apiserver LB 172.22.0.100 healthy (1/1 control planes UP)" "apiserver LB section: LB healthy, every joined control plane UP"
+if [[ "$out" == *"own HAProxy"* ]]; then echo "FAIL  no worker-side proxy check (there is no worker-side proxy)"; FAILURES=$((FAILURES+1)); else echo "PASS  no worker-side proxy check (there is no worker-side proxy)"; fi
 assert_contains "$out" "PASS  Gateway programmed (172.22.0.200)" "gateway address"
 assert_contains "$out" "PASS  HTTPRoute reachable from host (backend echo-abc)" "httproute"
 assert_contains "$out" "PASS  X-Forwarded-For carries the client IP (172.22.0.254)" "xff"
@@ -98,6 +109,16 @@ assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "noisy kubelet: exit 1"
 assert_contains "$out" "FAIL  kubelet runtime cgroup" "noisy kubelet: named"
 assert_contains "$out" "containerd.service" "noisy kubelet: the message shows the cgroup it looks for"
 rm -f "$STUB/kubelet-noisy"
+# The apiserver LB section: a dead LB and a dead worker-side HAProxy are each one named FAIL.
+touch "$STUB/lb-down"; run
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "LB with no healthy backend: exit 1"
+assert_contains "$out" "FAIL  apiserver LB 172.22.0.100" "LB failure named"
+assert_contains "$out" "FAIL 1" "summary counts exactly the LB failure"
+rm -f "$STUB/lb-down"
+# A backend still in its rise window reports "UP 1/2": it is serving and must count as UP.
+touch "$STUB/lb-rising"; run
+assert_contains "$out" "PASS  apiserver LB 172.22.0.100 healthy (1/1 control planes UP)" "a backend in its rise window counts as UP"
+rm -f "$STUB/lb-rising"
 
 touch "$STUB/stopped"; run
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "stopped cluster: refused"

@@ -22,4 +22,8 @@ assert_contains "$(cat taskfiles/nodes.yaml)" ":/var/lib/containers/shared:ro" "
 # unless CRI-O is told to use kubeadm's. L3 run 38252624650 (1.36.4) failed exactly there.
 assert_contains "$(cat $f)" "kubeadm config images list" "the image build reads the pause image from kubeadm"
 assert_contains "$(cat $f)" 'pause_image = ' "CRI-O's pause_image is set to kubeadm's pause in a crio.conf.d drop-in"
+# The apiserver LB is a host-side container (kubeadm HA model: one LB in front of the control planes);
+# the node image carries no proxy of its own.
+assert_eq "" "$(grep -n 'haproxy\|apiserver-lb' $f || true)" "node image has no haproxy or apiserver-lb"
+if [ -e images/node/systemd ] || [ -e images/node/haproxy ]; then echo "FAIL  no node-local LB files in images/node"; FAILURES=$((FAILURES+1)); else echo "PASS  no node-local LB files in images/node"; fi
 finish

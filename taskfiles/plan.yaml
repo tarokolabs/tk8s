@@ -36,6 +36,9 @@ tasks:
           n=0; {{ range .DEF.spec.nodes }}{{ if eq .role "control-plane" }}n=$((n + {{ .count | default 1 }})); {{ end }}{{ end }}echo $n
       # Explicit node subnet from the input, if any (172.22.N.0/24).
       WANT_NODES: '{{ if .DEF.spec.network }}{{ .DEF.spec.network.nodes | default "" }}{{ end }}'
+      WANT_DNS: '{{ if .DEF.spec.network }}{{ .DEF.spec.network.dns | default "" }}{{ end }}'
+      WANT_LB: '{{ if .DEF.spec.network }}{{ .DEF.spec.network.lb | default "" }}{{ end }}'
+      HAS_VIP: '{{ if .DEF.spec.network }}{{ if .DEF.spec.network.vip }}yes{{ end }}{{ end }}'
       CLUSTER_YAML: '{{ .STATE_DIR }}/cluster.yaml'
       # Index N: reuse the one already recorded for this cluster (resume), else the
       # one implied by an explicit subnet, else the smallest N no other cluster uses.
@@ -66,6 +69,7 @@ tasks:
       INVALID:
         sh: |
           {{ if .DEF.spec.runtime }}echo 'spec.runtime is not a field any more: nodes run CRI-O from the single node image; remove the key'; exit 0{{ end }}
+          {{ if eq .HAS_VIP "yes" }}echo 'spec.network.vip is no longer supported: every cluster gets an apiserver LB at spec.network.lb; recreate the cluster'; exit 0{{ end }}
           case "{{ .CNI }}" in cilium|canal) ;; *) echo 'spec.cni "{{ .CNI }}" must be cilium or canal'; exit 0 ;; esac
           case "{{ .DATAPATH }}" in auto|netkit|veth) ;; *) echo 'spec.datapath "{{ .DATAPATH }}" must be auto, netkit or veth'; exit 0 ;; esac
           {{ if and (eq .GVISOR "true") (eq .DATAPATH "netkit") }}echo 'gvisor requires the veth datapath; gVisor sandboxes have no network under netkit'; exit 0{{ end }}
@@ -85,6 +89,12 @@ tasks:
           {{ end }}
           {{ if .DEF.spec.nodes }}[ "{{ (index .DEF.spec.nodes 0).role }}" = control-plane ] || { echo 'the first entry in spec.nodes must be a control-plane (it runs kubeadm init)'; exit 0; }{{ end }}
           [ $(( {{ .CP_COUNT }} % 2 )) -eq 1 ] || { echo 'control-plane count {{ .CP_COUNT }} must be odd (1, 3, 5) for etcd quorum'; exit 0; }
+          [ {{ .CP_COUNT }} -le 5 ] || { echo 'control-plane count {{ .CP_COUNT }} exceeds the limit: at most 5 (the apiserver LB has five backend slots)'; exit 0; }
+          # Custom DNS/LB addresses live in .220-.253 of the node subnet: nodes take .1-.199, LB-IPAM .200-.219, the gateway .254.
+          for a in "{{ .WANT_DNS }}" "{{ .WANT_LB }}"; do
+            [ -z "$a" ] || echo "$a" | grep -qE '^172\.22\.{{ .INDEX }}\.(2[2-4][0-9]|25[0-3])$' || { echo "spec.network address $a must be 172.22.{{ .INDEX }}.220-253 (custom dns/lb; defaults are .253 and .100)"; exit 0; }
+          done
+          [ -z "{{ .WANT_DNS }}" ] || [ "{{ .WANT_DNS }}" != "{{ .WANT_LB }}" ] || { echo 'spec.network.dns and spec.network.lb must differ'; exit 0; }
     preconditions:
       - sh: '[ -n "{{ .CLUSTER }}" ]'
         msg: "metadata.name is required in {{ .CLUSTER_FILE }}"
@@ -115,17 +125,16 @@ tasks:
             index: {{ .INDEX }}
             nodes: 172.22.{{ .INDEX }}.0/24
             gateway: 172.22.{{ .INDEX }}.254
+            dns: {{ .WANT_DNS | default (print "172.22." .INDEX ".253") }}
+            lb: {{ .WANT_LB | default (print "172.22." .INDEX ".100") }}
             lb_range: 172.22.{{ .INDEX }}.200-172.22.{{ .INDEX }}.219
             pods: 10.244.{{ mul (atoi .INDEX) 8 }}.0/21
             services: 10.98.{{ .INDEX }}.0/24
-        {{- if gt (atoi .CP_COUNT) 1 }}
-            vip: 172.22.{{ .INDEX }}.100
-        {{- end }}
           nodes:
         {{- $idx := .INDEX }}{{ $ip := 0 }}{{ $cp := 0 }}{{ $wk := 0 }}
         {{- range .NODES }}{{ $grp := . }}
         {{- range $i := until (int (default 1 $grp.count)) }}
-        {{- $ip = add $ip 1 }}
+        {{- $ip = add $ip 1 }}{{ if eq (int $ip) 100 }}{{ $ip = 101 }}{{ end }}
         {{- if eq $grp.role "control-plane" }}{{ $cp = add $cp 1 }}
             - role: control-plane
               name: {{ if $grp.name }}{{ $grp.name }}{{ else }}{{ $.CLUSTER }}-control-plane{{ if gt (int $cp) 1 }}{{ $cp }}{{ end }}{{ end }}
