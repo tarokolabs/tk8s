@@ -1,8 +1,13 @@
 # Single source of truth for pinned component versions.
 # Read by the Taskfile (fromYaml), install.sh, and the release workflow.
 kubernetes:
-  default: "1.37.0"
-  previous: "1.36.4"
+  default: "1.37.1"
+  previous: "1.36.5"
+# CRI-O for the node image, by Kubernetes minor (CRI-O's minor follows Kubernetes'; the patch is
+# pinned here). Static bundle from https://storage.googleapis.com/cri-o/artifacts/, with a checksum.
+crio:
+  "1.37": "v1.37.2"
+  "1.36": "v1.36.7"
 cilium: "1.20.2"
 cilium_cli: "v0.20.1"
 cni_plugins: "v1.9.1"

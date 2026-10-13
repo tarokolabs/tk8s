@@ -12,7 +12,7 @@ assert_contains "$out" "cpu: 2" "default cpu"
 assert_contains "$out" "memory: 4g" "default memory, lower-cased"
 assert_contains "$out" "# ---- /etc/containers/systemd/tk8s/tk8s.network" "dry-run prints the network unit"
 assert_contains "$out" "# ---- /etc/containers/systemd/tk8s/tk8s-worker2.container" "dry-run prints node units"
-assert_contains "$out" "kubernetesVersion: 1.37.0" "dry-run prints the kubeadm config"
+assert_contains "$out" "kubernetesVersion: 1.37.1" "dry-run prints the kubeadm config"
 if [ -d "$TMP/clusters/tk8s" ]; then echo "FAIL  dry-run leaves no state directory"; FAILURES=$((FAILURES+1)); else echo "PASS  dry-run leaves no state directory"; fi
 mkdir -p "$TMP/clusters/taken"; touch "$TMP/clusters/taken/.create-complete"; printf 'metadata: {name: taken}\nspec: {network: {index: 5}, nodes: []}\n' > "$TMP/clusters/taken/cluster.yaml"
 out=$($T create cluster taken --dry-run 2>&1); rc=$?
@@ -27,10 +27,10 @@ out=$($T create cluster -f "$TMP/clash.yaml" --dry-run 2>&1); rc=$?
 assert_eq "1" "$rc" "dry-run rejects an explicit subnet that overlaps an existing cluster"
 assert_contains "$out" "already used" "dry-run overlap message"
 rm -rf "$TMP/clusters/first"
-out=$($T create cluster demo --control-planes 3 --workers 4 --cpu 4 --memory 8G --k8s 1.36.4 --dry-run 2>&1)
+out=$($T create cluster demo --control-planes 3 --workers 4 --cpu 4 --memory 8G --k8s 1.36.5 --dry-run 2>&1)
 assert_contains "$out" "name: demo-control-plane3" "control-planes flag"
 assert_contains "$out" "name: demo-worker4" "workers flag"
-assert_contains "$out" 'kubernetes: "1.36.4"' "k8s flag"
+assert_contains "$out" 'kubernetes: "1.36.5"' "k8s flag"
 assert_contains "$out" "lb: 172.22." "HA gets the apiserver LB address"
 out=$($T create cluster demo --control-planes 3 --defer-join --dry-run 2>&1)
 assert_eq "2" "$(echo "$out" | grep -c "join: false")" "--defer-join marks the extra control planes"
@@ -82,11 +82,11 @@ out=$(TK_TASK="$TMP/task-stub" $T pull images 2>&1); rc=$?
 assert_eq "0" "$rc" "pull images exits 0"
 assert_contains "$out" "images:ensure" "pull images runs images:ensure"
 assert_eq "0" "$(echo "$out" | grep -c 'K8S=')" "pull images without --k8s leaves the version to the taskfile default"
-out=$(TK_TASK="$TMP/task-stub" $T pull images --k8s 1.36.4 2>&1); assert_contains "$out" "images:ensure K8S=1.36.4" "pull images --k8s"
+out=$(TK_TASK="$TMP/task-stub" $T pull images --k8s 1.36.5 2>&1); assert_contains "$out" "images:ensure K8S=1.36.5" "pull images --k8s"
 out=$(TK_TASK="$TMP/task-stub" $T get images 2>&1); assert_contains "$out" "images:list" "get images runs images:list"
-out=$(TK_TASK="$TMP/task-stub" $T get images --k8s 1.36.4 2>&1); assert_contains "$out" "images:list K8S=1.36.4" "get images --k8s"
-out=$(TK_TASK="$TMP/task-stub" $T delete images --k8s 1.36.4 --yes 2>&1)
-assert_contains "$out" "images:prune K8S=1.36.4" "delete images runs images:prune"
+out=$(TK_TASK="$TMP/task-stub" $T get images --k8s 1.36.5 2>&1); assert_contains "$out" "images:list K8S=1.36.5" "get images --k8s"
+out=$(TK_TASK="$TMP/task-stub" $T delete images --k8s 1.36.5 --yes 2>&1)
+assert_contains "$out" "images:prune K8S=1.36.5" "delete images runs images:prune"
 assert_contains "$out" "yes=1" "delete images --yes sets TK_ASSUME_YES"
 assert_fails "delete images without --k8s is rejected" env TK_TASK="$TMP/task-stub" $T delete images --yes
 assert_fails "get images with a malformed --k8s is rejected" env TK_TASK="$TMP/task-stub" $T get images --k8s 1.36
@@ -99,5 +99,5 @@ assert_fails "--control-planes 7 is rejected" $T create cluster --control-planes
 # kube-vip is gone from the whole platform, release notes included (README only recalls it under the v1 differences).
 assert_eq "" "$(grep -rn 'kube-vip\|kube_vip' taskfiles scripts bin versions.yaml manifests 2>/dev/null || true)" "no kube-vip left in taskfiles, scripts, tkctl, pins or manifests (plan:resolve still names spec.network.vip to refuse it)"
 assert_contains "$out" "TK_OFFLINE" "help documents TK_OFFLINE"
-out=$($T version 2>&1); assert_contains "$out" "kubernetes default 1.37.0" "version shows default kubernetes"
+out=$($T version 2>&1); assert_contains "$out" "kubernetes default 1.37.1" "version shows default kubernetes"
 rm -rf "$TMP"; finish

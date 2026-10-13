@@ -1,0 +1,15 @@
+[Unit]
+Description=tk8s node: mount propagation and a unique product_uuid (what kind's entrypoint did)
+DefaultDependencies=no
+After=local-fs.target
+Conflicts=shutdown.target
+Before=shutdown.target
+Before=crio.service kubelet.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/tk8s-node-init
+
+[Install]
+WantedBy=multi-user.target

@@ -12,8 +12,8 @@
 
 | 元件 | 說明 |
 |---|---|
-| Kubernetes | kubeadm 建立，預設 **1.37.0**，次新 1.36.4（見 `versions.yaml`） |
-| Container runtime | **CRI-O**（版本對齊 K8s minor）；只有一種節點 image |
+| Kubernetes | kubeadm 建立，預設 **1.37.1**，次新 1.36.5（見 `versions.yaml`） |
+| Container runtime | **CRI-O**（minor 對齊 K8s，patch 釘在 `versions.yaml` 的 `crio` 表）；只有一種節點 image，見「節點 image」 |
 | CNI | **cilium** 1.20.2，kube-proxy replacement；datapath 預設在核心 ≥ 6.8 用 netkit，`--datapath veth` 可切 |
 | 負載平衡 | cilium LB-IPAM 加 L2 announcement，LoadBalancer IP 從節點網段的 `.200`–`.219` 配發 |
 | Gateway API | cilium 內建 controller，GatewayClass `cilium`，Gateway API v1.6.1 CRD（experimental channel，含 TCPRoute、UDPRoute） |
@@ -37,7 +37,7 @@
 
 建叢集的流程與實體機上的 kubeadm 一致：建網路與節點容器、第一個 control plane `kubeadm init`、其餘節點 `kubeadm join`、裝 CNI。這是教學上想讓學員讀得懂的部分，所以全部是可讀的 shell。
 
-節點 image 為 `ghcr.io/tarokolabs/tk8s/node:v<K8s 版本>`，拉不到時以 `images/node/` 的配方本地建置。
+節點 image 為 `ghcr.io/tarokolabs/tk8s/node:v<K8s 版本>`，拉不到時以 `images/node/` 的配方本地建置（見「節點 image」）。
 
 ## 需求
 
@@ -120,7 +120,7 @@ kind: Cluster
 metadata:
   name: tkdt
 spec:
-  kubernetes: "1.37.0"
+  kubernetes: "1.37.1"
   cni: cilium              # cilium | canal
   datapath: auto           # auto | netkit | veth
   gvisor: false
@@ -167,6 +167,21 @@ tkctl create cluster -f tkdt.yaml
 
 節點容器是 Quadlet 管的，每次啟停會重建；節點必須保留的 `/var`、`/etc`、`/usr/local/bin` 放在每節點的 named volume（`<節點>-var`、`-etc`、`-usr-local-bin`），`delete` 會一起清掉。
 
+## 節點 image
+
+每個節點容器跑的是 `ghcr.io/tarokolabs/tk8s/node:v<K8s 版本>`，配方在 `images/node/`，從 `docker.io/library/debian:13-slim` 起：
+
+- **systemd** 當 PID 1（Podman 看到 `/sbin/init` 自動進 systemd 模式），加上 dbus、iptables、nftables、conntrack 這些 kubeadm 與 kubelet 要的 OS 工具，以及 nano、vim、ping、less、jq、tcpdump、strace。
+- **CRI-O** 來自官方的 static bundle（`storage.googleapis.com/cri-o/artifacts/cri-o.amd64.<版本>.tar.gz`），版本由 `versions.yaml` 的 `crio` 表依 K8s minor 決定，下載後比對 `.sha256sum`。crun、conmon、runc 都在 bundle 裡。
+- **kubeadm、kubelet、kubectl** 來自 `dl.k8s.io/release/v<版本>/bin/linux/amd64/`，各自比對 `.sha256`。kubelet 的 unit 與 kubeadm 的 drop-in 是 kubeadm 文件的標準內容，`--runtime-cgroups` 指向 `crio.service`。
+- **沒有的東西**：沒有 containerd、沒有預載任何容器 image（叢集的 image 來自「共用 image store」）、沒有 kind 的任何東西。image 約 626 MB。
+
+每個元件都是釘死版本的 artifact 加 checksum，所以同一份 `versions.yaml` 一年後重建仍是同樣的 CRI-O 與 Kubernetes（apt 那層跟著 Debian 的 point release 走，沒有釘）。`tk8s-node-init.service` 在節點啟動時做 kind 的 entrypoint 以前做的兩件事：把根掛載設成 rshared（kubelet 的掛載才會傳出去）、給節點一個自己的 `product_uuid`（同主機的容器看到的是主機的 DMI；kubeadm 要求每個節點唯一）。`/etc/machine-id` 在 image 裡是空的，第一次啟動由 systemd 產生並留在節點的 `-etc` volume。
+
+自己 build：`sudo podman build --build-arg VER=1.37.1 --build-arg CRIO=v1.37.2 -t ghcr.io/tarokolabs/tk8s/node:v1.37.1 images/node`；`tkctl pull images --k8s <版本>` 在 tag 沒發布時會自動做同一件事。`--k8s` 指定的 minor 必須在 `crio` 表裡才建得出來；已經拉下來的 image 不受此限。
+
+節點內的短名稱 image（`kubectl run --image=nginx`）一律解到 `docker.io`。
+
 ## 共用 image store
 
 建叢集需要的 image（control plane、Cilium、metrics-server、local-path、HAProxy、`verify` 的測試 image）由主機拉一次，放在 `/opt/taroko/images/<K8s 版本>/`，每個節點容器以唯讀掛在 `/var/lib/containers/shared`，CRI-O 把它當 additional image store：查 image 先看這裡，有就直接用，沒有才照常 pull 進節點自己的 `/var`。所以：
@@ -200,7 +215,7 @@ tkctl create cluster -f tkdt.yaml
 
 ## 支援的 K8s 版本
 
-支援政策：**最新與次新的 K8s minor**，目前為 1.37.x 與 1.36.x，釘在 `versions.yaml`。每次 push 到 `main` 與每個 tag，CI 都會在 GitHub runner 上以這兩個版本各建一個叢集並跑 `tkctl verify cluster`（workflow `l3`）。更舊的版本可以用 `--k8s` 指定，節點 image 會本地建置，但不在主要支援範圍。
+支援政策：**最新與次新的 K8s minor**，目前為 1.37.x 與 1.36.x，釘在 `versions.yaml`（K8s patch 與 CRI-O patch 都在那裡）。每次 push 到 `main` 與每個 tag，CI 都會在 GitHub runner 上以這兩個版本各建一個叢集並跑 `tkctl verify cluster`（workflow `l3`）。更舊的版本可以用 `--k8s` 指定：已發布的 tag 直接拉；沒發布的要 `versions.yaml` 的 `crio` 表有那個 minor 才能本地建置，不在主要支援範圍。
 
 ## 與 v1 的差異
 

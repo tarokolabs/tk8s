@@ -8,6 +8,7 @@ TMP=$(mktemp -d); export TK_DATA_DIR="$TMP" TK_HOME="$PWD"
 STUB="$TMP/bin"; mkdir -p "$STUB" "$TMP/store"; export STUB STUB_LOG="$TMP/calls.log"
 v() { sed -nE "s/^$1: *\"?([^\"]+)\"?.*/\1/p" versions.yaml; }
 K8S=$(sed -nE 's/^  default: *"([^"]+)"/\1/p' versions.yaml)
+CRIO=$(sed -nE "s/^  \"${K8S%.*}\": *\"([^\"]+)\".*/\1/p" versions.yaml)
 printf '#!/usr/bin/env bash\necho "sudo $*" >> "$STUB_LOG"; exec "$@"\n' > "$STUB/sudo"
 printf '#!/usr/bin/env bash\necho "flock $1" >> "$STUB_LOG"; touch "$1"; shift; exec "$@"\n' > "$STUB/flock"  # flock creates the lock file, so does the stub
 printf '#!/usr/bin/env bash\necho "curl $*" >> "$STUB_LOG"; exit 0\n' > "$STUB/curl"
@@ -68,7 +69,7 @@ touch "$STUB/no-node-image"; run task images:node K8S="$K8S"
 assert_eq "0" "$rc" "images:node exits 0"
 assert_contains "$(cat "$STUB_LOG")" "podman pull ghcr.io/tarokolabs/tk8s/node:v$K8S" "node image pulled when absent"
 touch "$STUB/node-unpublished"; run task images:node K8S="$K8S"
-assert_contains "$(cat "$STUB_LOG")" "podman build --build-arg VER=$K8S --force-rm -t ghcr.io/tarokolabs/tk8s/node:v$K8S $PWD/images/node" "node image built locally when the tag is not published"
+assert_contains "$(cat "$STUB_LOG")" "podman build --build-arg VER=$K8S --build-arg CRIO=$CRIO --force-rm -t ghcr.io/tarokolabs/tk8s/node:v$K8S $PWD/images/node" "node image built locally with the CRI-O tag of its Kubernetes minor"
 rm -f "$STUB/no-node-image" "$STUB/node-unpublished"
 run task images:node K8S="$K8S"
 if grep -qE "podman (pull|build)" "$STUB_LOG"; then echo "FAIL  images:node is a no-op when the image exists"; FAILURES=$((FAILURES+1)); else echo "PASS  images:node is a no-op when the image exists"; fi
@@ -77,6 +78,21 @@ touch "$STUB/no-node-image"; run env TK_OFFLINE=1 task images:node K8S="$K8S"
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "images:node offline with no node image fails"
 assert_contains "$out" "TK_OFFLINE" "images:node offline failure names TK_OFFLINE"
 if grep -qE "podman (pull|build)" "$STUB_LOG"; then echo "FAIL  images:node offline pulls and builds nothing"; FAILURES=$((FAILURES+1)); else echo "PASS  images:node offline pulls and builds nothing"; fi
+# A minor without a crio entry: an image already on the host is used as is; building is refused by name.
+rm -f "$STUB/no-node-image" "$STUB/node-unpublished"
+run task images:node K8S=1.35.5
+assert_eq "0" "$rc" "images:node uses a pulled image of a minor without a crio entry"
+touch "$STUB/no-node-image" "$STUB/node-unpublished"; run task images:node K8S=1.35.5
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "images:node cannot build a minor without a crio entry"
+assert_contains "$out" "no crio entry for Kubernetes minor 1.35" "the refusal names the minor"
+if grep -q "podman build" "$STUB_LOG"; then echo "FAIL  no build without a crio entry"; FAILURES=$((FAILURES+1)); else echo "PASS  no build without a crio entry"; fi
+rm -f "$STUB/no-node-image" "$STUB/node-unpublished"
+# scripts/build-images.sh (release) does the same lookup.
+run env TK="$PWD" SUDO= scripts/build-images.sh node "$K8S"
+assert_contains "$(cat "$STUB_LOG")" "--build-arg=VER=$K8S --build-arg=CRIO=$CRIO -t ghcr.io/tarokolabs/tk8s/node:v$K8S $PWD/images/node" "build-images.sh passes the CRI-O tag"
+run env TK="$PWD" SUDO= scripts/build-images.sh node 1.35.5
+assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "build-images.sh refuses a minor without a crio entry"
+assert_contains "$out" "no crio entry for Kubernetes minor 1.35" "build-images.sh names the minor"
 rm -f "$STUB/no-node-image"
 run env TK_OFFLINE=1 task nodes:cni-plugins
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "nodes:cni-plugins offline with no plugins fails"

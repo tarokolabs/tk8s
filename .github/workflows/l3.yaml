@@ -73,7 +73,10 @@ jobs:
       - name: Install tk8s with install.sh from this checkout
         run: TK_VERSION="${GITHUB_REF_NAME}" TK_REPO="$GITHUB_WORKSPACE" TK_RAW="file://$GITHUB_WORKSPACE" sh install.sh
       - name: Build the node image from this checkout
-        run: sudo podman build --build-arg VER="${{ matrix.k8s }}" --force-rm -t "ghcr.io/tarokolabs/tk8s/node:v${{ matrix.k8s }}" images/node >/tmp/node-build.log 2>&1 || { tail -30 /tmp/node-build.log; exit 1; }
+        run: |
+          k8s="${{ matrix.k8s }}"; crio=$(sed -nE "s/^  \"${k8s%.*}\": *\"([^\"]+)\".*/\1/p" versions.yaml)
+          [ -n "$crio" ] || { echo "versions.yaml has no crio entry for Kubernetes minor ${k8s%.*}"; exit 1; }
+          sudo podman build --build-arg VER="$k8s" --build-arg CRIO="$crio" --force-rm -t "ghcr.io/tarokolabs/tk8s/node:v$k8s" images/node >/tmp/node-build.log 2>&1 || { tail -30 /tmp/node-build.log; exit 1; }
       - name: Fill the shared image store (a second run must find it full)
         run: |
           set -eux

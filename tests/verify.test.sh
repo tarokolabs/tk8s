@@ -9,7 +9,7 @@ touch "$TMP/clusters/demo/.create-complete"
 cat > "$TMP/clusters/demo/cluster.yaml" <<'YAML'
 metadata: {name: demo}
 spec:
-  kubernetes: "1.37.0"
+  kubernetes: "1.37.1"
   cni: cilium
   datapath: auto
   datapath_resolved: veth
@@ -45,8 +45,8 @@ cat > "$STUB/kubectl" <<'SH'
 #!/usr/bin/env bash
 echo "kubectl $*" >> "$STUB/kubectl.log"
 case "$*" in
-  *"get nodes --no-headers"*) printf 'demo-control-plane Ready control-plane 1m v1.37.0\ndemo-worker1 Ready <none> 1m v1.37.0\n' ;;
-  *"get nodes -o custom-columns"*) echo "  demo-control-plane v1.37.0 cri-o://1.37.0 6.12" ;;
+  *"get nodes --no-headers"*) printf 'demo-control-plane Ready control-plane 1m v1.37.1\ndemo-worker1 Ready <none> 1m v1.37.1\n' ;;
+  *"get nodes -o custom-columns"*) echo "  demo-control-plane v1.37.1 cri-o://1.37.2 6.12" ;;
   *"get pods -n kube-system --no-headers"*)
      # Right after a boot the system pods are still starting; the first answer is not Running.
      n=$(cat "$STUB/pods-calls" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB/pods-calls"

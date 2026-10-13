@@ -1,6 +1,6 @@
 # 臨時補建節點 image（不發 Release）：K8s 出新 patch 版而平台無需發版時，
 # 手動觸發建置指定版本的 node image（CRI-O）。
-# 前提：docker.io/kindest/node 已發佈對應版本 tag。
+# 前提：versions.yaml 的 crio 表有該 K8s minor 的項目（build-images.sh 依它取 CRI-O 的 static bundle）。
 name: node-images
 permissions:
   contents: read
