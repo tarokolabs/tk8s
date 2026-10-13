@@ -9,8 +9,8 @@ metadata: {name: demo}
 spec:
   network: {index: 0, nodes: 172.22.0.0/24, pods: 10.244.0.0/21, services: 10.98.0.0/24}
   nodes:
-    - {role: control-plane, name: demo-control-plane, ip: 172.22.0.1, cpu: 2, memory: 4g, join: true}
-    - {role: worker, name: demo-worker1, ip: 172.22.0.2, cpu: 2, memory: 4g, join: true}
+    - {role: control-plane, name: demo-cp-1, ip: 172.22.0.1, cpu: 2, memory: 4g, join: true}
+    - {role: worker, name: demo-worker-1, ip: 172.22.0.2, cpu: 2, memory: 4g, join: true}
 YAML
 cat > "$STUB/sudo" <<'SH'
 #!/usr/bin/env bash
@@ -41,8 +41,8 @@ SH
 chmod +x "$STUB"/*; export STUB_LOG="$TMP/podman.log"; : > "$STUB_LOG"
 out=$(PATH="$STUB:$PATH" TK_ASSUME_YES=1 task lifecycle:delete CLUSTER=demo 2>&1); rc=$?
 assert_eq "0" "$rc" "delete exits 0 when some volumes are already gone"
-assert_contains "$out" "remove volume demo-control-plane-var" "first node volume removed"
-assert_contains "$out" "remove volume demo-worker1-var" "second node volume removed (loop did not abort)"
+assert_contains "$out" "remove volume demo-cp-1-var" "first node volume removed"
+assert_contains "$out" "remove volume demo-worker-1-var" "second node volume removed (loop did not abort)"
 assert_contains "$out" "remove network demo" "network removed after the volume loop"
 assert_contains "$out" "remove state" "state directory removed"
 assert_contains "$(cat "$STUB_LOG")" "/etc/systemd/system/demo-routes.service" "routes unit removed with the other units"

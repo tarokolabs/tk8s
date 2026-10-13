@@ -16,7 +16,7 @@ tasks:
       DEF: { ref: fromYaml .DEF_RAW }
       NODES: { ref: .DEF.spec.nodes }
       IMAGE: 'ghcr.io/tarokolabs/tk8s/node:v{{ .DEF.spec.kubernetes }}'
-      CP_NAME: '{{ .CLUSTER }}-control-plane'
+      CP_NAME: '{{ (index .DEF.spec.nodes 0).name }}'
       CP_IP: '{{ (index .DEF.spec.nodes 0).ip }}'
       LB_IP: '{{ .DEF.spec.network.lb }}'
       DOMAIN: '{{ .CLUSTER }}.k8s'

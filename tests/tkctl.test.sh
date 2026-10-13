@@ -7,11 +7,11 @@ assert_eq "0" "$rc" "dry-run exits 0"
 if [[ "$out" == *"unbound variable"* ]]; then echo "FAIL  dry-run has no shell errors"; FAILURES=$((FAILURES+1)); else echo "PASS  dry-run has no shell errors"; fi
 assert_contains "$out" "name: tk8s" "default cluster name"
 if [[ "$out" == *"task: ["* ]]; then echo "FAIL  tkctl output does not echo task commands"; FAILURES=$((FAILURES+1)); else echo "PASS  tkctl output does not echo task commands"; fi
-assert_contains "$out" "name: tk8s-worker2" "default 1 control-plane + 2 workers"
+assert_contains "$out" "name: tk8s-worker-2" "default 1 control-plane + 2 workers"
 assert_contains "$out" "cpu: 2" "default cpu"
 assert_contains "$out" "memory: 4g" "default memory, lower-cased"
 assert_contains "$out" "# ---- /etc/containers/systemd/tk8s/tk8s.network" "dry-run prints the network unit"
-assert_contains "$out" "# ---- /etc/containers/systemd/tk8s/tk8s-worker2.container" "dry-run prints node units"
+assert_contains "$out" "# ---- /etc/containers/systemd/tk8s/tk8s-worker-2.container" "dry-run prints node units"
 assert_contains "$out" "kubernetesVersion: 1.37.1" "dry-run prints the kubeadm config"
 if [ -d "$TMP/clusters/tk8s" ]; then echo "FAIL  dry-run leaves no state directory"; FAILURES=$((FAILURES+1)); else echo "PASS  dry-run leaves no state directory"; fi
 mkdir -p "$TMP/clusters/taken"; touch "$TMP/clusters/taken/.create-complete"; printf 'metadata: {name: taken}\nspec: {network: {index: 5}, nodes: []}\n' > "$TMP/clusters/taken/cluster.yaml"
@@ -28,8 +28,8 @@ assert_eq "1" "$rc" "dry-run rejects an explicit subnet that overlaps an existin
 assert_contains "$out" "already used" "dry-run overlap message"
 rm -rf "$TMP/clusters/first"
 out=$($T create cluster demo --control-planes 3 --workers 4 --cpu 4 --memory 8G --k8s 1.36.5 --dry-run 2>&1)
-assert_contains "$out" "name: demo-control-plane3" "control-planes flag"
-assert_contains "$out" "name: demo-worker4" "workers flag"
+assert_contains "$out" "name: demo-cp-3" "control-planes flag"
+assert_contains "$out" "name: demo-worker-4" "workers flag"
 assert_contains "$out" 'kubernetes: "1.36.5"' "k8s flag"
 assert_contains "$out" "lb: 172.22." "HA gets the apiserver LB address"
 out=$($T create cluster demo --control-planes 3 --defer-join --dry-run 2>&1)

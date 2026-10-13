@@ -132,10 +132,10 @@ tasks:
         {{- $ip = add $ip 1 }}{{ if eq (int $ip) 100 }}{{ $ip = 101 }}{{ end }}
         {{- if eq $grp.role "control-plane" }}{{ $cp = add $cp 1 }}
             - role: control-plane
-              name: {{ if $grp.name }}{{ $grp.name }}{{ else }}{{ $.CLUSTER }}-control-plane{{ if gt (int $cp) 1 }}{{ $cp }}{{ end }}{{ end }}
+              name: {{ if $grp.name }}{{ $grp.name }}{{ else }}{{ $.CLUSTER }}-cp-{{ $cp }}{{ end }}
         {{- else }}{{ $wk = add $wk 1 }}
             - role: worker
-              name: {{ if $grp.name }}{{ $grp.name }}{{ else }}{{ $.CLUSTER }}-worker{{ $wk }}{{ end }}
+              name: {{ if $grp.name }}{{ $grp.name }}{{ else }}{{ $.CLUSTER }}-worker-{{ $wk }}{{ end }}
         {{- end }}
               ip: 172.22.{{ $idx }}.{{ $ip }}
               cpu: {{ default 2 $grp.cpu }}

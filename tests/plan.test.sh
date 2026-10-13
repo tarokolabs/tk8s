@@ -25,8 +25,8 @@ assert_contains "$out" "services: 10.98.1.0/24" "service subnet from index"
 assert_contains "$out" "gateway: 172.22.1.254" "gateway .254"
 assert_contains "$out" "lb_range: 172.22.1.200-172.22.1.219" "LB-IPAM range"
 assert_contains "$out" "lb: 172.22.1.100" "apiserver LB address (single control plane too)"
-assert_contains "$out" "name: demo-control-plane" "first control plane name"
-assert_contains "$out" "name: demo-worker2" "workers expanded from count"
+assert_contains "$out" "name: demo-cp-1" "first control plane name"
+assert_contains "$out" "name: demo-worker-2" "workers expanded from count"
 assert_contains "$out" "ip: 172.22.1.3" "third node ip"
 assert_contains "$out" 'kubernetes: "1.37.1"' "default kubernetes version filled in"
 if [[ "$out" == *"runtime:"* ]]; then echo "FAIL  no runtime field (CRI-O only)"; FAILURES=$((FAILURES+1)); else echo "PASS  no runtime field (CRI-O only)"; fi
@@ -36,7 +36,7 @@ sed -i.bak 's/role: control-plane, cpu: 2/role: control-plane, count: 3, cpu: 2/
 out=$(task plan:resolve CLUSTER_FILE="$TMP/in.yaml" DRY_RUN=true 2>&1)
 assert_contains "$out" "lb: 172.22.1.100" "apiserver LB address (HA too)"
 if [[ "$out" == *"vip:"* ]] || [[ "$out" == *"dns:"* ]]; then echo "FAIL  no vip field (kube-vip is gone)"; FAILURES=$((FAILURES+1)); else echo "PASS  no vip field (kube-vip is gone)"; fi
-assert_contains "$out" "name: demo-control-plane3" "third control plane name"
+assert_contains "$out" "name: demo-cp-3" "third control plane name"
 # deferred join carried per node
 cat > "$TMP/in3.yaml" <<'YAML'
 metadata: {name: defer}
