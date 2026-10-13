@@ -176,7 +176,7 @@ tkctl create cluster -f tkdt.yaml
 - **kubeadm、kubelet、kubectl** 來自 `dl.k8s.io/release/v<版本>/bin/linux/amd64/`，各自比對 `.sha256`。kubelet 的 unit 與 kubeadm 的 drop-in 是 kubeadm 文件的標準內容，`--runtime-cgroups` 指向 `crio.service`。
 - **沒有的東西**：沒有 containerd、沒有預載任何容器 image（叢集的 image 來自「共用 image store」）、沒有 kind 的任何東西。image 約 626 MB。
 
-每個元件都是釘死版本的 artifact 加 checksum，所以同一份 `versions.yaml` 一年後重建仍是同樣的 image。`tk8s-node-init.service` 在節點啟動時做 kind 的 entrypoint 以前做的兩件事：把根掛載設成 rshared（kubelet 的掛載才會傳出去）、給節點一個自己的 `product_uuid`（同主機的容器看到的是主機的 DMI；kubeadm 要求每個節點唯一）。`/etc/machine-id` 在 image 裡是空的，第一次啟動由 systemd 產生並留在節點的 `-etc` volume。
+每個元件都是釘死版本的 artifact 加 checksum，所以同一份 `versions.yaml` 一年後重建仍是同樣的 CRI-O 與 Kubernetes（apt 那層跟著 Debian 的 point release 走，沒有釘）。`tk8s-node-init.service` 在節點啟動時做 kind 的 entrypoint 以前做的兩件事：把根掛載設成 rshared（kubelet 的掛載才會傳出去）、給節點一個自己的 `product_uuid`（同主機的容器看到的是主機的 DMI；kubeadm 要求每個節點唯一）。`/etc/machine-id` 在 image 裡是空的，第一次啟動由 systemd 產生並留在節點的 `-etc` volume。
 
 自己 build：`sudo podman build --build-arg VER=1.37.1 --build-arg CRIO=v1.37.2 -t ghcr.io/tarokolabs/tk8s/node:v1.37.1 images/node`；`tkctl pull images --k8s <版本>` 在 tag 沒發布時會自動做同一件事。`--k8s` 指定的 minor 必須在 `crio` 表裡才建得出來；已經拉下來的 image 不受此限。
 

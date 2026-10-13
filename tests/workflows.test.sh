@@ -18,6 +18,7 @@ assert_contains "$(cat $l3)" "nothing to pull" "L3 asserts the second pull image
 assert_contains "$(cat $l3)" "TK_OFFLINE: \"1\"" "L3 creates with TK_OFFLINE=1"
 assert_contains "$(cat $l3)" "Pulled image" "L3 counts CRI-O pulls in every node"
 assert_contains "$(cat $l3)" "nodes:cni-plugins cni:cli" "L3 pre-installs the CNI plugins and the cilium CLI before going offline"
+assert_contains "$(cat $l3)" '--build-arg CRIO="$crio"' "L3 builds the node image with the CRI-O tag looked up in versions.yaml"
 assert_contains "$(cat $l3)" " helm.cilium.io " "L3 blocks the cilium Helm repository too (the CLI fetches charts it does not embed)"
 r=$(grep -n 'tk8s-offline$/d' $l3 | head -1 | cut -d: -f1); a=$(grep -n 'upload-artifact' $l3 | head -1 | cut -d: -f1)
 if [ -n "$r" ] && [ -n "$a" ] && [ "$r" -lt "$a" ]; then echo "PASS  L3 restores /etc/hosts before uploading logs"; else echo "FAIL  L3 restores /etc/hosts before uploading logs"; FAILURES=$((FAILURES+1)); fi

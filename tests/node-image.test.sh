@@ -22,6 +22,9 @@ assert_contains "$c" "getty.target" "getty masked"
 assert_contains "$c" ": > /etc/machine-id" "machine-id emptied so each node generates its own on first boot"
 assert_contains "$c" "ln -s /etc/machine-id /var/lib/dbus/machine-id" "dbus machine-id is a symlink, not the build-time copy systemd would reuse"
 assert_contains "$c" "STOPSIGNAL SIGRTMIN+3" "systemd's stop signal"
+assert_contains "$c" "ReadKMsg=no" "journald does not read the host's /dev/kmsg (privileged container)"
+assert_contains "$c" "rm -f /root/.crio-install" "the bundle's uninstall manifest is not left in the image"
+assert_eq "" "$(grep -n '^ENV DEBIAN_FRONTEND' $f || true)" "DEBIAN_FRONTEND is a build ARG, not a runtime ENV"
 assert_contains "$c" 'CMD ["/sbin/init"]' "systemd is PID 1"
 # Our files are in the image
 for p in systemd/kubelet.service systemd/kubelet.service.d/10-kubeadm.conf systemd/tk8s-node-init.service sbin/tk8s-node-init registries.conf.d/zz-taroko.conf crio.conf.d/10-taroko.conf crictl.yaml storage.conf; do
@@ -50,6 +53,7 @@ assert_contains "$i" "mount --bind /etc/tk8s/product_uuid /sys/class/dmi/id/prod
 u=$(cat images/node/systemd/tk8s-node-init.service 2>/dev/null)
 assert_contains "$u" "Before=crio.service kubelet.service" "node init runs before crio and kubelet"
 assert_contains "$u" "ExecStart=/usr/local/sbin/tk8s-node-init" "node init unit runs the script"
+assert_contains "$u" "Conflicts=shutdown.target" "node init unit pairs DefaultDependencies=no with the shutdown conflict"
 # Short image names resolve to docker.io, whatever the bundle's registries.conf says
 assert_contains "$(cat images/node/registries.conf.d/zz-taroko.conf 2>/dev/null)" 'unqualified-search-registries = ["docker.io"]' "kubectl run --image=nginx pulls from docker.io"
 # The shared store: nodes mount it where CRI-O's storage.conf lists an additional image store. The

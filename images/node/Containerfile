@@ -7,7 +7,7 @@ ARG CRIO=v0.0.0
 FROM docker.io/library/debian:13-slim
 ARG VER
 ARG CRIO
-ENV DEBIAN_FRONTEND=noninteractive
+ARG DEBIAN_FRONTEND=noninteractive
 
 # OS: systemd (and dbus: CRI-O's systemd cgroup manager asks systemd for cgroups over sd-bus), the
 # tools kubeadm's preflight and the kubelet need, zstd for addons:gvisor's tarball, and what a student
@@ -27,7 +27,7 @@ RUN set -eux; cd /tmp; \
     curl -fsSLO "https://storage.googleapis.com/cri-o/artifacts/cri-o.amd64.${CRIO}.tar.gz.sha256sum"; \
     sha256sum -c "cri-o.amd64.${CRIO}.tar.gz.sha256sum"; \
     tar -xzf "cri-o.amd64.${CRIO}.tar.gz"; \
-    cd cri-o && bash ./install && cd / && rm -rf /tmp/cri-o*; \
+    cd cri-o && bash ./install && cd / && rm -rf /tmp/cri-o* && rm -f /root/.crio-install; \
     ls -l /usr/local/bin/crio /usr/libexec/crio/crun /usr/local/lib/systemd/system/crio.service
 
 # Kubernetes binaries with their published checksums.
@@ -57,6 +57,10 @@ RUN set -eux; pause=$(kubeadm config images list --kubernetes-version "v${VER}" 
     printf '# Written at image build: CRI-O uses the same pause image kubeadm %s lists.\n[crio.image]\npause_image = "%s"\n' "v${VER}" "$pause" \
       > /etc/crio/crio.conf.d/20-pause.conf; \
     cat /etc/crio/crio.conf.d/20-pause.conf
+
+# journald in a privileged container can read the host's /dev/kmsg; without this every node's journal
+# fills with the host's and the other nodes' kernel messages (kind sets the same).
+RUN mkdir -p /etc/systemd/journald.conf.d && printf '[Journal]\nReadKMsg=no\n' > /etc/systemd/journald.conf.d/10-taroko.conf
 
 # inotify limits inside the node container.
 RUN printf 'fs.inotify.max_user_instances=8192\nfs.inotify.max_user_watches=524288\n' > /etc/sysctl.d/99-taroko-inotify.conf
