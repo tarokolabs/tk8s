@@ -8,6 +8,8 @@ tasks:
     desc: Pull the node image of a Kubernetes version, or build it locally when the tag is not published
     vars:
       K8S: '{{ .K8S | default .VERSIONS.kubernetes.default }}'
+      MINOR: '{{ regexReplaceAll "\\.[0-9]+$" .K8S "" }}'
+      CRIO: '{{ if hasKey .VERSIONS.crio .MINOR }}{{ index .VERSIONS.crio .MINOR }}{{ end }}'
       IMAGE: 'ghcr.io/tarokolabs/tk8s/node:v{{ .K8S }}'
     status:
       - sudo podman image exists {{ .IMAGE }}
@@ -15,8 +17,9 @@ tasks:
       - |
         [ "${TK_OFFLINE:-}" != 1 ] || { echo "node image {{ .IMAGE }} is not present and TK_OFFLINE=1 forbids pulling or building it" >&2; exit 1; }
         if sudo podman pull {{ .IMAGE }} >/dev/null 2>&1; then echo "{{ .IMAGE }} pulled"; else
+          [ -n "{{ .CRIO }}" ] || { echo "versions.yaml has no crio entry for Kubernetes minor {{ .MINOR }}; cannot build {{ .IMAGE }}" >&2; exit 1; }
           echo "{{ .IMAGE }} is not published; building locally (the first build takes a few minutes)"
-          sudo podman build --build-arg VER={{ .K8S }} --force-rm -t {{ .IMAGE }} {{ .TK_HOME }}/images/node
+          sudo podman build --build-arg VER={{ .K8S }} --build-arg CRIO={{ .CRIO }} --force-rm -t {{ .IMAGE }} {{ .TK_HOME }}/images/node
         fi
 
   init:

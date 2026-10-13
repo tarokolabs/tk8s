@@ -41,7 +41,10 @@ node)
    shift
    [ "$1" == "" ] && echo "build-images.sh node <K8s版本>..." && exit 1
    for v in "$@"; do
-      build_push "node:v${v}" images/node --build-arg=VER=${v}
+      # CRI-O tag by Kubernetes minor, from the crio table in versions.yaml
+      crio=$(sed -nE "s/^  \"${v%.*}\": *\"([^\"]+)\".*/\1/p" "${TK}/versions.yaml")
+      [ -z "${crio}" ] && echo "versions.yaml has no crio entry for Kubernetes minor ${v%.*}; cannot build node:v${v}" && exit 1
+      build_push "node:v${v}" images/node --build-arg=VER=${v} --build-arg=CRIO=${crio}
    done
    ;;
 *)
