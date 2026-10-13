@@ -20,7 +20,7 @@ export HOME="${HOME:-/tmp}"
   images "$TK_HOME/manifests/metrics-server.${ms#v}.yaml" \
          "$TK_HOME/manifests/local-path-storage.${lp#v}.yaml"
   v verify_busybox; v verify_alpine; v verify_agnhost
-  # The host-side apiserver LB and the cluster DNS run on the host from its own store; images:host copies
-  # them out of the shared store, so they are pulled here like everything else.
-  v haproxy; v coredns
+  # The host-side apiserver LB runs on the host from its own store; images:host copies it out of the
+  # shared store, so it is pulled here like everything else.
+  v haproxy
 } | sort -u

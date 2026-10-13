@@ -9,7 +9,7 @@ cat > "$TMP/clusters/demo/cluster.yaml" <<'YAML'
 metadata: {name: demo}
 spec:
   kubernetes: "1.37.0"
-  network: {index: 0, nodes: 172.22.0.0/24, gateway: 172.22.0.254, dns: 172.22.0.253, lb: 172.22.0.100, pods: 10.244.0.0/21, services: 10.98.0.0/24}
+  network: {index: 0, nodes: 172.22.0.0/24, gateway: 172.22.0.254, lb: 172.22.0.100, pods: 10.244.0.0/21, services: 10.98.0.0/24}
   nodes: [{role: control-plane, name: demo-control-plane, ip: 172.22.0.1, join: true}]
 YAML
 printf '#!/usr/bin/env bash\nexec "$@"\n' > "$STUB/sudo"

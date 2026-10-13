@@ -104,6 +104,8 @@ tasks:
         k8s=$(sed -nE 's/^ *kubernetes: *"?([0-9.]+)"?.*/\1/p' {{ .STATE_DIR }}/cluster.yaml | head -1)
         task --silent -d {{ .TK_HOME }} images:ensure K8S=$k8s
       - task --silent -d {{ .TK_HOME }} nodes:render CLUSTER={{ .CLUSTER }}
+      # The LB's backend list came from cluster.yaml: a graceful reload (master-worker SIGUSR2) picks the new one up.
+      - sudo podman kill --signal USR2 {{ .CLUSTER }}-lb >/dev/null
       - sudo systemctl daemon-reload && sudo systemctl start {{ .NODE }}.service
       - |
         for i in $(seq 1 90); do s=$(sudo podman exec {{ .NODE }} systemctl is-system-running 2>/dev/null || true); case "$s" in running|degraded) break;; esac; sleep 2; done
@@ -183,6 +185,7 @@ tasks:
         done
         step "update cluster.yaml" task --silent -d {{ .TK_HOME }} node:remove-entry CLUSTER={{ .CLUSTER }} NODE={{ .NODE }}
         step "re-render target" task --silent -d {{ .TK_HOME }} nodes:render CLUSTER={{ .CLUSTER }}
+        step "reload the apiserver LB" sudo podman kill --signal USR2 {{ .CLUSTER }}-lb
         step "daemon-reload" sudo systemctl daemon-reload
         sudo systemctl reset-failed "{{ .NODE }}.service" 2>/dev/null || true
         [ $errs -eq 0 ] && echo "node {{ .NODE }} removed" || { echo "node {{ .NODE }} removed with $errs failed step(s)" >&2; exit 1; }

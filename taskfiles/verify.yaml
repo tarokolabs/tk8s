@@ -158,7 +158,7 @@ tasks:
         # CSV (column 18 = status) says how many control planes it sees UP.
         LB={{ .DEF.spec.network.lb }}
         joined_cp={{ $n := 0 }}{{ range .DEF.spec.nodes }}{{ if and (eq .role "control-plane") (ne (toString .join) "false") }}{{ $n = add $n 1 }}{{ end }}{{ end }}{{ $n }}
-        stats=$(sudo podman exec {{ .CLUSTER }}-lb bash -c 'exec 3<>/dev/tcp/127.0.0.1/8404; printf "GET /stats;csv HTTP/1.0\r\n\r\n" >&3; cat <&3' 2>/dev/null | grep '^control-planes,cp')
+        stats=$(sudo podman exec {{ .CLUSTER }}-lb bash -c 'exec 3<>/dev/tcp/127.0.0.1/8404; printf "GET /stats;csv HTTP/1.0\r\n\r\n" >&3; cat <&3' 2>/dev/null | awk -F, '$1=="control-planes" && $2!="BACKEND"')
         up=$(echo "$stats" | awk -F, '$18 ~ /^UP/' | grep -c . || true)   # "UP 1/2" (rise window) serves too
         lb_ready=$(curl -sk --max-time 5 https://$LB:6443/readyz 2>/dev/null | head -c 40)
         if [ "$lb_ready" = ok ] && [ "$up" = "$joined_cp" ]; then
