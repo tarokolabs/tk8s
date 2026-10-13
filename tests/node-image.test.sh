@@ -20,10 +20,11 @@ assert_contains "$c" "systemctl enable crio.service kubelet.service tk8s-node-in
 assert_contains "$c" "systemctl mask systemd-udevd.service" "udev masked"
 assert_contains "$c" "getty.target" "getty masked"
 assert_contains "$c" ": > /etc/machine-id" "machine-id emptied so each node generates its own on first boot"
+assert_contains "$c" "ln -s /etc/machine-id /var/lib/dbus/machine-id" "dbus machine-id is a symlink, not the build-time copy systemd would reuse"
 assert_contains "$c" "STOPSIGNAL SIGRTMIN+3" "systemd's stop signal"
 assert_contains "$c" 'CMD ["/sbin/init"]' "systemd is PID 1"
 # Our files are in the image
-for p in systemd/kubelet.service systemd/kubelet.service.d/10-kubeadm.conf systemd/tk8s-node-init.service sbin/tk8s-node-init registries.conf.d/20-taroko.conf crio.conf.d/10-taroko.conf crictl.yaml storage.conf; do
+for p in systemd/kubelet.service systemd/kubelet.service.d/10-kubeadm.conf systemd/tk8s-node-init.service sbin/tk8s-node-init registries.conf.d/zz-taroko.conf crio.conf.d/10-taroko.conf crictl.yaml storage.conf; do
   if [ -f "images/node/$p" ]; then echo "PASS  images/node/$p exists"; else echo "FAIL  images/node/$p exists"; FAILURES=$((FAILURES+1)); fi
 done
 assert_contains "$c" "COPY systemd/kubelet.service /etc/systemd/system/kubelet.service" "kubelet unit copied"
@@ -50,7 +51,7 @@ u=$(cat images/node/systemd/tk8s-node-init.service 2>/dev/null)
 assert_contains "$u" "Before=crio.service kubelet.service" "node init runs before crio and kubelet"
 assert_contains "$u" "ExecStart=/usr/local/sbin/tk8s-node-init" "node init unit runs the script"
 # Short image names resolve to docker.io, whatever the bundle's registries.conf says
-assert_contains "$(cat images/node/registries.conf.d/20-taroko.conf 2>/dev/null)" 'unqualified-search-registries = ["docker.io"]' "kubectl run --image=nginx pulls from docker.io"
+assert_contains "$(cat images/node/registries.conf.d/zz-taroko.conf 2>/dev/null)" 'unqualified-search-registries = ["docker.io"]' "kubectl run --image=nginx pulls from docker.io"
 # The shared store: nodes mount it where CRI-O's storage.conf lists an additional image store. The
 # mount point must exist in the image (containers/storage stats it; empty is fine, missing is not).
 s=images/node/storage.conf
@@ -65,6 +66,7 @@ assert_contains "$c" 'pause_image = ' "CRI-O's pause_image is set to kubeadm's p
 assert_eq "" "$(grep -n 'haproxy\|apiserver-lb' $f || true)" "node image has no haproxy or apiserver-lb"
 # Teaching tools (no yq: not in Debian's apt)
 assert_contains "$c" "nano vim iputils-ping less jq tcpdump strace" "editor and debugging tools"
+assert_contains "$c" " zstd " "zstd in the image (addons:gvisor unpacks gvisor.tar.zstd inside the node)"
 assert_eq "" "$(grep -nw 'yq' $f || true)" "no yq"
 # The CRI-O drop-in's comments describe the bundle, not a deb
 assert_eq "" "$(grep -n '套件\|kcn' images/node/crio.conf.d/10-taroko.conf || true)" "10-taroko.conf no longer talks about a package or kcn"
