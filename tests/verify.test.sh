@@ -14,7 +14,7 @@ spec:
   datapath: auto
   datapath_resolved: veth
   gvisor: false
-  network: {index: 0, nodes: 172.22.0.0/24, gateway: 172.22.0.254, dns: 172.22.0.253, lb: 172.22.0.100, pods: 10.244.0.0/21, services: 10.98.0.0/24, lb_range: 172.22.0.200-172.22.0.219}
+  network: {index: 0, nodes: 172.22.0.0/24, gateway: 172.22.0.254, lb: 172.22.0.100, pods: 10.244.0.0/21, services: 10.98.0.0/24, lb_range: 172.22.0.200-172.22.0.219}
   nodes:
     - {role: control-plane, name: demo-control-plane, ip: 172.22.0.1, cpu: 2, memory: 4g, join: true}
     - {role: worker, name: demo-worker1, ip: 172.22.0.2, cpu: 2, memory: 4g, join: true}

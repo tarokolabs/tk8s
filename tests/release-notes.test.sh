@@ -19,6 +19,5 @@ assert_contains "$out" "local-path-provisioner $(v local_path_provisioner)" "loc
 assert_contains "$out" "$d、$p" "both supported kubernetes versions"
 if [[ "$out" == *libexec* ]]; then echo "FAIL  no v1 paths"; FAILURES=$((FAILURES+1)); else echo "PASS  no v1 paths"; fi
 rm -rf "$TMP"; assert_contains "$out" "$(v haproxy)" "release notes: apiserver LB pin"
-assert_contains "$out" "$(v coredns)" "release notes: cluster DNS pin"
 if [[ "$out" == *"worker 內"* ]] || [[ "$out" == *"kube-vip"* ]]; then echo "FAIL  release notes describe neither a worker-side proxy nor kube-vip"; FAILURES=$((FAILURES+1)); else echo "PASS  release notes describe neither a worker-side proxy nor kube-vip"; fi
 finish

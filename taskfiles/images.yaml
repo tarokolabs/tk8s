@@ -107,7 +107,7 @@ tasks:
         echo "images {{ .K8S }}: $present present, $pulled pulled in $(( $(date +%s) - start ))s ({{ .IMAGES_DIR }}/{{ .K8S }})"
 
   host:
-    desc: Put the cluster DNS and apiserver LB images into the host's store (copied from the shared store)
+    desc: Put the apiserver LB image into the host's store (copied from the shared store)
     silent: true
     vars:
       K8S: '{{ .K8S | default .VERSIONS.kubernetes.default }}'
@@ -115,7 +115,7 @@ tasks:
     cmds:
       - |
         set -eo pipefail
-        for img in {{ .VERSIONS.haproxy }} {{ .VERSIONS.coredns }}; do
+        for img in {{ .VERSIONS.haproxy }}; do
           sudo podman image exists "$img" && continue
           [ -f {{ .CONF }} ] && sudo env CONTAINERS_STORAGE_CONF={{ .CONF }} podman image exists "$img" || {
             echo "images: $img is not in the shared store {{ .IMAGES_DIR }}/{{ .K8S }}; run tkctl pull images --k8s {{ .K8S }}" >&2; exit 1; }

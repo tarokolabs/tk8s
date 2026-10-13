@@ -20,7 +20,6 @@ spec:
     lb_range: 172.22.3.200-172.22.3.219
     pods: 10.244.24.0/21
     services: 10.98.3.0/24
-    dns: 172.22.3.253
     lb: 172.22.3.100
   nodes:
     - role: control-plane
@@ -51,7 +50,7 @@ assert_contains "$out" "Addons:" "describe has an Addons section"
 assert_contains "$out" "unavailable (cluster is not running)" "addon versions are skipped on a stopped cluster instead of timing out"
 assert_contains "$out" "Access:" "describe has an Access section"
 assert_contains "$out" "lb 172.22.3.100" "describe shows the apiserver LB address"
-assert_contains "$out" "dns 172.22.3.253" "describe shows the cluster DNS address"
+if [[ "$out" == *"dns 172"* ]]; then echo "FAIL  describe shows no cluster DNS (there is none)"; FAILURES=$((FAILURES+1)); else echo "PASS  describe shows no cluster DNS (there is none)"; fi
 assert_contains "$out" "apiserver:  https://172.22.3.100:6443" "describe shows the endpoint kubectl uses"
 assert_contains "$out" "ip route add 172.22.3.0/24 via " "describe prints the route another machine needs to reach LB IPs and ClusterIPs"
 # Running cluster: addon versions come from kubectl with the cluster's kubeconfig; kubectl errors must not abort describe.

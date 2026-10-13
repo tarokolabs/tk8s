@@ -69,7 +69,7 @@ STUB="$TMP/stub"; mkdir -p "$STUB"; export STUB STUB_LOG="$TMP/stub.log"; : > "$
 printf '#!/usr/bin/env bash\nexec "$@"\n' > "$STUB/sudo"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/systemctl"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/sleep"
-printf '#!/usr/bin/env bash\ncase "$*" in *is-system-running*) echo running;; esac; exit 0\n' > "$STUB/podman"
+printf '#!/usr/bin/env bash\necho "podman $*" >> "$STUB_LOG"; case "$*" in *is-system-running*) echo running;; esac; exit 0\n' > "$STUB/podman"
 REAL_TASK=$(command -v task)
 cat > "$STUB/task" <<SH
 #!/usr/bin/env bash
@@ -82,6 +82,9 @@ assert_eq "0" "$rc" "node:add (stubbed host) exits 0"
 assert_contains "$(cat "$STUB_LOG")" "addons:runtimeclass CLUSTER=demo" "node:add installs crun where the runtime needs it"
 # The new node mounts the shared store of the cluster's version; fill it first so the node pulls nothing.
 assert_contains "$(cat "$STUB_LOG")" "images:ensure K8S=1.37.0" "node:add fills the shared image store"
+# The LB's backend list is rendered from cluster.yaml; a changed list is a graceful reload (master-worker SIGUSR2).
+assert_contains "$(cat "$STUB_LOG")" "podman kill --signal USR2 demo-lb" "node:add reloads the LB after re-rendering its config"
+if [ "$(grep -n 'nodes:render' "$STUB_LOG" | head -1 | cut -d: -f1)" -lt "$(grep -n 'kill --signal USR2' "$STUB_LOG" | head -1 | cut -d: -f1)" ]; then echo "PASS  reload comes after the render"; else echo "FAIL  reload comes after the render"; FAILURES=$((FAILURES+1)); fi
 if [ "$(grep -n 'images:ensure' "$STUB_LOG" | head -1 | cut -d: -f1)" -lt "$(grep -n 'nodes:render' "$STUB_LOG" | head -1 | cut -d: -f1)" ]; then echo "PASS  store filled before the node is rendered and started"; else echo "FAIL  store filled before the node is rendered and started"; FAILURES=$((FAILURES+1)); fi
 assert_contains "$(cat "$STUB_LOG")" "addons:gvisor CLUSTER=demo" "node:add installs gVisor on --gvisor clusters"
 if [ "$(grep -n 'nodes:render' "$STUB_LOG" | head -1 | cut -d: -f1)" -lt "$(grep -n 'addons:runtimeclass' "$STUB_LOG" | head -1 | cut -d: -f1)" ]; then echo "PASS  addons run after the node is up"; else echo "FAIL  addons run after the node is up"; FAILURES=$((FAILURES+1)); fi

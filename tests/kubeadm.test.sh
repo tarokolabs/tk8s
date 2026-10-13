@@ -6,7 +6,7 @@ cat > "$TMP/clusters/demo/cluster.yaml" <<'YAML'
 metadata: {name: demo}
 spec:
   kubernetes: "1.37.0"
-  network: {index: 3, nodes: 172.22.3.0/24, gateway: 172.22.3.254, pods: 10.244.24.0/21, services: 10.98.3.0/24, dns: 172.22.3.253, lb: 172.22.3.100}
+  network: {index: 3, nodes: 172.22.3.0/24, gateway: 172.22.3.254, pods: 10.244.24.0/21, services: 10.98.3.0/24, lb: 172.22.3.100}
   nodes:
     - {role: control-plane, name: demo-control-plane, ip: 172.22.3.1, join: true}
     - {role: control-plane, name: demo-control-plane2, ip: 172.22.3.2, join: true}

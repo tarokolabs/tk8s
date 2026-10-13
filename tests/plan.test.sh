@@ -24,7 +24,6 @@ assert_contains "$out" "pods: 10.244.8.0/21" "pod subnet = 10.244.(8N).0/21"
 assert_contains "$out" "services: 10.98.1.0/24" "service subnet from index"
 assert_contains "$out" "gateway: 172.22.1.254" "gateway .254"
 assert_contains "$out" "lb_range: 172.22.1.200-172.22.1.219" "LB-IPAM range"
-assert_contains "$out" "dns: 172.22.1.253" "cluster DNS address (single control plane too)"
 assert_contains "$out" "lb: 172.22.1.100" "apiserver LB address (single control plane too)"
 assert_contains "$out" "name: demo-control-plane" "first control plane name"
 assert_contains "$out" "name: demo-worker2" "workers expanded from count"
@@ -35,9 +34,8 @@ assert_contains "$out" "join: true" "join defaults to true"
 # HA
 sed -i.bak 's/role: control-plane, cpu: 2/role: control-plane, count: 3, cpu: 2/' "$TMP/in.yaml"
 out=$(task plan:resolve CLUSTER_FILE="$TMP/in.yaml" DRY_RUN=true 2>&1)
-assert_contains "$out" "dns: 172.22.1.253" "cluster DNS address (HA too)"
 assert_contains "$out" "lb: 172.22.1.100" "apiserver LB address (HA too)"
-if [[ "$out" == *"vip:"* ]]; then echo "FAIL  no vip field (kube-vip is gone)"; FAILURES=$((FAILURES+1)); else echo "PASS  no vip field (kube-vip is gone)"; fi
+if [[ "$out" == *"vip:"* ]] || [[ "$out" == *"dns:"* ]]; then echo "FAIL  no vip field (kube-vip is gone)"; FAILURES=$((FAILURES+1)); else echo "PASS  no vip field (kube-vip is gone)"; fi
 assert_contains "$out" "name: demo-control-plane3" "third control plane name"
 # deferred join carried per node
 cat > "$TMP/in3.yaml" <<'YAML'
@@ -102,11 +100,10 @@ assert_contains "$out" "spec.network.vip is no longer supported" "vip refusal na
 cat > "$TMP/pin.yaml" <<'YAML'
 metadata: {name: pin}
 spec:
-  network: {nodes: 172.22.9.0/24, dns: 172.22.9.250, lb: 172.22.9.240}
+  network: {nodes: 172.22.9.0/24, lb: 172.22.9.240}
   nodes: [{role: control-plane}]
 YAML
 out=$(task plan:resolve CLUSTER_FILE="$TMP/pin.yaml" DRY_RUN=true 2>&1)
-assert_contains "$out" "dns: 172.22.9.250" "explicit dns address kept"
 assert_contains "$out" "lb: 172.22.9.240" "explicit lb address kept"
 # Custom addresses live in .220-.253 (nodes take .1-.199, the LB-IPAM pool .200-.219, the gateway .254).
 cat > "$TMP/clash.yaml" <<'YAML'
@@ -118,14 +115,6 @@ YAML
 out=$(task plan:resolve CLUSTER_FILE="$TMP/clash.yaml" DRY_RUN=true 2>&1); rc=$?
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "an lb address inside the node range is refused"
 assert_contains "$out" "220" "refusal names the allowed range"
-cat > "$TMP/same.yaml" <<'YAML'
-metadata: {name: same}
-spec:
-  network: {nodes: 172.22.9.0/24, dns: 172.22.9.230, lb: 172.22.9.230}
-  nodes: [{role: control-plane}]
-YAML
-out=$(task plan:resolve CLUSTER_FILE="$TMP/same.yaml" DRY_RUN=true 2>&1); rc=$?
-assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "dns and lb on the same address are refused"
 # Node allocation never hands out the LB's default address.
 cat > "$TMP/big.yaml" <<'YAML'
 metadata: {name: big}

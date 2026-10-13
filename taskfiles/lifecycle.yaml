@@ -50,7 +50,7 @@ tasks:
         echo "Name:        {{ .CLUSTER }}"
         echo "State:       $state"
         echo "Kubernetes:  {{ .DEF.spec.kubernetes }}   cni: {{ .DEF.spec.cni }}   datapath: {{ .DEF.spec.datapath_resolved | default .DEF.spec.datapath }}   gvisor: {{ .DEF.spec.gvisor }}"
-        echo "Network:     nodes {{ .DEF.spec.network.nodes }} (gateway {{ .DEF.spec.network.gateway }})  pods {{ .DEF.spec.network.pods }}  services {{ .DEF.spec.network.services }}  lb-ipam {{ .DEF.spec.network.lb_range }}  lb {{ .DEF.spec.network.lb }}  dns {{ .DEF.spec.network.dns }}"
+        echo "Network:     nodes {{ .DEF.spec.network.nodes }} (gateway {{ .DEF.spec.network.gateway }})  pods {{ .DEF.spec.network.pods }}  services {{ .DEF.spec.network.services }}  lb-ipam {{ .DEF.spec.network.lb_range }}  lb {{ .DEF.spec.network.lb }}"
         echo "Nodes:"
         printf '  %-24s %-14s %-14s %-14s %s\n' NAME ROLE IP RESOURCES JOIN
         {{ range .DEF.spec.nodes }}
