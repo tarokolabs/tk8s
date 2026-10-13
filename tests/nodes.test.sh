@@ -79,6 +79,8 @@ up=$(sed -n '/^  up:/,/^  [a-z-]*:$/p' taskfiles/nodes.yaml)
 assert_contains "$up" "images:host K8S=" "nodes:up calls images:host"
 if [ "$(echo "$up" | grep -n 'images:host' | head -1 | cut -d: -f1)" -lt "$(echo "$up" | grep -n 'enable --now' | head -1 | cut -d: -f1)" ]; then echo "PASS  images are in the host store before the target starts"; else echo "FAIL  images are in the host store before the target starts"; FAILURES=$((FAILURES+1)); fi
 assert_contains "$up" "control-planes," "nodes:up waits until the LB lists the control planes"
+assert_eq "" "$(echo "$up" | grep -o '}}-control-plane' | head -1)" "nodes:up counts backends by the stats columns, not by a node name pattern"
+assert_contains "$up" '$2!="BACKEND"' "nodes:up skips the backend summary row the way verify does"
 if [[ "$up" == *"MAINT (resolution)"* ]]; then echo "FAIL  nodes:up no longer waits on DNS resolution"; FAILURES=$((FAILURES+1)); else echo "PASS  nodes:up no longer waits on DNS resolution"; fi
 cp_unit=$(echo "$out" | sed -n '/demo-cp-1.container/,/demo-worker-1.container/p')
 if [[ "$cp_unit" == *"After=demo-cp-1.service"* ]]; then echo "FAIL  control plane must not wait for itself"; FAILURES=$((FAILURES+1)); else echo "PASS  control plane has no After on itself"; fi

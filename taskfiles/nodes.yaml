@@ -251,7 +251,7 @@ tasks:
         # backends stay DOWN until kubeadm brings an apiserver up.
         want={{ $n := 0 }}{{ range .NODES }}{{ if eq .role "control-plane" }}{{ $n = add $n 1 }}{{ end }}{{ end }}{{ $n }}
         for i in $(seq 1 30); do
-          got=$(sudo podman exec {{ .CLUSTER }}-lb bash -c 'exec 3<>/dev/tcp/127.0.0.1/8404; printf "GET /stats;csv HTTP/1.0\r\n\r\n" >&3; cat <&3' 2>/dev/null | grep -c '^control-planes,{{ .CLUSTER }}-control-plane' || true)
+          got=$(sudo podman exec {{ .CLUSTER }}-lb bash -c 'exec 3<>/dev/tcp/127.0.0.1/8404; printf "GET /stats;csv HTTP/1.0\r\n\r\n" >&3; cat <&3' 2>/dev/null | awk -F, '$1=="control-planes" && $2!="BACKEND"' | grep -c . || true)
           [ "${got:-0}" -ge "$want" ] && { echo "{{ .CLUSTER }}-lb: $got control plane backend(s) at {{ .DEF.spec.network.lb }}"; break; }
           [ $i -eq 30 ] && { echo "{{ .CLUSTER }}-lb lists ${got:-0} of $want control planes within 60 s (podman logs {{ .CLUSTER }}-lb)" >&2; exit 1; }
           sleep 2
