@@ -1,0 +1,8 @@
+#!/bin/sh
+# What kind's entrypoint did for a node container and Podman does not: volume mounts made by the
+# kubelet must propagate (rshared), and every node needs its own product_uuid (containers on one
+# host all see the host's DMI). The uuid lives in /etc (a persisted volume), so it survives restarts.
+set -e
+mount --make-rshared /
+if [ ! -s /etc/tk8s/product_uuid ]; then mkdir -p /etc/tk8s; cat /proc/sys/kernel/random/uuid > /etc/tk8s/product_uuid; fi
+if [ -f /sys/class/dmi/id/product_uuid ]; then mount --bind /etc/tk8s/product_uuid /sys/class/dmi/id/product_uuid; fi

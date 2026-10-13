@@ -1,62 +1,77 @@
+# tk8s node image: Debian 13 with systemd as PID 1, CRI-O from its static bundle and the Kubernetes
+# binaries from dl.k8s.io. Every artifact is pinned and checked against its published checksum, so
+# the same VER and CRIO always build the same image. Nothing inherited from another node image: one
+# runtime (CRI-O), no preloaded container images (nodes get those from the shared image store).
 ARG VER=0.0
-FROM docker.io/kindest/node:v${VER}
-
-# FROM 之後要重新宣告才拿得到 build-arg
+ARG CRIO=v0.0.0
+FROM docker.io/library/debian:13-slim
 ARG VER
-ARG CRIO_CHANNEL=stable
-# 2026-07 起 pkgs.k8s.io 的 addons:/cri-o 路徑回 403（2026-08 複驗仍然如此），
-# CRI-O deb 目前只剩上游 openSUSE Build Service 這個來源。做成 build-arg，
-# 日後 pkgs.k8s.io 恢復時以 --build-arg CRIO_REPO=https://pkgs.k8s.io/addons:/cri-o 切回
-ARG CRIO_REPO=https://download.opensuse.org/repositories/isv:/cri-o
+ARG CRIO
+ENV DEBIAN_FRONTEND=noninteractive
 
-# 與 taroko image 相同的除錯工具（gpg 是加 CRI-O repo 用的）
-RUN apt-get update && apt-get upgrade -y
-RUN apt-get install -y nano net-tools curl wget iputils-ping jq gpg zstd
-RUN rm /kind/manifests/*.yaml
+# OS: systemd (and dbus: CRI-O's systemd cgroup manager asks systemd for cgroups over sd-bus), the
+# tools kubeadm's preflight and the kubelet need, and what a student needs inside a node.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      systemd systemd-sysv dbus ca-certificates curl iproute2 iptables nftables conntrack ethtool socat util-linux kmod procps \
+      nano vim iputils-ping less jq tcpdump strace \
+    && rm -rf /var/lib/apt/lists/*
 
-# CRI-O 的 minor 版本必須對齊 K8s minor：VER=1.35.5 -> v1.35
-# --force-confnew：cri-o 套件的 /etc/crictl.yaml 與 kind image 內建同名檔衝突，
-# 不加會卡在 dpkg 的 conffile 互動提示（build 環境無 stdin 直接失敗）
-RUN set -eux; \
-    CRIO_URL="${CRIO_REPO}:/${CRIO_CHANNEL}:/v${VER%.*}/deb"; \
-    mkdir -p /etc/apt/keyrings; \
-    curl -fsSL "${CRIO_URL}/Release.key" \
-      | gpg --dearmor -o /etc/apt/keyrings/cri-o-apt-keyring.gpg; \
-    echo "deb [signed-by=/etc/apt/keyrings/cri-o-apt-keyring.gpg] ${CRIO_URL}/ /" \
-      > /etc/apt/sources.list.d/cri-o.list; \
-    apt-get update; \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y \
-      -o Dpkg::Options::=--force-confnew cri-o; \
-    rm -rf /var/lib/apt/lists/*
+# CRI-O static bundle: one tarball, one checksum, every tag stays downloadable (the GitHub release
+# has no assets; the bundle is at storage.googleapis.com). Its install script puts crio, crictl and
+# pinns in /usr/local/bin, crun/conmon/runc in /usr/libexec/crio, crio.service in
+# /usr/local/lib/systemd/system, policy.json and crio.conf.d/10-crio.conf in /etc/crio, and
+# registries.conf in /etc/containers/registries.conf.d. Its shebang lacks the "!", hence bash.
+RUN set -eux; cd /tmp; \
+    curl -fsSLO "https://storage.googleapis.com/cri-o/artifacts/cri-o.amd64.${CRIO}.tar.gz"; \
+    curl -fsSLO "https://storage.googleapis.com/cri-o/artifacts/cri-o.amd64.${CRIO}.tar.gz.sha256sum"; \
+    sha256sum -c "cri-o.amd64.${CRIO}.tar.gz.sha256sum"; \
+    tar -xzf "cri-o.amd64.${CRIO}.tar.gz"; \
+    cd cri-o && bash ./install && cd / && rm -rf /tmp/cri-o*; \
+    ls -l /usr/local/bin/crio /usr/libexec/crio/crun /usr/local/lib/systemd/system/crio.service
 
-# gVisor is not baked in; addons:gvisor installs it into the node's persisted /usr/local/bin
-# when the cluster is created with --gvisor.
+# Kubernetes binaries with their published checksums.
+RUN set -eux; cd /usr/local/bin; for b in kubeadm kubelet kubectl; do \
+      curl -fsSLO "https://dl.k8s.io/release/v${VER}/bin/linux/amd64/${b}"; \
+      echo "$(curl -fsSL "https://dl.k8s.io/release/v${VER}/bin/linux/amd64/${b}.sha256")  ${b}" | sha256sum -c -; \
+      chmod 755 "${b}"; done
 
-# 節點 container 內 inotify 上限
-RUN printf 'fs.inotify.max_user_instances=8192\nfs.inotify.max_user_watches=524288\n' \
-      > /etc/sysctl.d/99-taroko-inotify.conf
+# kubelet: the standard kubeadm unit and drop-in; --runtime-cgroups points at crio.service.
+COPY systemd/kubelet.service /etc/systemd/system/kubelet.service
+COPY systemd/kubelet.service.d/ /etc/systemd/system/kubelet.service.d/
+RUN echo 'KUBELET_EXTRA_ARGS=--runtime-cgroups=/system.slice/crio.service' > /etc/default/kubelet
 
+# What kind's entrypoint did at start: rshared root and a unique product_uuid.
+COPY systemd/tk8s-node-init.service /etc/systemd/system/tk8s-node-init.service
+COPY sbin/tk8s-node-init /usr/local/sbin/tk8s-node-init
+
+# CRI-O and container config of the platform.
 COPY crio.conf.d/ /etc/crio/crio.conf.d/
+COPY registries.conf.d/ /etc/containers/registries.conf.d/
 COPY crictl.yaml /etc/crictl.yaml
+COPY storage.conf /etc/containers/storage.conf
 
-# CRI-O 與 kubeadm 必須用同一個 sandbox（pause）image。CRI-O 內建的預設（1.36 是 pause:3.10.1）
-# 會跟 kubeadm 列的（1.36.4 是 3.10.2）漂移；共用 image store 只有 kubeadm 列的那個，離線時
-# CRI-O 拉不到自己的預設就建不出任何 pod sandbox。build 時從 kubeadm 讀，寫進獨立的 drop-in。
-RUN set -eux; \
-    pause=$(kubeadm config images list --kubernetes-version "v${VER}" | grep '/pause:'); \
+# CRI-O and kubeadm must use the same sandbox (pause) image: the shared store only holds the one
+# kubeadm lists, and CRI-O's built-in default drifts from it. Read it from kubeadm at build time.
+RUN set -eux; pause=$(kubeadm config images list --kubernetes-version "v${VER}" | grep '/pause:'); \
     printf '# Written at image build: CRI-O uses the same pause image kubeadm %s lists.\n[crio.image]\npause_image = "%s"\n' "v${VER}" "$pause" \
       > /etc/crio/crio.conf.d/20-pause.conf; \
     cat /etc/crio/crio.conf.d/20-pause.conf
-COPY storage.conf /etc/containers/storage.conf
 
-# 共用唯讀 image store 的掛載點（與主 store /var/lib/containers/storage 並排）。目錄必須先存在：
-# 沒掛任何東西時它是空目錄，CRI-O 照常啟動（退化成沒有共用 store）；目錄不存在的話
-# containers/storage 會報 can't stat imageStore dir，crio 起不來。
+# inotify limits inside the node container.
+RUN printf 'fs.inotify.max_user_instances=8192\nfs.inotify.max_user_watches=524288\n' > /etc/sysctl.d/99-taroko-inotify.conf
+
+# Mount point of the shared read-only image store (next to the main store /var/lib/containers/storage).
+# It must exist: empty is fine (CRI-O starts without a shared store), missing makes crio fail to start.
 RUN mkdir -p /var/lib/containers/shared
 
-# 換掉 CRI：關閉 containerd，改由 crio 提供 CRI socket。kind 在 /etc/default/kubelet 把 kubelet 的
-# --runtime-cgroups 指向 containerd 的 cgroup；跟著換成 crio 的，否則 kubelet 每幾秒就報
-# "Failed to get system container stats"。
-RUN systemctl disable containerd.service && \
-    systemctl enable crio.service && \
-    sed -i 's#/system.slice/containerd.service#/system.slice/crio.service#' /etc/default/kubelet
+# systemd in a container: our units on, hardware and host-only units off.
+RUN systemctl enable crio.service kubelet.service tk8s-node-init.service && \
+    systemctl mask systemd-udevd.service systemd-udevd-kernel.socket systemd-udevd-control.socket \
+      getty.target console-getty.service apt-daily.timer apt-daily-upgrade.timer e2scrub_all.timer fstrim.timer
+
+# An empty machine-id makes systemd generate one on the first boot and persist it in the node's /etc
+# volume: nodes must not share the one baked in at build time.
+RUN : > /etc/machine-id
+
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]
