@@ -12,7 +12,7 @@
 
 | 元件 | 說明 |
 |---|---|
-| Kubernetes | kubeadm 建立，預設 **1.37.0**，次新 1.36.4（見 `versions.yaml`） |
+| Kubernetes | kubeadm 建立，預設 **1.37.1**，次新 1.36.5（見 `versions.yaml`） |
 | Container runtime | **CRI-O**（版本對齊 K8s minor）；只有一種節點 image |
 | CNI | **cilium** 1.20.2，kube-proxy replacement；datapath 預設在核心 ≥ 6.8 用 netkit，`--datapath veth` 可切 |
 | 負載平衡 | cilium LB-IPAM 加 L2 announcement，LoadBalancer IP 從節點網段的 `.200`–`.219` 配發 |
@@ -120,7 +120,7 @@ kind: Cluster
 metadata:
   name: tkdt
 spec:
-  kubernetes: "1.37.0"
+  kubernetes: "1.37.1"
   cni: cilium              # cilium | canal
   datapath: auto           # auto | netkit | veth
   gvisor: false

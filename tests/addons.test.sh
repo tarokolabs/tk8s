@@ -9,7 +9,7 @@ fixture() {  # gvisor
   cat > "$TMP/clusters/demo/cluster.yaml" <<YAML
 metadata: {name: demo}
 spec:
-  kubernetes: "1.37.0"
+  kubernetes: "1.37.1"
   cni: cilium
   datapath: veth
   gvisor: $1

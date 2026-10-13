@@ -5,7 +5,7 @@ mkdir -p "$TMP/clusters/demo"
 cat > "$TMP/clusters/demo/cluster.yaml" <<'YAML'
 metadata: {name: demo}
 spec:
-  kubernetes: "1.37.0"
+  kubernetes: "1.37.1"
   network: {index: 3, nodes: 172.22.3.0/24, gateway: 172.22.3.254, pods: 10.244.24.0/21, services: 10.98.3.0/24, lb: 172.22.3.100}
   nodes:
     - {role: control-plane, name: demo-control-plane, ip: 172.22.3.1, join: true}
@@ -14,7 +14,7 @@ spec:
     - {role: worker, name: demo-worker1, ip: 172.22.3.4, join: true}
 YAML
 out=$(task kubeadm:render CLUSTER=demo DRY_RUN=true 2>&1)
-assert_contains "$out" "kubernetesVersion: 1.37.0" "k8s version"
+assert_contains "$out" "kubernetesVersion: 1.37.1" "k8s version"
 assert_contains "$out" "advertiseAddress: 172.22.3.1" "first control plane ip"
 assert_contains "$out" "criSocket: unix:///var/run/crio/crio.sock" "CRI-O socket"
 assert_contains "$out" 'controlPlaneEndpoint: "api.demo.k8s:6443"' "controlPlaneEndpoint is the cluster DNS name"

@@ -8,7 +8,7 @@ kind: Cluster
 metadata:
   name: demo
 spec:
-  kubernetes: "1.37.0"
+  kubernetes: "1.37.1"
   cni: cilium
   datapath: auto
   datapath_resolved: netkit

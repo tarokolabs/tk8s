@@ -36,7 +36,7 @@ case "$*" in
   *"get ciliumloadbalancerippool"*) [ -f "$STUB/pool-exists" ] ;;
   *"get secret"*) [ -f "$STUB/ds-exists" ] && echo "sh.helm.release.v1.cilium.v1 helm.sh/release.v1 1 1m"; exit 0 ;;
   *"wait gatewayclass"*) [ ! -f "$STUB/gw-fail" ] ;;
-  *"get nodes"*) if [ -f "$STUB/nodes-notready" ]; then echo "demo-worker1 NotReady <none> 1m v1.37.0"; fi; echo "demo-control-plane Ready control-plane 1m v1.37.0" ;;
+  *"get nodes"*) if [ -f "$STUB/nodes-notready" ]; then echo "demo-worker1 NotReady <none> 1m v1.37.1"; fi; echo "demo-control-plane Ready control-plane 1m v1.37.1" ;;
   *) echo "kubectl $*" >> "$STUB_LOG"; exit 0 ;;
 esac
 SH

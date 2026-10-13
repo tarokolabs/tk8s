@@ -28,7 +28,7 @@ assert_contains "$out" "lb: 172.22.1.100" "apiserver LB address (single control 
 assert_contains "$out" "name: demo-control-plane" "first control plane name"
 assert_contains "$out" "name: demo-worker2" "workers expanded from count"
 assert_contains "$out" "ip: 172.22.1.3" "third node ip"
-assert_contains "$out" 'kubernetes: "1.37.0"' "default kubernetes version filled in"
+assert_contains "$out" 'kubernetes: "1.37.1"' "default kubernetes version filled in"
 if [[ "$out" == *"runtime:"* ]]; then echo "FAIL  no runtime field (CRI-O only)"; FAILURES=$((FAILURES+1)); else echo "PASS  no runtime field (CRI-O only)"; fi
 assert_contains "$out" "join: true" "join defaults to true"
 # HA

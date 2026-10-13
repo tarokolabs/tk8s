@@ -32,4 +32,15 @@ assert_contains "$(cat scripts/vendor-manifests.sh)" "helm.cilium.io/cilium-" "v
 bb=$(v verify_busybox)
 assert_eq "" "$(grep -nE 'image: *(docker.io/library/)?busybox *$' manifests/*.yaml || true)" "no untagged busybox in the manifests"
 assert_contains "$(cat "manifests/local-path-storage.${lp#v}.yaml")" "image: $bb" "local-path helper pod runs the pinned busybox"
+# The node image is built from pinned artifacts: Kubernetes from dl.k8s.io and CRI-O from its static
+# bundle. Every supported Kubernetes minor needs a CRI-O tag in the crio table, or images:node cannot build.
+assert_eq "1.37.1" "$(sed -nE 's/^  default: *"([^"]+)"/\1/p' versions.yaml)" "kubernetes default is 1.37.1"
+assert_eq "1.36.5" "$(sed -nE 's/^  previous: *"([^"]+)"/\1/p' versions.yaml)" "kubernetes previous is 1.36.5"
+crio_of() { sed -nE "s/^  \"$1\": *\"([^\"]+)\".*/\1/p" versions.yaml; }
+assert_eq "v1.37.2" "$(crio_of 1.37)" "crio table pins 1.37"
+assert_eq "v1.36.7" "$(crio_of 1.36)" "crio table pins 1.36"
+for k in default previous; do
+  m=$(sed -nE "s/^  $k: *\"([0-9]+\.[0-9]+)\.[0-9]+\"/\1/p" versions.yaml)
+  if [ -n "$(crio_of "$m")" ]; then echo "PASS  crio table covers kubernetes.$k ($m)"; else echo "FAIL  crio table covers kubernetes.$k ($m)"; FAILURES=$((FAILURES+1)); fi
+done
 rm -rf "$TMP"; finish

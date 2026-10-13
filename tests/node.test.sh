@@ -8,7 +8,7 @@ kind: Cluster
 metadata:
   name: demo
 spec:
-  kubernetes: "1.37.0"
+  kubernetes: "1.37.1"
   network:
     index: 3
     nodes: 172.22.3.0/24
@@ -81,7 +81,7 @@ out=$(PATH="$STUB:$PATH" "$REAL_TASK" node:add CLUSTER=demo ROLE=worker JOIN=fal
 assert_eq "0" "$rc" "node:add (stubbed host) exits 0"
 assert_contains "$(cat "$STUB_LOG")" "addons:runtimeclass CLUSTER=demo" "node:add installs crun where the runtime needs it"
 # The new node mounts the shared store of the cluster's version; fill it first so the node pulls nothing.
-assert_contains "$(cat "$STUB_LOG")" "images:ensure K8S=1.37.0" "node:add fills the shared image store"
+assert_contains "$(cat "$STUB_LOG")" "images:ensure K8S=1.37.1" "node:add fills the shared image store"
 # The LB's backend list is rendered from cluster.yaml; a changed list is a graceful reload (master-worker SIGUSR2).
 assert_contains "$(cat "$STUB_LOG")" "podman kill --signal USR2 demo-lb" "node:add reloads the LB after re-rendering its config"
 if [ "$(grep -n 'nodes:render' "$STUB_LOG" | head -1 | cut -d: -f1)" -lt "$(grep -n 'kill --signal USR2' "$STUB_LOG" | head -1 | cut -d: -f1)" ]; then echo "PASS  reload comes after the render"; else echo "FAIL  reload comes after the render"; FAILURES=$((FAILURES+1)); fi
