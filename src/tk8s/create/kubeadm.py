@@ -98,8 +98,34 @@ def _initialised(ctx: Context, cp: str) -> bool:
     return r.returncode == 0
 
 
+def _completed(ctx: Context, cp: str) -> bool:
+    """kubeadm init got to the end: it uploaded its configuration (after the apiserver answered
+    and the admin user was bootstrapped). A kubeadm init that died waiting for the control plane
+    leaves admin.conf behind but none of this."""
+    r = ctx.host.run(
+        [
+            "podman",
+            "exec",
+            cp,
+            "kubectl",
+            "--kubeconfig",
+            "/etc/kubernetes/admin.conf",
+            "-n",
+            "kube-system",
+            "get",
+            "configmap",
+            "kubeadm-config",
+        ],
+        sudo=True,
+        capture=True,
+        check=False,
+    )
+    return r.returncode == 0
+
+
 def init_done(ctx: Context) -> bool:
-    return _initialised(ctx, ctx.require_cluster().first_control_plane.name)
+    cp = ctx.require_cluster().first_control_plane.name
+    return _initialised(ctx, cp) and _completed(ctx, cp)
 
 
 def init_run(ctx: Context) -> None:
@@ -107,6 +133,11 @@ def init_run(ctx: Context) -> None:
     planes; wait until the LB sees the apiserver."""
     cp = ctx.require_cluster().first_control_plane.name
     if _initialised(ctx, cp):
+        if not _completed(ctx, cp):
+            raise PhaseFailed(
+                f"kubeadm init on {cp} did not complete (admin.conf exists but the cluster was "
+                "never bootstrapped); delete the cluster and create it again"
+            )
         ctx.say(f"  {cp} already initialized")
     else:
         ctx.say(f"  kubeadm init on {cp} ...")

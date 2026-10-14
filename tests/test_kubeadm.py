@@ -278,3 +278,18 @@ def test_kubeconfig_waits_for_the_apiserver_through_the_lb(ctx: Context, host: F
     host.responses[("curl",)] = Result(0, "", "")
     with pytest.raises(PhaseFailed, match="has no healthy control plane after 60 s"):
         kubeadm.kubeconfig_run(ctx)
+
+
+def test_init_that_did_not_complete_is_refused_not_skipped(ctx: Context, host: FakeHost) -> None:
+    """admin.conf exists after a kubeadm init that died in wait-control-plane; the cluster has no
+    bootstrap token, no CoreDNS and an admin that cannot do anything. Say so instead of going on."""
+    initialised(host)
+    host.responses[("podman", "exec", "demo-cp-1", "kubectl")] = Result(1, "", "forbidden")
+    assert not kubeadm.init_done(ctx)
+    with pytest.raises(PhaseFailed, match=r"kubeadm init on demo-cp-1 did not complete"):
+        kubeadm.init_run(ctx)
+    host.responses[("podman", "exec", "demo-cp-1", "kubectl")] = Result(0, "kubeadm-config", "")
+    assert kubeadm.init_done(ctx)
+    host.calls.clear()
+    kubeadm.init_run(ctx)
+    assert "  demo-cp-1 already initialized" in host.lines
