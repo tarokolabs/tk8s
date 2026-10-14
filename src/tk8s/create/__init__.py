@@ -1,7 +1,7 @@
 """create cluster, phase by phase, in the order they run."""
 
 from ..phases import Phase
-from . import cni, images, kubeadm, nodes, plan, preflight, units
+from . import addons, cni, images, kubeadm, nodes, plan, preflight, units
 
 PHASES: list[Phase] = [
     preflight.PHASE,
@@ -11,6 +11,7 @@ PHASES: list[Phase] = [
     nodes.PHASE,
     kubeadm.PHASE,
     cni.PHASE,
+    addons.PHASE,
 ]
 
 # --dry-run never touches the host: it resolves the plan and renders every file, nothing else.

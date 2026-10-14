@@ -134,6 +134,12 @@ class Host:
             return r.stdout if r.returncode == 0 else None
         return path.read_text() if path.exists() else None
 
+    def read_bytes(self, path: Path) -> bytes | None:
+        return path.read_bytes() if path.exists() else None
+
+    def remove(self, path: Path) -> None:
+        path.unlink(missing_ok=True)
+
     def exists(self, path: Path) -> bool:
         return path.exists()
 
@@ -186,6 +192,12 @@ class DryRunHost(Host):
         self._say("")
 
     def read(self, path: Path, *, sudo: bool = False) -> str | None:
+        return None
+
+    def read_bytes(self, path: Path) -> bytes | None:
+        return None
+
+    def remove(self, path: Path) -> None:
         return None
 
     def exists(self, path: Path) -> bool:
@@ -281,6 +293,14 @@ class FakeHost(Host):
 
     def read(self, path: Path, *, sudo: bool = False) -> str | None:
         return self.files.get(path)
+
+    def read_bytes(self, path: Path) -> bytes | None:
+        text = self.files.get(path)
+        return text.encode() if text is not None else None
+
+    def remove(self, path: Path) -> None:
+        self.calls.append(Call(["rm", "-f", str(path)], False, {}))
+        self.files.pop(path, None)
 
     def exists(self, path: Path) -> bool:
         return path in self.files or path in self.dirs

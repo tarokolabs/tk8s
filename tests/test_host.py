@@ -121,3 +121,18 @@ def test_write_uses_a_unique_temp_name_and_install_D(tmp_path: Path) -> None:
     d = DryRunHost(lines.append)
     d.write(Path("/etc/x/y.conf"), "v", sudo=True)
     assert lines[0] == "# ---- /etc/x/y.conf"
+
+
+def test_read_bytes_and_remove(tmp_path: Path) -> None:
+    h = Host(lambda _: None)
+    p = tmp_path / "blob"
+    p.write_bytes(b"\x00\x01")
+    assert h.read_bytes(p) == b"\x00\x01" and h.read_bytes(tmp_path / "nope") is None
+    h.remove(p)
+    h.remove(p)  # a second remove is fine
+    assert not p.exists()
+    f = FakeHost()
+    f.files[Path("/x")] = "ab"
+    assert f.read_bytes(Path("/x")) == b"ab" and f.read_bytes(Path("/y")) is None
+    f.remove(Path("/x"))
+    assert Path("/x") not in f.files
