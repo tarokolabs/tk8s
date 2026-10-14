@@ -69,6 +69,7 @@ def ready_host(host: FakeHost, data_dir: Path, name: str = "demo") -> model.Clus
         r[("podman", "exec", n.name, "systemctl", "is-system-running")] = Result(0, "running\n", "")
         r[("podman", "exec", n.name, "test")] = Result(0, "", "")
     r[("kubectl", "get", "--raw", "/readyz")] = Result(0, "ok", "")
+    r[("curl", "-sk", "--max-time", "3")] = Result(0, "ok", "")  # the LB answers /readyz
     r[("kubectl", "get", "node")] = Result(0, "x Ready", "")
     r[("kubectl", "get", "nodes", "--no-headers")] = Result(
         0, "".join(f"{n.name} Ready <none> 1m v1.37.1\n" for n in c.spec.nodes), ""

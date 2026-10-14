@@ -318,13 +318,13 @@ def test_delete_control_plane_waits_for_the_lb_before_deleting_the_node(tmp_path
     )
     host.responses = {
         ("kubectl", "get", "node", "demo-cp-2"): [Result(0, "demo-cp-2", ""), Result(1, "", "")],
-        ("curl", "-sk", "--max-time", "3"): [
-            Result(0, "", ""),
-            Result(56, "", "EOF"),
-            Result(0, "ok", ""),
-        ],
         **host.responses,
     }
+    host.responses[("curl", "-sk", "--max-time", "3")] = [  # the fixture's key, now a sequence
+        Result(0, "", ""),
+        Result(56, "", "EOF"),
+        Result(0, "ok", ""),
+    ]
     ctx.node = "demo-cp-2"
     Runner([node_delete.PHASE], record=False).run(ctx)
     a = argvs(host)
