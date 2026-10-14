@@ -2,20 +2,17 @@
 
 import argparse
 import os
-import re
 import shutil
 import sys
 from pathlib import Path
 
 from . import images, model, verify, versions
-from .create import DRY_RUN_PHASES, PHASES
-from .create.plan import PlanError, load_existing, resolve, used_indices
+from .args import UsageError, add_create_flags
+from .create.plan import PlanError
 from .datatree import PreflightError
-from .host import DryRunHost, Host, HostError
-from .paths import Paths
-from .phases import Context, Options, PhaseFailed, Runner, tk8s_version, tree
-
-HOME = Path(__file__).resolve().parents[2]
+from .host import HostError
+from .phases import PhaseFailed, tk8s_version
+from .verbs import HOME, cmd_create, cmd_images, cmd_verify
 
 USAGE = """\
 tkctl: create and manage tk8s Kubernetes clusters on a single podman host.
@@ -69,8 +66,6 @@ Environment:
   TK_VERIFY_TIMEOUT      seconds to wait for each verify check (default 180)
 """
 
-NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,15}$")
-K8S_RE = re.compile(r"^1\.[0-9]+\.[0-9]+$")
 KNOWN_VERBS = {
     "create",
     "delete",
@@ -95,33 +90,6 @@ NOT_YET = {
     "add",
     "join",
 }
-
-
-class UsageError(Exception):
-    pass
-
-
-def validate_name(name: str) -> str:
-    if not NAME_RE.match(name):
-        raise UsageError(
-            f"invalid cluster name '{name}': use lowercase letters, digits and '-', "
-            "start with a letter, max 16 characters"
-        )
-    return name
-
-
-def normalize_memory(m: str) -> str:
-    if not re.fullmatch(r"[0-9]+[GgMm]", m):
-        raise UsageError(
-            f"invalid --memory '{m}': use a number followed by G or M, e.g. 4G or 4096M"
-        )
-    return m.lower()
-
-
-def validate_k8s(v: str) -> str:
-    if not K8S_RE.match(v):
-        raise UsageError("--k8s must look like 1.37.0")
-    return v
 
 
 # ---- plugins (kubectl's rule: tkctl-<a>-<b> before tkctl-<a>, longest match; built-ins win)
@@ -152,202 +120,6 @@ def plugin_argv(argv: list[str]) -> list[str] | None:
         if path:
             return [path, *argv[n:]]
     return None
-
-
-# ---- create cluster
-
-
-def add_create_flags(p: argparse.ArgumentParser) -> None:
-    p.add_argument("name", nargs="?")
-    p.add_argument("--control-planes", type=int, default=1)
-    p.add_argument("--workers", type=int, default=2)
-    p.add_argument("--cpu", type=int, default=2)
-    p.add_argument("--memory", default="4G")
-    p.add_argument("--k8s")
-    p.add_argument("--gvisor", action="store_true")
-    p.add_argument("--datapath", choices=["auto", "netkit", "veth"])
-    p.add_argument("--defer-join", action="store_true")
-    p.add_argument("-f", dest="file")
-    p.add_argument("--allow-overlap", action="store_true")
-    p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--phase")
-    p.add_argument("--skip-phases", default="")
-    p.add_argument("--list-phases", action="store_true")
-    p.add_argument("--quiet", action="store_true")
-
-
-def user_cluster_from_flags(a: argparse.Namespace) -> model.UserCluster:
-    if a.control_planes < 1:
-        raise UsageError("--control-planes must be a positive integer")
-    if a.control_planes % 2 == 0:
-        raise UsageError("--control-planes must be odd (1, 3, 5) for etcd quorum")
-    if a.control_planes > 5:
-        raise UsageError(
-            "--control-planes must be at most 5 (the apiserver LB has five backend slots)"
-        )
-    if a.defer_join and a.control_planes == 1:
-        raise UsageError("--defer-join needs --control-planes 3 or more")
-    if a.workers < 0:
-        raise UsageError("--workers must be an integer")
-    if a.cpu < 1:
-        raise UsageError("--cpu must be a positive integer")
-    memory = normalize_memory(a.memory)
-    groups = [model.NodeGroup(role="control-plane", cpu=a.cpu, memory=memory)]
-    if a.control_planes > 1:
-        groups.append(
-            model.NodeGroup(
-                role="control-plane",
-                count=a.control_planes - 1,
-                cpu=a.cpu,
-                memory=memory,
-                join=not a.defer_join,
-            )
-        )
-    groups.append(model.NodeGroup(role="worker", count=a.workers, cpu=a.cpu, memory=memory))
-    spec = model.UserSpec(kubernetes=a.k8s, gvisor=a.gvisor, datapath=a.datapath, nodes=groups)
-    name = validate_name(a.name or "tk8s")
-    return model.UserCluster(metadata=model.Metadata(name=name), spec=spec)
-
-
-def user_cluster_from_file(a: argparse.Namespace, topo_flags: bool) -> model.UserCluster:
-    if topo_flags:
-        raise UsageError(
-            "-f cannot be combined with --control-planes/--workers/--cpu/--memory; "
-            "put them in the file"
-        )
-    path = Path(a.file)
-    if not path.is_file():
-        raise UsageError(f"file not found: {path}")
-    if a.name:
-        raise UsageError(f"the cluster name comes from metadata.name in {path}")
-    u = model.load_user_file(path)
-    validate_name(u.metadata.name)
-    spec = u.spec
-    if a.k8s:
-        spec = spec.model_copy(update={"kubernetes": a.k8s})
-    if a.gvisor:
-        spec = spec.model_copy(update={"gvisor": True, "datapath": "veth"})
-    return u.model_copy(update={"spec": spec})
-
-
-def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
-    if a.list_phases:
-        print("\n".join(tree(PHASES)))
-        return 0
-    if a.k8s:
-        validate_k8s(a.k8s)
-    if a.gvisor and a.datapath == "netkit":
-        raise UsageError(
-            "--gvisor requires the veth datapath; gVisor sandboxes have no network under netkit "
-            "(drop --datapath netkit)"
-        )
-    if a.gvisor and a.datapath is None:
-        a.datapath = "veth"
-    topo = any(f in raw for f in ("--control-planes", "--workers", "--cpu", "--memory"))
-    user = user_cluster_from_file(a, topo) if a.file else user_cluster_from_flags(a)
-    ctx = make_context(dry_run=a.dry_run, quiet=a.quiet)
-    name = user.metadata.name
-    existing = load_existing(ctx.paths, name)
-    if existing is not None and existing.status is not None and existing.status.phase == "Ready":
-        raise UsageError(f"cluster {name} already exists; delete it first or pick another name")
-    ctx.cluster = resolve(
-        user,
-        k8s_default=ctx.versions.kubernetes.default,
-        existing=existing,
-        used_indices=used_indices(ctx.paths),
-        allow_overlap=a.allow_overlap,
-        tk8s_version=tk8s_version(HOME),
-    )
-    phases = DRY_RUN_PHASES if a.dry_run else PHASES
-    skip = {s for s in a.skip_phases.split(",") if s}
-    Runner(phases, only=a.phase, skip=skip).run(ctx)
-    if a.dry_run or a.phase:
-        return 0
-    c = ctx.require_cluster()
-    if skip:
-        print()
-        print(
-            f"cluster {c.name} is not marked Ready: skipped {','.join(sorted(skip))}; "
-            f"rerun tkctl create cluster {c.name} to finish"
-        )
-        return 0
-    if c.status is not None and c.status.phase != "Ready":
-        status = c.status.model_copy(update={"phase": "Ready"})
-        ctx.cluster = c.model_copy(update={"status": status})
-        ctx.host.write(ctx.state_dir / "cluster.yaml", model.dumps(ctx.cluster))
-    print()
-    print(f"cluster {c.name} is ready")
-    print(f"  kubeconfig: {ctx.state_dir}/kubeconfig   (tkctl use cluster {c.name})")
-    print(f"  units:      /etc/containers/systemd/{c.name}/   target: {c.name}.target")
-    print(f"  describe:   tkctl describe cluster {c.name}")
-    return 0
-
-
-# ---- verify cluster
-
-
-def cmd_verify(a: argparse.Namespace) -> int:
-    if a.list_phases:
-        print("\n".join(tree(verify.PHASES)))
-        return 0
-    if not a.name:
-        raise UsageError("usage: tkctl verify cluster NAME [--phase P]")
-    name = validate_name(a.name)
-    ctx = make_context()
-    state = ctx.paths.state_dir(name)
-    if not (state / "cluster.yaml").exists():
-        raise UsageError(
-            f"cluster {name} not found under {ctx.paths.clusters_dir} (tkctl get clusters)"
-        )
-    marker = (state / ".create-complete").exists()
-    ctx.cluster = model.load(state / "cluster.yaml", create_complete_marker=marker)
-    return 1 if verify.run(ctx, only=a.phase) else 0
-
-
-# ---- images verbs
-
-
-def cmd_images(verb: str, a: argparse.Namespace) -> int:
-    if a.k8s:
-        validate_k8s(a.k8s)
-    if verb == "delete" and not a.k8s:
-        raise UsageError("usage: tkctl delete images --k8s VERSION [--yes]")
-    ctx = make_context(assume_yes=getattr(a, "yes", False), refresh=getattr(a, "refresh", False))
-    k8s = a.k8s or ctx.versions.kubernetes.default
-    if verb == "pull":
-        images.ensure(ctx, k8s)
-    elif verb == "get":
-        print(f"{'STATUS':<8} IMAGE")
-        for s, img in images.status(ctx, k8s):
-            print(f"{s:<8} {img}")
-    else:
-        images.prune(ctx, k8s)
-    return 0
-
-
-# ---- wiring
-
-
-def make_context(
-    *, dry_run: bool = False, quiet: bool = False, assume_yes: bool = False, refresh: bool = False
-) -> Context:
-    paths = Paths.from_env(HOME)
-    opts = Options(
-        dry_run=dry_run,
-        quiet=quiet,
-        offline=os.environ.get("TK_OFFLINE") == "1",
-        assume_yes=assume_yes or os.environ.get("TK_ASSUME_YES") == "1",
-        refresh=refresh,
-        verify_timeout=int(os.environ.get("TK_VERIFY_TIMEOUT") or 180),
-    )
-    host: Host = DryRunHost(print, quiet=quiet) if dry_run else Host(print, quiet=quiet)
-    return Context(
-        host=host,
-        paths=paths,
-        versions=versions.load(paths.home / "versions.yaml"),
-        options=opts,
-        say=print,
-    )
 
 
 def build_parser() -> argparse.ArgumentParser:

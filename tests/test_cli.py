@@ -250,14 +250,14 @@ def test_host_and_preflight_errors_are_one_line(
     def boom(ctx: object, k8s: str) -> None:
         raise PreflightError("/opt/taroko is owned by someone, not student")
 
-    monkeypatch.setattr("tk8s.cli.images.ensure", boom)
+    monkeypatch.setattr("tk8s.verbs.images.ensure", boom)
     rc, out = run(capsys, "pull", "images")
     assert rc == 1 and out.strip() == "tkctl: /opt/taroko is owned by someone, not student"
 
     def boom2(ctx: object, k8s: str) -> None:
         raise HostError(["curl", "x"], 22, "The requested URL returned error: 404")
 
-    monkeypatch.setattr("tk8s.cli.images.ensure", boom2)
+    monkeypatch.setattr("tk8s.verbs.images.ensure", boom2)
     rc, out = run(capsys, "pull", "images")
     assert rc == 1 and out.startswith("tkctl: curl x exited 22")
 
@@ -278,7 +278,7 @@ def test_create_runs_every_phase_and_marks_the_cluster_ready(
     capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from tests.fixtures import ready_host
-    from tk8s import cli, model, versions
+    from tk8s import model, verbs, versions
     from tk8s.host import FakeHost
     from tk8s.paths import Paths
     from tk8s.phases import Context, Options
@@ -286,16 +286,16 @@ def test_create_runs_every_phase_and_marks_the_cluster_ready(
     host = FakeHost()
 
     def fake_context(**kw: object) -> Context:
-        paths = Paths.from_env(cli.HOME)
+        paths = Paths.from_env(verbs.HOME)
         return Context(
             host=host,
             paths=paths,
-            versions=versions.load(cli.HOME / "versions.yaml"),
+            versions=versions.load(verbs.HOME / "versions.yaml"),
             options=Options(poll=0, poll_slow=0, retry_delay=0),
             say=print,
         )
 
-    monkeypatch.setattr(cli, "make_context", fake_context)
+    monkeypatch.setattr(verbs, "make_context", fake_context)
     ready_host(host, data_dir)
     rc, out = run(capsys, "create", "cluster", "demo")
     assert rc == 0
@@ -366,7 +366,7 @@ def test_skipped_phases_leave_the_cluster_creating(
     capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from tests.fixtures import ready_host
-    from tk8s import cli, model, versions
+    from tk8s import model, verbs, versions
     from tk8s.host import FakeHost
     from tk8s.paths import Paths
     from tk8s.phases import Context, Options
@@ -376,13 +376,13 @@ def test_skipped_phases_leave_the_cluster_creating(
     def fake_context(**kw: object) -> Context:
         return Context(
             host=host,
-            paths=Paths.from_env(cli.HOME),
-            versions=versions.load(cli.HOME / "versions.yaml"),
+            paths=Paths.from_env(verbs.HOME),
+            versions=versions.load(verbs.HOME / "versions.yaml"),
             options=Options(poll=0, poll_slow=0, retry_delay=0),
             say=print,
         )
 
-    monkeypatch.setattr(cli, "make_context", fake_context)
+    monkeypatch.setattr(verbs, "make_context", fake_context)
     ready_host(host, data_dir)
     c = model.load_text(host.files[data_dir / "clusters" / "demo" / "cluster.yaml"])
     assert c.status is not None
