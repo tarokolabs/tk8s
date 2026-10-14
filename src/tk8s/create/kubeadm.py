@@ -133,6 +133,7 @@ def init_run(ctx: Context) -> None:
     planes; wait until the LB sees the apiserver."""
     cp = ctx.require_cluster().first_control_plane.name
     if _initialised(ctx, cp):
+        wait_lb_ready(ctx)  # a resume right after a restart: the apiserver may still be coming up
         if not _completed(ctx, cp):
             raise PhaseFailed(
                 f"kubeadm init on {cp} did not complete (admin.conf exists but the cluster was "

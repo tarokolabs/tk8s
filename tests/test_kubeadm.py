@@ -293,3 +293,26 @@ def test_init_that_did_not_complete_is_refused_not_skipped(ctx: Context, host: F
     host.calls.clear()
     kubeadm.init_run(ctx)
     assert "  demo-cp-1 already initialized" in host.lines
+
+
+def test_init_already_done_waits_for_the_apiserver_before_judging_completion(
+    ctx: Context, host: FakeHost
+) -> None:
+    """A resume right after a restart: admin.conf exists, the apiserver is still coming up. The
+    completion check must come after the LB wait, or a healthy cluster is told to delete itself."""
+    initialised(host)
+    host.responses[("podman", "exec", "demo-cp-1", "kubectl")] = [
+        Result(1, "", "connection refused"),
+        Result(0, "kubeadm-config", ""),
+    ]
+    host.responses[("curl",)] = [Result(0, "", ""), Result(0, "ok", "")]
+    assert not kubeadm.init_done(ctx)  # the blip
+    kubeadm.init_run(ctx)  # waits for the LB, then finds the cluster bootstrapped
+    assert "  demo-cp-1 already initialized" in host.lines
+    curl_at = next(i for i, c in enumerate(host.calls) if c.argv[0] == "curl")
+    cm_at = next(
+        i
+        for i, c in enumerate(host.calls)
+        if c.argv[:4] == ["podman", "exec", "demo-cp-1", "kubectl"] and i > curl_at
+    )
+    assert curl_at < cm_at

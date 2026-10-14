@@ -264,6 +264,13 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
     if a.dry_run or a.phase:
         return 0
     c = ctx.require_cluster()
+    if skip:
+        print()
+        print(
+            f"cluster {c.name} is not marked Ready: skipped {','.join(sorted(skip))}; "
+            f"rerun tkctl create cluster {c.name} to finish"
+        )
+        return 0
     if c.status is not None and c.status.phase != "Ready":
         status = c.status.model_copy(update={"phase": "Ready"})
         ctx.cluster = c.model_copy(update={"status": status})

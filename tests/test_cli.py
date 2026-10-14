@@ -360,3 +360,37 @@ def test_stdout_is_line_buffered_so_redirected_logs_show_each_step(
     monkeypatch.setattr(sys, "stdout", fake)
     cli.main(["version"])
     assert fake.line_buffering  # a `tkctl create … > log` shows every phase as it happens
+
+
+def test_skipped_phases_leave_the_cluster_creating(
+    capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.fixtures import ready_host
+    from tk8s import cli, model, versions
+    from tk8s.host import FakeHost
+    from tk8s.paths import Paths
+    from tk8s.phases import Context, Options
+
+    host = FakeHost()
+
+    def fake_context(**kw: object) -> Context:
+        return Context(
+            host=host,
+            paths=Paths.from_env(cli.HOME),
+            versions=versions.load(cli.HOME / "versions.yaml"),
+            options=Options(poll=0, poll_slow=0, retry_delay=0),
+            say=print,
+        )
+
+    monkeypatch.setattr(cli, "make_context", fake_context)
+    ready_host(host, data_dir)
+    c = model.load_text(host.files[data_dir / "clusters" / "demo" / "cluster.yaml"])
+    assert c.status is not None
+    host.files[data_dir / "clusters" / "demo" / "cluster.yaml"] = model.dumps(
+        c.model_copy(update={"status": c.status.model_copy(update={"phase": "Creating"})})
+    )
+    rc, out = run(capsys, "create", "cluster", "demo", "--skip-phases", "cni")
+    assert rc == 0 and "cluster demo is ready" not in out
+    assert "not marked Ready: skipped cni; rerun tkctl create cluster demo to finish" in out
+    saved = model.load_text(host.files[data_dir / "clusters" / "demo" / "cluster.yaml"])
+    assert saved.status is not None and saved.status.phase == "Creating"

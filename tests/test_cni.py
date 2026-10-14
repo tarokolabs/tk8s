@@ -167,3 +167,11 @@ def test_canal_path(ctx: Context, host: FakeHost) -> None:
     proxy = next(c for c in host.calls if c.argv == ["kubectl", "apply", "-f", "-"])
     assert proxy.input == "maxPerCore: 0\n"
     assert not installs(host) and "  canal ok (no Gateway API on this path)" in host.lines
+
+
+def test_nodes_ready_is_not_done_when_kubectl_fails(ctx: Context, host: FakeHost) -> None:
+    healthy(host, ctx)
+    host.responses[("kubectl", "get", "nodes", "--no-headers")] = Result(1, "", "refused")
+    assert not cni.nodes_ready_done(ctx)
+    with pytest.raises(PhaseFailed, match="nodes are not Ready after 5 minutes"):
+        Runner([cni.PHASE], only="cni/nodes-ready").run(ctx)

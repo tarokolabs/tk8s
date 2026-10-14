@@ -429,6 +429,14 @@ CHECKS = [
     ("tcproute", "a TCPRoute reachable from the host", check_tcproute),
 ]
 PHASES: list[Phase] = [Phase(name, summary, None, lambda ctx: None) for name, summary, _ in CHECKS]
+# A check that reads what an earlier one set up (the Gateway's address, the gVisor pod's output)
+# runs that one first when asked for on its own.
+PREREQUISITES = {
+    "httproute": ["gateway"],
+    "xff": ["gateway"],
+    "tcproute": ["gateway"],
+    "gvisor-network": ["runtimeclass-gvisor"],
+}
 SECTIONS = {
     "nodes": "nodes",
     "kubelet": "kubelet",
@@ -439,6 +447,16 @@ SECTIONS = {
     "apiserver-lb": "apiserver-lb",
     "gatewayclass": "gateway-api",
 }
+
+
+def _section_of(check: str) -> str:
+    """The [section] a check prints under: the nearest section heading at or before it."""
+    current = ""
+    for name, _, _ in CHECKS:
+        current = SECTIONS.get(name, current)
+        if name == check:
+            return current
+    return current
 
 
 def run(ctx: Context, only: str | None = None) -> int:
@@ -459,12 +477,16 @@ def run(ctx: Context, only: str | None = None) -> int:
         if r.kubectl("create", "ns", NS)[0] != 0:
             r.ng(f"create namespace {NS}")
             return r.failed
+        wanted = None if only is None else {*PREREQUISITES.get(only, []), only}
+        printed = ""
         for name, _, check in CHECKS:
-            if only is not None and name != only:
+            if wanted is not None and name not in wanted:
                 continue
-            if name in SECTIONS:
+            section = _section_of(name)
+            if section != printed:
                 ctx.say("")
-                ctx.say(f"[{SECTIONS[name]}]")
+                ctx.say(f"[{section}]")
+                printed = section
             check(r)
     finally:
         r.kubectl("delete", "ns", NS, "--ignore-not-found", "--wait=false")

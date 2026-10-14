@@ -176,3 +176,20 @@ def test_stopped_or_unfinished_cluster_is_refused(ctx: Context, host: FakeHost) 
         match="cluster demo is not fully created; rerun tkctl create cluster demo",
     ):
         verify.run(ctx)
+
+
+def test_a_dependent_check_runs_its_prerequisite_first(ctx: Context, host: FakeHost) -> None:
+    healthy(ctx, host)
+    host.responses[("curl", "-s", "-m", "8", "-H")] = Result(0, "172.22.0.254", "")  # only xff asks
+    assert verify.run(ctx, only="xff") == 0
+    assert lines(host, "PASS  ") == [
+        "PASS  Gateway programmed (172.22.0.200)",
+        "PASS  X-Forwarded-For carries the client IP (172.22.0.254)",
+    ]
+    assert "[gateway-api]" in host.lines
+    host.lines.clear()
+    assert verify.run(ctx, only="gvisor-network") == 0
+    assert lines(host, "SKIP  ") == [
+        "SKIP  RuntimeClass gvisor — not enabled (create the cluster with --gvisor)"
+    ]
+    assert host.lines[-1] == "PASS 0  FAIL 0  SKIP 1"

@@ -194,18 +194,21 @@ INSTALL = Phase(
 # ---- nodes-ready
 
 
-def not_ready(ctx: Context) -> list[str]:
+def not_ready(ctx: Context) -> list[str] | None:
+    """Names of the nodes that are not Ready; None when kubectl itself failed."""
     r = ctx.host.run(
         ["kubectl", "get", "nodes", "--no-headers"],
         env=kubectl_env(ctx),
         capture=True,
         check=False,
     )
+    if r.returncode != 0:
+        return None
     return [line.split()[0] for line in r.stdout.splitlines() if line.split()[1:2] != ["Ready"]]
 
 
 def nodes_ready_done(ctx: Context) -> bool:
-    return not not_ready(ctx)
+    return not_ready(ctx) == []
 
 
 def nodes_ready_run(ctx: Context) -> None:
@@ -213,10 +216,11 @@ def nodes_ready_run(ctx: Context) -> None:
     with the cluster target by nodes/up; with the CNI in place the nodes turn Ready."""
     for i in range(1, 61):
         pending = not_ready(ctx)
-        if not pending:
+        if pending == []:
             break
         if i == 60:
-            raise PhaseFailed(f"nodes are not Ready after 5 minutes: {' '.join(pending)}")
+            what = " ".join(pending) if pending else "kubectl get nodes failed"
+            raise PhaseFailed(f"nodes are not Ready after 5 minutes: {what}")
         time.sleep(ctx.options.poll_slow)
     r = ctx.host.run(
         ["kubectl", "get", "nodes", "--no-headers"], env=kubectl_env(ctx), capture=True
