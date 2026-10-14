@@ -34,7 +34,7 @@ def test_l3_builds_the_node_image_fills_the_store_blocks_downloads_then_creates(
     assert '--build-arg CRIO="$crio"' in L3 and " helm.cilium.io " in L3
     assert "task " not in L3 and "install.sh" in L3
     assert line_of(L3, "tk8s-offline$/d") < line_of(L3, "upload-artifact")
-    assert "branches: [v2, main, python]" in L3 or "branches: [main, python]" in L3
+    assert "branches: [v2, main]" in L3
 
 
 def test_l3_installs_with_the_installer_from_the_checkout() -> None:
