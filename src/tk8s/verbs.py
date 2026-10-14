@@ -5,7 +5,7 @@ import argparse
 import os
 from pathlib import Path
 
-from . import images, model, verify, versions
+from . import images, lifecycle, model, verify, versions
 from .args import (
     UsageError,
     user_cluster_from_file,
@@ -97,6 +97,38 @@ def cmd_verify(a: argparse.Namespace) -> int:
     marker = (state / ".create-complete").exists()
     ctx.cluster = model.load(state / "cluster.yaml", create_complete_marker=marker)
     return 1 if verify.run(ctx, only=a.phase) else 0
+
+
+# ---- get clusters, describe, stop, start, use
+
+
+def cluster_context(name: str | None, verb: str, *, quiet: bool = False) -> Context:
+    """The context of an existing cluster, for the verbs that take `cluster NAME`."""
+    if not name:
+        raise UsageError(f"usage: tkctl {verb} cluster NAME")
+    ctx = make_context(quiet=quiet)
+    lifecycle.load_cluster(ctx, validate_name(name))
+    return ctx
+
+
+def cmd_get_clusters() -> int:
+    lifecycle.list_clusters(make_context(quiet=True))
+    return 0
+
+
+def cmd_cluster(verb: str, a: argparse.Namespace) -> int:
+    looking = verb == "describe"  # read-only verbs print no `$` lines: nothing to redo
+    ctx = cluster_context(a.name, verb, quiet=looking)
+    c = ctx.require_cluster()
+    if verb == "describe":
+        lifecycle.describe(ctx, c, a.output)
+    elif verb == "stop":
+        lifecycle.stop(ctx, c)
+    elif verb == "start":
+        lifecycle.start(ctx, c)
+    else:
+        lifecycle.use(ctx, c)
+    return 0
 
 
 # ---- images verbs

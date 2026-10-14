@@ -20,6 +20,23 @@ def run(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str]:
     return rc, out.out + out.err
 
 
+def fake_context(host: object, **kw: object) -> object:
+    """verbs.make_context with a FakeHost and no waiting; assume_yes follows --yes."""
+    from tk8s import verbs, versions
+    from tk8s.host import FakeHost
+    from tk8s.paths import Paths
+    from tk8s.phases import Context, Options
+
+    assert isinstance(host, FakeHost)
+    return Context(
+        host=host,
+        paths=Paths.from_env(verbs.HOME),
+        versions=versions.load(verbs.HOME / "versions.yaml"),
+        options=Options(poll=0, poll_slow=0, retry_delay=0, assume_yes=bool(kw.get("assume_yes"))),
+        say=print,
+    )
+
+
 def test_default_dry_run(capsys: pytest.CaptureFixture[str], data_dir: Path) -> None:
     rc, out = run(capsys, "create", "cluster", "--dry-run")
     assert rc == 0
@@ -278,24 +295,11 @@ def test_create_runs_every_phase_and_marks_the_cluster_ready(
     capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from tests.fixtures import ready_host
-    from tk8s import model, verbs, versions
+    from tk8s import model, verbs
     from tk8s.host import FakeHost
-    from tk8s.paths import Paths
-    from tk8s.phases import Context, Options
 
     host = FakeHost()
-
-    def fake_context(**kw: object) -> Context:
-        paths = Paths.from_env(verbs.HOME)
-        return Context(
-            host=host,
-            paths=paths,
-            versions=versions.load(verbs.HOME / "versions.yaml"),
-            options=Options(poll=0, poll_slow=0, retry_delay=0),
-            say=print,
-        )
-
-    monkeypatch.setattr(verbs, "make_context", fake_context)
+    monkeypatch.setattr(verbs, "make_context", lambda **kw: fake_context(host, **kw))
     ready_host(host, data_dir)
     rc, out = run(capsys, "create", "cluster", "demo")
     assert rc == 0
@@ -366,23 +370,11 @@ def test_skipped_phases_leave_the_cluster_creating(
     capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from tests.fixtures import ready_host
-    from tk8s import model, verbs, versions
+    from tk8s import model, verbs
     from tk8s.host import FakeHost
-    from tk8s.paths import Paths
-    from tk8s.phases import Context, Options
 
     host = FakeHost()
-
-    def fake_context(**kw: object) -> Context:
-        return Context(
-            host=host,
-            paths=Paths.from_env(verbs.HOME),
-            versions=versions.load(verbs.HOME / "versions.yaml"),
-            options=Options(poll=0, poll_slow=0, retry_delay=0),
-            say=print,
-        )
-
-    monkeypatch.setattr(verbs, "make_context", fake_context)
+    monkeypatch.setattr(verbs, "make_context", lambda **kw: fake_context(host, **kw))
     ready_host(host, data_dir)
     c = model.load_text(host.files[data_dir / "clusters" / "demo" / "cluster.yaml"])
     assert c.status is not None
@@ -394,3 +386,59 @@ def test_skipped_phases_leave_the_cluster_creating(
     assert "not marked Ready: skipped cni; rerun tkctl create cluster demo to finish" in out
     saved = model.load_text(host.files[data_dir / "clusters" / "demo" / "cluster.yaml"])
     assert saved.status is not None and saved.status.phase == "Creating"
+
+
+def test_cluster_verbs_reach_lifecycle(
+    capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.fixtures import ready_host
+    from tk8s import verbs
+    from tk8s.host import FakeHost
+
+    host = FakeHost()
+    asked: list[dict[str, object]] = []
+
+    def context(**kw: object) -> object:
+        asked.append(kw)
+        return fake_context(host, **kw)
+
+    monkeypatch.setattr(verbs, "make_context", context)
+    c = ready_host(host, data_dir)
+    state = data_dir / "clusters" / "demo"
+    state.mkdir(parents=True)
+    (state / "cluster.yaml").write_text(host.files[state / "cluster.yaml"])
+    rc, out = run(capsys, "get", "clusters")
+    assert rc == 0 and out.startswith("NAME") and "demo " in out
+    assert asked[-1].get("quiet") is True  # read-only verbs print no `$` lines
+    rc, out = run(capsys, "describe", "cluster", "demo")
+    assert rc == 0 and "Name:        demo" in out and "Status:" in out
+    assert asked[-1].get("quiet") is True
+    rc, out = run(capsys, "describe", "cluster", "demo", "-o", "yaml")
+    assert rc == 0 and out.startswith("apiVersion")
+    rc, out = run(capsys, "stop", "cluster", "demo")
+    assert rc == 0 and out.rstrip().endswith("cluster demo stopped")
+    assert not asked[-1].get("quiet")
+    rc, out = run(capsys, "start", "cluster", "demo")
+    assert rc == 0 and ["systemctl", "start", "demo.target"] in [k.argv for k in host.calls]
+    monkeypatch.setenv("HOME", str(data_dir / "home"))
+    rc, out = run(capsys, "use", "cluster", "demo")
+    assert rc == 0 and "~/.kube/config now points at demo" in out
+    assert c.name == "demo"
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["stop", "cluster"], "usage: tkctl stop cluster NAME"),
+        (["start"], "usage: tkctl start cluster NAME"),
+        (["use", "cluster", "Nope"], "invalid cluster name 'Nope'"),
+        (["describe", "cluster", "nope"], "cluster nope not found under"),
+        (["stop", "cluster", "nope"], "cluster nope not found under"),
+        (["get", "nothing"], "usage: tkctl get clusters | tkctl get images [--k8s VERSION]"),
+    ],
+)
+def test_cluster_verb_usage_errors(
+    capsys: pytest.CaptureFixture[str], argv: list[str], message: str
+) -> None:
+    rc, out = run(capsys, *argv)
+    assert rc != 0 and message in out, out

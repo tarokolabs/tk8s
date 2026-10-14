@@ -6,13 +6,13 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import images, model, verify, versions
+from . import images, lifecycle, model, verify, versions
 from .args import UsageError, add_create_flags
 from .create.plan import PlanError
 from .datatree import PreflightError
 from .host import HostError
 from .phases import PhaseFailed, tk8s_version
-from .verbs import HOME, cmd_create, cmd_images, cmd_verify
+from .verbs import HOME, cmd_cluster, cmd_create, cmd_get_clusters, cmd_images, cmd_verify
 
 USAGE = """\
 tkctl: create and manage tk8s Kubernetes clusters on a single podman host.
@@ -80,15 +80,19 @@ KNOWN_VERBS = {
     "pull",
     "version",
 }
-NOT_YET = {
-    "delete cluster",
-    "get clusters",
-    "describe",
-    "stop",
-    "start",
-    "use",
-    "add",
-    "join",
+NOT_YET = {"delete cluster", "add", "join"}
+NOUNS = {
+    "create": {"cluster"},
+    "verify": {"cluster"},
+    "pull": {"images"},
+    "get": {"clusters", "images"},
+    "delete": {"cluster", "node", "images"},
+    "describe": {"cluster"},
+    "stop": {"cluster"},
+    "start": {"cluster"},
+    "use": {"cluster"},
+    "add": {"node"},
+    "join": {"node"},
 }
 
 
@@ -140,6 +144,14 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--refresh", action="store_true")
         if verb == "delete":
             p.add_argument("--yes", action="store_true")
+        if verb == "get":
+            nouns.add_parser("clusters", add_help=False)
+    for verb in ("describe", "stop", "start", "use"):
+        nouns = sub.add_parser(verb, add_help=False).add_subparsers(dest="noun")
+        p = nouns.add_parser("cluster", add_help=False)
+        p.add_argument("name", nargs="?")
+        if verb == "describe":
+            p.add_argument("-o", dest="output", choices=["yaml"])
     return ap
 
 
@@ -161,6 +173,7 @@ def main(argv: list[str] | None = None) -> int:
         HostError,
         PreflightError,
         verify.VerifyError,
+        lifecycle.ClusterError,
     ) as err:
         print(f"tkctl: {err}", file=sys.stderr)
         return 1
@@ -172,6 +185,15 @@ def _usage_of(verb: str) -> str:
         "get": "usage: tkctl get clusters | tkctl get images [--k8s VERSION]",
         "delete": "usage: tkctl delete cluster NAME [--yes] | "
         "tkctl delete images --k8s VERSION [--yes]",
+        "create": "usage: tkctl create cluster [NAME] [flags]",
+        "verify": "usage: tkctl verify cluster NAME [--phase P]",
+        "describe": "usage: tkctl describe cluster NAME [-o yaml]",
+        "stop": "usage: tkctl stop cluster NAME",
+        "start": "usage: tkctl start cluster NAME",
+        "use": "usage: tkctl use cluster NAME",
+        "add": "usage: tkctl add node CLUSTER --role worker|control-plane "
+        "[--cpu N] [--memory SIZE] [--no-join]",
+        "join": "usage: tkctl join node CLUSTER NODE",
     }[verb]
 
 
@@ -193,12 +215,10 @@ def _main(args: list[str]) -> int:
             os.execvp(plugin[0], plugin)
         raise UsageError(f"unknown command '{verb}' (see tkctl --help)")
     noun = args[1] if len(args) > 1 else ""
-    if verb in ("pull", "get", "delete") and noun != "images":
-        if f"{verb} {noun}" in NOT_YET or verb in NOT_YET:
-            raise UsageError(f"{verb} {noun} is not implemented yet on this branch")
+    if f"{verb} {noun}" in NOT_YET or verb in NOT_YET:
+        raise UsageError(f"{verb} {noun} is not implemented yet on this branch")
+    if noun not in NOUNS[verb]:
         raise UsageError(_usage_of(verb))
-    if verb in NOT_YET:
-        raise UsageError(f"{verb} is not implemented yet on this branch")
     try:
         a = build_parser().parse_args(args)
     except SystemExit as err:  # argparse already printed "unrecognized arguments: ..."
@@ -207,6 +227,10 @@ def _main(args: list[str]) -> int:
         return cmd_create(a, args)
     if a.verb == "verify" and a.noun == "cluster":
         return cmd_verify(a)
+    if a.verb == "get" and a.noun == "clusters":
+        return cmd_get_clusters()
+    if a.verb in ("describe", "stop", "start", "use") and a.noun == "cluster":
+        return cmd_cluster(a.verb, a)
     if a.noun == "images":
         return cmd_images(a.verb, a)
     raise UsageError(f"unknown command '{' '.join(args[:2])}' (see tkctl --help)")
