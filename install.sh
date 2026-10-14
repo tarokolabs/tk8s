@@ -2,7 +2,7 @@
 # tk8s installer: prerequisites, uv and kubectl (pinned in versions.yaml, checksum verified), a
 # checkout under TK_INSTALL_DIR with its Python environment, and a tkctl link. Safe to rerun.
 #   curl -fsSL https://raw.githubusercontent.com/tarokolabs/tk8s/main/install.sh | sh
-#   TK_VERSION=v2026.11.0 sh install.sh     # pin a release
+#   TK_VERSION=v2026.10.7 sh install.sh     # pin a release
 set -eu
 
 main() {

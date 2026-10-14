@@ -106,7 +106,7 @@ curl -fsSL https://raw.githubusercontent.com/tarokolabs/tk8s/main/install.sh | s
 tkctl create cluster
 ```
 
-`install.sh` 做四件事，可重跑：檢查前置條件（podman ≥ 5.4、systemd、cgroup v2、swap 關閉、免密碼 sudo、curl、git）；依 `versions.yaml` 下載 `uv` 與 `kubectl` 到 `/usr/local/bin` 並驗 checksum；clone 到 `/opt/taroko/tk8s`；`uv sync --locked` 把 Python 3.14 與相依裝進 `/opt/taroko/tk8s/.venv/`，把 `tkctl` 連結到 `/usr/local/bin`。`TK_VERSION=v2026.11.0 sh` 釘版本。開發者 clone 到任何位置後 `uv sync`，再用 `uv run tkctl …`。
+`install.sh` 做四件事，可重跑：檢查前置條件（podman ≥ 5.4、systemd、cgroup v2、swap 關閉、免密碼 sudo、curl、git）；依 `versions.yaml` 下載 `uv` 與 `kubectl` 到 `/usr/local/bin` 並驗 checksum；clone 到 `/opt/taroko/tk8s`；`uv sync --locked` 把 Python 3.14 與相依裝進 `/opt/taroko/tk8s/.venv/`，把 `tkctl` 連結到 `/usr/local/bin`。`TK_VERSION=v2026.10.7 sh` 釘版本。開發者 clone 到任何位置後 `uv sync`，再用 `uv run tkctl …`。
 
 約三分鐘後印出 `cluster tk8s is ready`。接著：
 
