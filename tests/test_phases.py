@@ -100,6 +100,7 @@ def test_completed_phases_are_recorded_in_cluster_yaml_through_the_host(ctx: Con
 
     host = ctx.host
     assert isinstance(host, FakeHost)
+    host.files[ctx.state_dir / "cluster.yaml"] = model.dumps(ctx.require_cluster())  # plan ran
     p, _ = counter_phase("p", 1)
     Runner([p]).run(ctx)
     saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
@@ -130,3 +131,24 @@ def test_a_done_check_that_hits_the_host_fails_the_phase_not_the_program(tmp_pat
     p = Phase("images", "x", done, lambda c: None)
     with pytest.raises(PhaseFailed, match=r"\[images\] failed: podman build x exited 1"):
         Runner([p]).run(ctx)
+
+
+def test_nothing_is_recorded_before_plan_wrote_cluster_yaml(ctx: Context) -> None:
+    """preflight completes before plan; recording it would create cluster.yaml early and make
+    plan look already done."""
+    from tk8s import model
+
+    host = ctx.host
+    assert isinstance(host, FakeHost)
+    first = Phase("preflight", "check", None, lambda c: None)
+    ran: list[str] = []
+
+    def plan_run(c: Context) -> None:
+        ran.append("plan")
+        c.host.write(c.state_dir / "cluster.yaml", model.dumps(c.require_cluster()))
+
+    plan = Phase("plan", "plan", lambda c: c.host.exists(c.state_dir / "cluster.yaml"), plan_run)
+    Runner([first, plan]).run(ctx)
+    assert ran == ["plan"] and host.lines == ["[preflight] check", "[plan] plan"]
+    saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
+    assert saved.status is not None and list(saved.status.completed) == ["plan"]

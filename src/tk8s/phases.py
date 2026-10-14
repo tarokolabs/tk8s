@@ -111,7 +111,11 @@ class Runner:
 
     @staticmethod
     def _record(ctx: Context, full: str) -> None:
+        """status.completed in cluster.yaml, once plan has written that file (recording preflight
+        earlier would create the file and make plan look already done)."""
         if ctx.cluster is None or ctx.cluster.status is None:
+            return
+        if not ctx.host.exists(ctx.state_dir / "cluster.yaml"):
             return
         completed = {**ctx.cluster.status.completed, full: datetime.now(UTC)}
         status = ctx.cluster.status.model_copy(update={"completed": completed})
