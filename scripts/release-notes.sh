@@ -35,5 +35,5 @@ $(sort "$digests"/*.digest | awk '{printf "| `%s` | `%s` |\n", $1, $2}')
 | apiserver 入口 | 每叢集一個 HAProxy LB（$(v haproxy)）在 control plane 前面；\`--control-planes 3\` 以上多 control plane |
 | RuntimeClass | crun（CRI-O 內建）；gVisor $(v gvisor)（\`--gvisor\`，建叢集時裝進節點）|
 | 監控與儲存 | metrics-server $(v metrics_server)、local-path-provisioner $(v local_path_provisioner) |
-| 工具 | go-task $(v task)、kubectl ${d}（install.sh 下載）|
+| 工具 | uv $(v uv)（Python 3.14 與相依由它安裝）、kubectl ${d}（install.sh 下載）|
 EOM
