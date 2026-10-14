@@ -53,3 +53,9 @@ htpasswd
 
 # 教材已移交 wulin repo；本地殘留的 wulin/ 素材目錄不進版控
 wulin/
+# Python
+.venv/
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
