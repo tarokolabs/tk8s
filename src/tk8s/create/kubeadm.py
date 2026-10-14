@@ -3,8 +3,18 @@
 Plan 1 ships the render sub-phase; init, join and kubeconfig follow with the same shape.
 """
 
-from ..phases import Context, Phase
+import re
+import time
+
+from ..phases import Context, Phase, PhaseFailed
 from ..render import template
+
+KEY_RE = re.compile(r"--certificate-key ([0-9a-f]+)")
+
+
+def kubectl_env(ctx: Context) -> dict[str, str]:
+    """kubectl never sees the caller's KUBECONFIG; every call names the cluster's own."""
+    return {"KUBECONFIG": str(ctx.state_dir / "kubeconfig")}
 
 
 def render_init(ctx: Context) -> str:
@@ -36,10 +46,126 @@ def render_run(ctx: Context) -> None:
 RENDER = Phase(
     "render", "write the kubeadm init configuration into the state dir", render_done, render_run
 )
+
+
+# ---- init
+
+
+def save_certificate_key(ctx: Context, key: str) -> None:
+    ctx.host.write(ctx.state_dir / ".certificate-key", key + "\n", mode=0o600)
+
+
+def wait_lb_ready(ctx: Context) -> None:
+    """kubeadm talked to the apiserver through the LB; make sure the LB reports it healthy before
+    anything else uses the endpoint."""
+    c = ctx.require_cluster()
+    lb = c.spec.network.lb
+    for i in range(1, 31):
+        r = ctx.host.run(
+            ["curl", "-sk", "--max-time", "3", f"https://{lb}:6443/readyz"],
+            capture=True,
+            check=False,
+        )
+        if r.stdout.strip() == "ok":
+            return
+        if i == 30:
+            raise PhaseFailed(
+                f"the apiserver LB at {lb} has no healthy control plane after 60 s "
+                f"(podman logs {c.name}-lb)"
+            )
+        time.sleep(ctx.options.poll)
+
+
+def _initialised(ctx: Context, cp: str) -> bool:
+    r = ctx.host.run(
+        ["podman", "exec", cp, "test", "-f", "/etc/kubernetes/admin.conf"], sudo=True, check=False
+    )
+    return r.returncode == 0
+
+
+def init_done(ctx: Context) -> bool:
+    return _initialised(ctx, ctx.require_cluster().first_control_plane.name)
+
+
+def init_run(ctx: Context) -> None:
+    """kubeadm init on the first control plane; keep the certificate key for the other control
+    planes; wait until the LB sees the apiserver."""
+    cp = ctx.require_cluster().first_control_plane.name
+    if _initialised(ctx, cp):
+        ctx.say(f"  {cp} already initialized")
+    else:
+        ctx.say(f"  kubeadm init on {cp} ...")
+        out = ctx.host.run(
+            [
+                "podman",
+                "exec",
+                cp,
+                "kubeadm",
+                "init",
+                "--config=/opt/taroko/init-config.yaml",
+                "--upload-certs",
+                "--ignore-preflight-errors=SystemVerification",
+            ],
+            sudo=True,
+            capture=True,
+            check=False,
+        )
+        if out.returncode != 0:
+            tail = "\n".join((out.stdout + out.stderr).splitlines()[-30:])
+            raise PhaseFailed(f"kubeadm init on {cp} failed:\n{tail}")
+        m = KEY_RE.search(out.stdout)
+        if m is None:
+            raise PhaseFailed("certificate key not found in kubeadm output")
+        save_certificate_key(ctx, m.group(1))
+        ctx.say(f"  {cp} initialized")
+    wait_lb_ready(ctx)
+
+
+INIT = Phase("init", "kubeadm init on the first control plane", init_done, init_run)
+
+
+# ---- kubeconfig
+
+
+def kubeconfig_done(ctx: Context) -> bool:
+    text = ctx.host.read(ctx.state_dir / "kubeconfig")
+    if not text:
+        return False
+    r = ctx.host.run(
+        ["kubectl", "get", "--raw", "/readyz"], env=kubectl_env(ctx), capture=True, check=False
+    )
+    return r.returncode == 0
+
+
+def kubeconfig_run(ctx: Context) -> None:
+    """The host cannot resolve api.<cluster>.k8s; its kubeconfig points straight at the LB."""
+    c = ctx.require_cluster()
+    cp = c.first_control_plane.name
+    r = ctx.host.run(
+        ["podman", "exec", cp, "cat", "/etc/kubernetes/admin.conf"],
+        sudo=True,
+        capture=True,
+        check=False,
+    )
+    if r.returncode != 0 or not r.stdout.strip():
+        raise PhaseFailed(f"could not read /etc/kubernetes/admin.conf from {cp}")
+    text = r.stdout.replace(
+        f"server: https://api.{c.domain}:6443", f"server: https://{c.spec.network.lb}:6443"
+    )
+    ctx.host.write(ctx.state_dir / "kubeconfig", text, mode=0o600)
+
+
+KUBECONFIG = Phase(
+    "kubeconfig",
+    "hand the host a kubeconfig that points at the LB",
+    kubeconfig_done,
+    kubeconfig_run,
+)
+
 PHASE = Phase(
     "kubeadm",
     "initialise the first control plane and join the others",
     None,
     lambda ctx: None,
-    children=(RENDER,),
+    children=(RENDER, INIT, KUBECONFIG),
 )

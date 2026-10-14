@@ -11,3 +11,10 @@ PHASES: list[Phase] = [
     nodes.PHASE,
     kubeadm.PHASE,
 ]
+
+# --dry-run never touches the host: it resolves the plan and renders every file, nothing else.
+DRY_RUN_PHASES: list[Phase] = [
+    plan.PHASE,
+    units.PHASE,
+    Phase("kubeadm", kubeadm.PHASE.summary, None, lambda ctx: None, children=(kubeadm.RENDER,)),
+]

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from . import images, model, versions
-from .create import PHASES
+from .create import DRY_RUN_PHASES, PHASES
 from .create.plan import PlanError, load_existing, resolve, used_indices
 from .datatree import PreflightError
 from .host import DryRunHost, Host, HostError
@@ -261,9 +261,7 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
         allow_overlap=a.allow_overlap,
         tk8s_version=tk8s_version(HOME),
     )
-    phases = PHASES
-    if a.dry_run:  # the host is never touched: no preflight, no images; plan prints instead
-        phases = [p for p in PHASES if p.name in ("plan", "units", "kubeadm")]
+    phases = DRY_RUN_PHASES if a.dry_run else PHASES
     skip = {s for s in a.skip_phases.split(",") if s}
     Runner(phases, only=a.phase, skip=skip).run(ctx)
     return 0

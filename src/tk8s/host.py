@@ -270,6 +270,7 @@ class FakeHost(Host):
         return self.run(argv, sudo=sudo, env=env, input=text, capture=True).stdout.encode()
 
     def write(self, path: Path, content: str, *, sudo: bool = False, mode: int = 0o644) -> None:
+        self.calls.append(Call(["write", str(path), f"mode={mode:o}"], sudo, {}, content))
         if sudo:
             self.calls.append(
                 Call(
