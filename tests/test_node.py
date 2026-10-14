@@ -95,6 +95,7 @@ def node_ctx(tmp_path: Path) -> tuple[Context, FakeHost]:
     host.podman.update(f"container:{n.name}" for n in c.spec.nodes)
     host.podman.update(f"volume:{v}" for n in c.spec.nodes for v in node_volumes(n.name))
     host.active.update(f"{n.name}.service" for n in c.spec.nodes)
+    host.responses[("curl", "-sk", "--max-time", "3")] = Result(0, "ok", "")  # the LB is healthy
     return ctx, host
 
 
@@ -303,3 +304,31 @@ def test_confirm_delete_node(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         node_delete.confirm_delete(ctx)
     assert prompts == ["Delete node demo-worker-2 from cluster demo? [y/N] "]
     assert host.lines == []
+
+
+def test_delete_control_plane_waits_for_the_lb_before_deleting_the_node(tmp_path: Path) -> None:
+    """kubeadm reset takes the apiserver on that node down; the LB keeps routing to it for a few
+    seconds, and a kubectl delete node in that window dies with EOF."""
+    ctx, host = node_ctx(tmp_path)
+    ctx.cluster = node.with_node(
+        ctx.require_cluster(),
+        model.Node(
+            role="control-plane", name="demo-cp-2", ip=IPv4Address("172.22.0.4"), cpu=2, memory="4g"
+        ),
+    )
+    host.responses = {
+        ("kubectl", "get", "node", "demo-cp-2"): [Result(0, "demo-cp-2", ""), Result(1, "", "")],
+        ("curl", "-sk", "--max-time", "3"): [
+            Result(0, "", ""),
+            Result(56, "", "EOF"),
+            Result(0, "ok", ""),
+        ],
+        **host.responses,
+    }
+    ctx.node = "demo-cp-2"
+    Runner([node_delete.PHASE], record=False).run(ctx)
+    a = argvs(host)
+    reset = a.index(["podman", "exec", "demo-cp-2", "kubeadm", "reset", "-f"])
+    gone = a.index(["kubectl", "delete", "node", "demo-cp-2"])
+    polls = [i for i, x in enumerate(a) if x[:4] == ["curl", "-sk", "--max-time", "3"]]
+    assert len(polls) == 3 and reset < polls[0] and polls[-1] < gone
