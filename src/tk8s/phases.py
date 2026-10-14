@@ -30,6 +30,7 @@ class Options:
     retry_delay: float = 5.0  # seconds between the two attempts of a pull
     poll: float = 2.0  # seconds between polls while waiting for a node or the LB
     poll_slow: float = 5.0  # seconds between polls while waiting for pods and nodes to be Ready
+    verify_timeout: int = 180  # TK_VERIFY_TIMEOUT: seconds to wait for each verify check
 
 
 class PhaseFailed(Exception):
