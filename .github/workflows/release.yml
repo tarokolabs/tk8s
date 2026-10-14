@@ -55,7 +55,18 @@ jobs:
       - name: Wait for L3 on this commit
         env:
           GH_TOKEN: ${{ github.token }}
-        run: scripts/wait-l3.sh "$GITHUB_SHA"
+        # Green as soon as any L3 run for the commit succeeded; red once every run is complete without
+        # a success (a tag push and a main push each get a run, and the concurrency group may cancel one).
+        run: |
+          for _ in $(seq 1 90); do
+            runs=$(gh run list -R "$GITHUB_REPOSITORY" --workflow l3.yaml --commit "$GITHUB_SHA" --json status,conclusion)
+            if echo "$runs" | grep -q '"conclusion":"success"'; then echo "L3 green for $GITHUB_SHA"; exit 0; fi
+            if [ "$runs" != "[]" ] && ! echo "$runs" | grep -qE '"status":"(queued|in_progress|waiting|requested|pending)"'; then
+              echo "L3 red for $GITHUB_SHA: $(echo "$runs" | grep -oE '"conclusion":"[a-z_]+"' | cut -d'"' -f4 | paste -sd, -)" >&2; exit 1
+            fi
+            sleep 30
+          done
+          echo "L3 did not finish for $GITHUB_SHA within 45 min" >&2; exit 1
       - name: Render release notes
         run: scripts/release-notes.sh "$GITHUB_REF_NAME" digests > /tmp/notes.md && cat /tmp/notes.md
       - name: Create the Release

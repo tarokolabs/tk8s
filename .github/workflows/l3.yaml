@@ -1,5 +1,5 @@
-# L3: a real cluster on a GitHub runner for each supported Kubernetes version, on every push to v2/main
-# and tag. Ubuntu 24.04 runners ship podman 4.9, below the 5.4 floor, and OBS has no podman 5 for Ubuntu,
+# L3: a real cluster on a GitHub runner for each supported Kubernetes version, on every push to main
+# (and the python branch while it is open) and tag. Ubuntu 24.04 runners ship podman 4.9, below the 5.4 floor, and OBS has no podman 5 for Ubuntu,
 # so podman is built from source; the node image is built from this checkout so L3 verifies the recipe
 # being released, not whatever GHCR holds.
 # The create runs offline: the shared image store is filled first, every download host is blocked in
@@ -10,7 +10,7 @@ permissions:
   contents: read
 on:
   push:
-    branches: [v2, main]
+    branches: [v2, main, python]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
@@ -84,8 +84,8 @@ jobs:
           tkctl pull images --k8s "${{ matrix.k8s }}" | tee /tmp/pull2.txt
           grep -q "nothing to pull" /tmp/pull2.txt
           tkctl get images --k8s "${{ matrix.k8s }}"
-          # Everything else a create fetches on the host.
-          task -d /opt/taroko/tk8s nodes:cni-plugins cni:cli
+          # Everything else a create fetches on the host: the CNI plugins (cilium's CLI came with pull images).
+          tkctl create cluster ci --workers 1 --k8s "${{ matrix.k8s }}" --phase nodes/cni-plugins
       - name: Block every host tkctl downloads from
         run: |
           # The runner must keep talking to GitHub, so this is a hosts-file block rather than an egress
