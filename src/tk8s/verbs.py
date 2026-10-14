@@ -5,9 +5,10 @@ import argparse
 import os
 from pathlib import Path
 
-from . import delete, images, lifecycle, model, verify, versions
+from . import delete, images, lifecycle, model, node, node_delete, verify, versions
 from .args import (
     UsageError,
+    normalize_memory,
     user_cluster_from_file,
     user_cluster_from_flags,
     validate_k8s,
@@ -159,6 +160,66 @@ def cmd_delete_cluster(a: argparse.Namespace) -> int:
     if a.phase:
         return 0
     print(f"cluster {name} deleted")
+    return 0
+
+
+# ---- add node, join node, delete node
+
+
+def cmd_add_node(a: argparse.Namespace) -> int:
+    if not a.cluster:
+        raise UsageError(
+            "usage: tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] "
+            "[--no-join]"
+        )
+    if a.role not in ("worker", "control-plane"):
+        raise UsageError("--role must be worker or control-plane")
+    if a.cpu is not None and a.cpu < 1:
+        raise UsageError("--cpu must be a positive integer")
+    memory = normalize_memory(a.memory) if a.memory else None
+    ctx = make_context()
+    c = lifecycle.load_cluster(ctx, validate_name(a.cluster))
+    if c.status is None or c.status.phase != "Ready":
+        raise lifecycle.ClusterError(f"cluster {c.name} is not fully created (tkctl get clusters)")
+    ctx.request = model.NodeRequest(role=a.role, cpu=a.cpu, memory=memory, join=not a.no_join)
+    Runner([node.add_phase(join=not a.no_join)], record=False).run(ctx)
+    print()
+    if a.no_join:
+        print(f"{ctx.node} left unjoined; join with: tkctl join node {c.name} {ctx.node}")
+    else:
+        print(f"node {ctx.node} added to cluster {c.name}")
+    return 0
+
+
+def cmd_join_node(a: argparse.Namespace) -> int:
+    if not a.cluster or not a.node:
+        raise UsageError("usage: tkctl join node CLUSTER NODE")
+    ctx = make_context()
+    c = lifecycle.load_cluster(ctx, validate_name(a.cluster))
+    if node.find(c, a.node) is None:
+        raise lifecycle.ClusterError(f"node {a.node} not found in cluster {c.name}")
+    ctx.node = a.node
+    Runner([node.JOIN_PHASE], record=False).run(ctx)
+    print()
+    print(f"node {a.node} joined cluster {c.name}")
+    return 0
+
+
+def cmd_delete_node(a: argparse.Namespace) -> int:
+    if not a.cluster or not a.node:
+        raise UsageError("usage: tkctl delete node CLUSTER NODE [--yes]")
+    ctx = make_context(assume_yes=a.yes or os.environ.get("TK_ASSUME_YES") == "1")
+    c = lifecycle.load_cluster(ctx, validate_name(a.cluster))
+    ctx.node = a.node
+    if node.find(c, a.node) is not None:
+        node.deletable(c, a.node)
+    elif not ctx.host.exists(node.unit_file(ctx)):  # a delete that stopped after `entry` resumes
+        raise lifecycle.ClusterError(f"node {a.node} not found in cluster {c.name}")
+    node_delete.confirm_delete(ctx)
+    Runner([node_delete.PHASE], only=a.phase, record=False).run(ctx)
+    if a.phase:
+        return 0
+    print(f"node {a.node} removed")
     return 0
 
 

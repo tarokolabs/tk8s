@@ -14,11 +14,14 @@ from .host import HostError
 from .phases import PhaseFailed, tk8s_version
 from .verbs import (
     HOME,
+    cmd_add_node,
     cmd_cluster,
     cmd_create,
     cmd_delete_cluster,
+    cmd_delete_node,
     cmd_get_clusters,
     cmd_images,
+    cmd_join_node,
     cmd_verify,
 )
 
@@ -36,7 +39,7 @@ Usage:
   tkctl use cluster NAME
   tkctl verify cluster NAME [--phase P] [--list-phases]
   tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] [--no-join]
-  tkctl delete node CLUSTER NODE [--yes]
+  tkctl delete node CLUSTER NODE [--yes] [--phase P]
   tkctl join node CLUSTER NODE
   tkctl pull images [--k8s VERSION] [--refresh]
                          (--refresh: pull the node image again even when its tag is present)
@@ -88,7 +91,6 @@ KNOWN_VERBS = {
     "pull",
     "version",
 }
-NOT_YET = {"add", "join"}
 NOUNS = {
     "create": {"cluster"},
     "verify": {"cluster"},
@@ -160,6 +162,28 @@ def build_parser() -> argparse.ArgumentParser:
             dc.add_argument("--yes", action="store_true")
             dc.add_argument("--phase")
             dc.add_argument("--list-phases", action="store_true")
+            dn = nouns.add_parser("node", add_help=False)
+            dn.add_argument("cluster", nargs="?")
+            dn.add_argument("node", nargs="?")
+            dn.add_argument("--yes", action="store_true")
+            dn.add_argument("--phase")
+    an = (
+        sub.add_parser("add", add_help=False)
+        .add_subparsers(dest="noun")
+        .add_parser("node", add_help=False)
+    )
+    an.add_argument("cluster", nargs="?")
+    an.add_argument("--role")
+    an.add_argument("--cpu", type=int)
+    an.add_argument("--memory")
+    an.add_argument("--no-join", action="store_true")
+    jn = (
+        sub.add_parser("join", add_help=False)
+        .add_subparsers(dest="noun")
+        .add_parser("node", add_help=False)
+    )
+    jn.add_argument("cluster", nargs="?")
+    jn.add_argument("node", nargs="?")
     for verb in ("describe", "stop", "start", "use"):
         nouns = sub.add_parser(verb, add_help=False).add_subparsers(dest="noun")
         p = nouns.add_parser("cluster", add_help=False)
@@ -229,8 +253,6 @@ def _main(args: list[str]) -> int:
             os.execvp(plugin[0], plugin)
         raise UsageError(f"unknown command '{verb}' (see tkctl --help)")
     noun = args[1] if len(args) > 1 else ""
-    if f"{verb} {noun}" in NOT_YET or verb in NOT_YET:
-        raise UsageError(f"{verb} {noun} is not implemented yet on this branch")
     if noun not in NOUNS[verb]:
         raise UsageError(_usage_of(verb))
     try:
@@ -245,6 +267,12 @@ def _main(args: list[str]) -> int:
         return cmd_get_clusters()
     if a.verb == "delete" and a.noun == "cluster":
         return cmd_delete_cluster(a)
+    if a.verb == "add" and a.noun == "node":
+        return cmd_add_node(a)
+    if a.verb == "join" and a.noun == "node":
+        return cmd_join_node(a)
+    if a.verb == "delete" and a.noun == "node":
+        return cmd_delete_node(a)
     if a.verb in ("describe", "stop", "start", "use") and a.noun == "cluster":
         return cmd_cluster(a.verb, a)
     if a.noun == "images":

@@ -480,3 +480,90 @@ def test_delete_cluster_verb(
     assert (
         rc == 0 and "cluster.yaml" in out and "cluster demo deleted" in out
     )  # reported, not fatal
+
+
+def test_node_verbs(
+    capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.fixtures import ready_host
+    from tests.test_node import new_node_answers
+    from tk8s import model, verbs
+    from tk8s.host import FakeHost, Result
+
+    host = FakeHost()
+    monkeypatch.setattr(verbs, "make_context", lambda **kw: fake_context(host, **kw))
+    c = ready_host(host, data_dir)
+    state = data_dir / "clusters" / "demo"
+    state.mkdir(parents=True)
+    new_node_answers(host, "demo-worker-3", ready_after=0)
+    assert c.status is not None
+    ready = c.model_copy(update={"status": c.status.model_copy(update={"phase": "Ready"})})
+    (state / "cluster.yaml").write_text(model.dumps(ready))
+    host.files[state / "cluster.yaml"] = model.dumps(ready)
+    rc, out = run(capsys, "add", "node", "demo", "--role", "worker", "--no-join")
+    assert rc == 0 and "[add/plan]" in out
+    assert out.rstrip().endswith(
+        "demo-worker-3 left unjoined; join with: tkctl join node demo demo-worker-3"
+    )
+    (state / "cluster.yaml").write_text(
+        host.files[state / "cluster.yaml"]
+    )  # the next verb reads disk
+    host.active.add("demo-worker-3.service")
+    rc, out = run(capsys, "join", "node", "demo", "demo-worker-3")
+    assert rc == 0 and "[join/kubeadm]" in out
+    assert out.rstrip().endswith("node demo-worker-3 joined cluster demo")
+    (state / "cluster.yaml").write_text(host.files[state / "cluster.yaml"])
+    host.podman.add("container:demo-worker-3")
+    host.responses[("kubectl", "get", "node", "demo-worker-3")] = [
+        Result(0, "", ""),
+        Result(1, "", ""),
+    ]  # joined, then gone
+    monkeypatch.setattr("builtins.input", lambda prompt: "n")
+    rc, out = run(capsys, "delete", "node", "demo", "demo-worker-3")
+    assert rc == 1 and out.rstrip().endswith("tkctl: aborted")
+    rc, out = run(capsys, "delete", "node", "demo", "demo-worker-3", "--yes")
+    assert rc == 0 and "[delete/drain]" in out
+    assert out.rstrip().endswith("node demo-worker-3 removed")
+    rc, out = run(capsys, "delete", "node", "demo", "demo-cp-1", "--yes")
+    assert rc == 1 and "the first control plane demo-cp-1 cannot be deleted" in out
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["add", "node", "demo"], "--role must be worker or control-plane"),
+        (["add", "node", "demo", "--role", "lb"], "--role must be worker or control-plane"),
+        (
+            ["add", "node", "demo", "--role", "worker", "--memory", "4Gi"],
+            "invalid --memory '4Gi'",
+        ),
+        (
+            ["add", "node"],
+            "usage: tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] "
+            "[--no-join]",
+        ),
+        (["join", "node", "demo"], "usage: tkctl join node CLUSTER NODE"),
+        (["delete", "node", "demo"], "usage: tkctl delete node CLUSTER NODE [--yes]"),
+        (["add", "node", "nope", "--role", "worker"], "cluster nope not found under"),
+    ],
+)
+def test_node_verb_usage_errors(
+    capsys: pytest.CaptureFixture[str], argv: list[str], message: str
+) -> None:
+    rc, out = run(capsys, *argv)
+    assert rc != 0 and message in out, out
+
+
+def test_add_node_refuses_a_cluster_still_creating(
+    capsys: pytest.CaptureFixture[str], data_dir: Path
+) -> None:
+    from tests.fixtures import ready_host
+    from tk8s import model
+    from tk8s.host import FakeHost
+
+    c = ready_host(FakeHost(), data_dir)  # resolve() leaves status.phase at Creating
+    state = data_dir / "clusters" / "demo"
+    state.mkdir(parents=True)
+    (state / "cluster.yaml").write_text(model.dumps(c))
+    rc, out = run(capsys, "add", "node", "demo", "--role", "worker")
+    assert rc == 1 and "cluster demo is not fully created (tkctl get clusters)" in out

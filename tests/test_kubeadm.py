@@ -316,3 +316,13 @@ def test_init_already_done_waits_for_the_apiserver_before_judging_completion(
         if c.argv[:4] == ["podman", "exec", "demo-cp-1", "kubectl"] and i > curl_at
     )
     assert curl_at < cm_at
+
+
+def test_certificate_key_fresh_ignores_the_stored_key(ctx: Context, host: FakeHost) -> None:
+    host.files[ctx.state_dir / ".certificate-key"] = "stale\n"
+    host.responses[("podman", "exec", "demo-cp-1", "kubeadm", "init", "phase", "upload-certs")] = (
+        Result(0, "[upload-certs] Using certificate key:\nnewkey\n", "")
+    )
+    assert kubeadm.certificate_key(ctx) == "stale"
+    assert kubeadm.certificate_key(ctx, fresh=True) == "newkey"
+    assert host.files[ctx.state_dir / ".certificate-key"] == "newkey\n"

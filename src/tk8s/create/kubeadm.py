@@ -231,9 +231,10 @@ def join_command(ctx: Context) -> str:
     return r.stdout.replace("\r", "").strip()
 
 
-def certificate_key(ctx: Context) -> str:
-    """The stored key, or a fresh upload: certificate keys expire after two hours."""
-    stored = ctx.host.read(ctx.state_dir / ".certificate-key")
+def certificate_key(ctx: Context, *, fresh: bool = False) -> str:
+    """The stored key, or a fresh upload. Certificate keys expire after two hours: create reuses
+    the one init just made, a join days later asks for a new one (fresh=True)."""
+    stored = None if fresh else ctx.host.read(ctx.state_dir / ".certificate-key")
     if stored and stored.strip():
         return stored.strip()
     cp = ctx.require_cluster().first_control_plane.name
