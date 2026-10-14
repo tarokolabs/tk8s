@@ -24,7 +24,7 @@ def find(c: model.Cluster, name: str) -> model.Node | None:
 def next_name(c: model.Cluster, role: model.Role) -> str:
     """Past the highest existing suffix, never by count: a deleted node's name is not reused while
     a higher-numbered node exists."""
-    base = f"{c.name}-cp-" if role == "control-plane" else f"{c.name}-worker-"
+    base = f"{c.name}-{role}-"  # <cluster>-control-plane-N / <cluster>-worker-N
     suffixes = [n.name[len(base) :] for n in c.spec.nodes if n.name.startswith(base)]
     used = [int(s) for s in suffixes if s.isdigit()]
     return f"{base}{max(used, default=0) + 1}"

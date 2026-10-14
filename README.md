@@ -74,8 +74,8 @@ addons             RuntimeClass, gVisor, metrics-server, local-path
   $ sudo -n install -D -m 644 /dev/stdin /etc/containers/systemd/demo/demo.network
   …
 [kubeadm/init] kubeadm init on the first control plane
-  $ sudo -n podman exec demo-cp-1 kubeadm init --config=/opt/taroko/init-config.yaml --upload-certs --ignore-preflight-errors=SystemVerification
-  demo-cp-1 initialized
+  $ sudo -n podman exec demo-control-plane-1 kubeadm init --config=/opt/taroko/init-config.yaml --upload-certs --ignore-preflight-errors=SystemVerification
+  demo-control-plane-1 initialized
 …
 cluster demo is ready
 ```
@@ -147,7 +147,7 @@ tkctl version
 
 幾個規則：
 
-- 名稱省略是 `tk8s`。名稱進節點名（`tk8s-cp-1`、`tk8s-worker-1`，全部從 1 編號）與叢集 DNS 網域（`tk8s.k8s`），格式 `^[a-z][a-z0-9-]{0,15}$`。
+- 名稱省略是 `tk8s`。名稱進節點名（`tk8s-control-plane-1`、`tk8s-worker-1`，全部從 1 編號）與叢集 DNS 網域（`tk8s.k8s`），格式 `^[a-z][a-z0-9-]{0,15}$`。
 - `--control-planes` 要是奇數、最多 5；不論幾台，apiserver 的入口都是 `api.<叢集>.k8s:6443`，由 `.100` 的 HAProxy 容器服務。
 - `--defer-join`：第一個以外的 control plane 建起來但不 join，之後用 `tkctl join node` 加入。這是 HA 練習用的。
 - `--gvisor` 需要 veth datapath，會自動選；明確指定 `--datapath netkit` 加 `--gvisor` 會被拒絕。

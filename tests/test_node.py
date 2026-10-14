@@ -18,9 +18,9 @@ def worker(n: int, ip: str, join: bool = True) -> model.Node:
 
 
 def test_next_name_skips_past_the_highest_suffix(ctx: Context) -> None:
-    c = ctx.require_cluster()  # demo-cp-1, demo-worker-1, demo-worker-2
+    c = ctx.require_cluster()  # demo-control-plane-1, demo-worker-1, demo-worker-2
     assert node.next_name(c, "worker") == "demo-worker-3"
-    assert node.next_name(c, "control-plane") == "demo-cp-2"
+    assert node.next_name(c, "control-plane") == "demo-control-plane-2"
     c = node.without_node(node.with_node(c, worker(3, "172.22.0.4")), "demo-worker-2")
     assert node.next_name(c, "worker") == "demo-worker-4"  # not by count: 2 is not reused
 
@@ -49,7 +49,7 @@ def test_plan_add_inherits_the_size_of_the_first_node_of_the_role(ctx: Context) 
         True,
     )
     n = node.plan_add(c, model.NodeRequest(role="control-plane", cpu=4, memory="8g", join=False))
-    assert (n.name, n.cpu, n.memory, n.join) == ("demo-cp-2", 4, "8g", False)
+    assert (n.name, n.cpu, n.memory, n.join) == ("demo-control-plane-2", 4, "8g", False)
     spec = c.spec.model_copy(update={"nodes": [c.first_control_plane]})
     only_cp = c.model_copy(update={"spec": spec})
     assert node.plan_add(only_cp, model.NodeRequest(role="worker")).cpu == c.first_control_plane.cpu
@@ -59,13 +59,14 @@ def test_without_node_refuses_the_first_control_plane_and_unknown_nodes(ctx: Con
     c = ctx.require_cluster()
     with pytest.raises(
         lifecycle.ClusterError,
-        match="the first control plane demo-cp-1 cannot be deleted; delete the cluster instead",
+        match="the first control plane demo-control-plane-1 cannot be deleted; "
+        "delete the cluster instead",
     ):
-        node.without_node(c, "demo-cp-1")
+        node.without_node(c, "demo-control-plane-1")
     with pytest.raises(lifecycle.ClusterError, match="node demo-nope not found in cluster demo"):
         node.without_node(c, "demo-nope")
     c2 = node.without_node(c, "demo-worker-2")
-    assert [n.name for n in c2.spec.nodes] == ["demo-cp-1", "demo-worker-1"]
+    assert [n.name for n in c2.spec.nodes] == ["demo-control-plane-1", "demo-worker-1"]
     assert c2.spec.network == c.spec.network and c2.status == c.status
 
 
@@ -142,7 +143,10 @@ def test_add_worker_runs_plan_units_start_addons_join_in_order(tmp_path: Path) -
     assert [n.name for n in saved.spec.nodes][-1] == "demo-worker-3" and saved.spec.nodes[-1].join
     assert saved.status is not None and saved.status.phase == "Ready"  # untouched
     unit = ctx.paths.unit_dir / "demo" / "demo-worker-3.container"
-    assert "IP=172.22.0.4" in host.files[unit] and "After=demo-cp-1.service" in host.files[unit]
+    assert (
+        "IP=172.22.0.4" in host.files[unit]
+        and "After=demo-control-plane-1.service" in host.files[unit]
+    )
     assert "demo-worker-3.service" in host.files[ctx.paths.systemd_dir / "demo.target"]
     a = argvs(host)
     reload_ = a.index(["podman", "kill", "--signal", "USR2", "demo-lb"])
@@ -157,18 +161,23 @@ def test_add_worker_runs_plan_units_start_addons_join_in_order(tmp_path: Path) -
 
 def test_add_control_plane_uploads_a_fresh_certificate_key(tmp_path: Path) -> None:
     ctx, host = node_ctx(tmp_path)
-    new_node_answers(host, "demo-cp-2", ready_after=1)  # ready runs once, and untaints
-    host.responses[("podman", "exec", "demo-cp-1", "kubeadm", "init", "phase", "upload-certs")] = (
-        Result(0, "[upload-certs] Using certificate key:\nfeedfacefeedface\n", "")
-    )
+    new_node_answers(host, "demo-control-plane-2", ready_after=1)  # ready runs once, and untaints
+    host.responses[
+        ("podman", "exec", "demo-control-plane-1", "kubeadm", "init", "phase", "upload-certs")
+    ] = Result(0, "[upload-certs] Using certificate key:\nfeedfacefeedface\n", "")
     ctx.request = model.NodeRequest(role="control-plane", cpu=4)
     Runner([node.add_phase(join=True)], record=False).run(ctx)
-    join = next(x for x in argvs(host) if x[:5] == ["podman", "exec", "demo-cp-2", "bash", "-c"])
+    join = next(
+        x for x in argvs(host) if x[:5] == ["podman", "exec", "demo-control-plane-2", "bash", "-c"]
+    )
     key = "--control-plane --certificate-key feedfacefeedface"
     assert f"{key} --apiserver-advertise-address 172.22.0.4" in join[5]
     assert host.files[ctx.state_dir / ".certificate-key"] == "feedfacefeedface\n"
     assert any(x[:3] == ["kubectl", "taint", "node"] for x in argvs(host))
-    assert "server demo-cp-2 172.22.0.4:6443" in host.files[ctx.state_dir / "lb" / "haproxy.cfg"]
+    assert (
+        "server demo-control-plane-2 172.22.0.4:6443"
+        in host.files[ctx.state_dir / "lb" / "haproxy.cfg"]
+    )
 
 
 def test_add_no_join_stops_after_the_addons(tmp_path: Path) -> None:
@@ -249,14 +258,14 @@ def test_delete_node_drains_stops_removes_and_rerenders(tmp_path: Path) -> None:
     for v in node_volumes("demo-worker-2"):
         assert ["podman", "volume", "rm", "-f", v] in a
     saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
-    assert [n.name for n in saved.spec.nodes] == ["demo-cp-1", "demo-worker-1"]
+    assert [n.name for n in saved.spec.nodes] == ["demo-control-plane-1", "demo-worker-1"]
     unit = ctx.paths.unit_dir / "demo" / "demo-worker-2.container"
     assert ["rm", "-f", str(unit)] in a and unit not in host.files
     assert "demo-worker-2.service" not in host.files[ctx.paths.systemd_dir / "demo.target"]
     assert a.index(["podman", "kill", "--signal", "USR2", "demo-lb"]) > a.index(
         ["rm", "-f", str(unit)]
     )
-    kept = ("demo-cp-1", "demo-worker-1")
+    kept = ("demo-control-plane-1", "demo-worker-1")
     assert host.podman == {f"container:{n}" for n in kept} | {
         f"volume:{v}" for n in kept for v in node_volumes(n)
     }
@@ -284,7 +293,7 @@ def test_delete_node_resumes_after_the_unit_file_went(tmp_path: Path) -> None:
     assert len(done) == 4  # drain, stop, container, volumes
     assert "demo-worker-2.service" not in host.files[ctx.paths.systemd_dir / "demo.target"]
     saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
-    assert [n.name for n in saved.spec.nodes] == ["demo-cp-1", "demo-worker-1"]
+    assert [n.name for n in saved.spec.nodes] == ["demo-control-plane-1", "demo-worker-1"]
 
 
 def test_drain_failure_is_reported_not_fatal(tmp_path: Path) -> None:
@@ -331,12 +340,16 @@ def test_delete_control_plane_waits_for_the_lb_before_deleting_the_node(tmp_path
     ctx.cluster = node.with_node(
         ctx.require_cluster(),
         model.Node(
-            role="control-plane", name="demo-cp-2", ip=IPv4Address("172.22.0.4"), cpu=2, memory="4g"
+            role="control-plane",
+            name="demo-control-plane-2",
+            ip=IPv4Address("172.22.0.4"),
+            cpu=2,
+            memory="4g",
         ),
     )
     host.responses = {
-        ("kubectl", "get", "node", "demo-cp-2"): [
-            Result(0, "demo-cp-2", ""),
+        ("kubectl", "get", "node", "demo-control-plane-2"): [
+            Result(0, "demo-control-plane-2", ""),
             Result(1, "", "NotFound"),
         ],
         **host.responses,
@@ -346,11 +359,11 @@ def test_delete_control_plane_waits_for_the_lb_before_deleting_the_node(tmp_path
         Result(56, "", "EOF"),
         Result(0, "ok", ""),
     ]
-    ctx.node = "demo-cp-2"
+    ctx.node = "demo-control-plane-2"
     Runner([node_delete.PHASE], record=False).run(ctx)
     a = argvs(host)
-    reset = a.index(["podman", "exec", "demo-cp-2", "kubeadm", "reset", "-f"])
-    gone = a.index(["kubectl", "delete", "node", "demo-cp-2"])
+    reset = a.index(["podman", "exec", "demo-control-plane-2", "kubeadm", "reset", "-f"])
+    gone = a.index(["kubectl", "delete", "node", "demo-control-plane-2"])
     polls = [i for i, x in enumerate(a) if x[:4] == ["curl", "-sk", "--max-time", "3"]]
     assert len(polls) == 3 and reset < polls[0] and polls[-1] < gone
 

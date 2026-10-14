@@ -151,12 +151,14 @@ def test_fake_host_tracks_units_systemctl_starts_and_stops() -> None:
 
 
 def test_fake_host_tracks_podman_containers_volumes_and_networks() -> None:
-    host = FakeHost(podman={"container:demo-cp-1", "volume:demo-cp-1-var", "network:demo"})
-    ok = host.run(["podman", "container", "exists", "demo-cp-1"], sudo=True, check=False)
+    host = FakeHost(
+        podman={"container:demo-control-plane-1", "volume:demo-control-plane-1-var", "network:demo"}
+    )
+    ok = host.run(["podman", "container", "exists", "demo-control-plane-1"], sudo=True, check=False)
     missing = host.run(["podman", "volume", "exists", "nope"], sudo=True, check=False)
     assert (ok.returncode, missing.returncode) == (0, 1)
-    host.run(["podman", "rm", "-f", "demo-cp-1"], sudo=True)
-    host.run(["podman", "volume", "rm", "-f", "demo-cp-1-var"], sudo=True)
+    host.run(["podman", "rm", "-f", "demo-control-plane-1"], sudo=True)
+    host.run(["podman", "volume", "rm", "-f", "demo-control-plane-1-var"], sudo=True)
     host.run(["podman", "network", "rm", "-f", "demo"], sudo=True)
     assert host.podman == set()
     host.podman.add("container:x")
