@@ -57,7 +57,7 @@ class Context:
 class Phase:
     name: str
     summary: str
-    done: Callable[[Context], bool]
+    done: Callable[[Context], bool] | None  # None: no completion state, runs every time
     run: Callable[[Context], None]
     children: tuple[Phase, ...] = ()
 
@@ -81,7 +81,7 @@ class Runner:
             if full in self.skip or full.split("/")[0] in self.skip:
                 ctx.say(f"[{full}] skipped")
                 continue
-            if phase.done(ctx):
+            if phase.done is not None and phase.done(ctx):
                 ctx.say(f"[{full}] already done")
                 continue
             ctx.say(f"[{full}] {phase.summary}")
@@ -92,7 +92,7 @@ class Runner:
             if ctx.options.dry_run:
                 ctx.say("")  # keep the file blocks apart from the next phase line
                 continue
-            if not phase.done(ctx):
+            if phase.done is not None and not phase.done(ctx):
                 raise PhaseFailed(f"[{full}] ran but is not done")
             self._record(ctx, full)
 

@@ -39,7 +39,7 @@ RENDER = Phase(
 PHASE = Phase(
     "kubeadm",
     "initialise the first control plane and join the others",
-    lambda ctx: False,
+    None,
     lambda ctx: None,
     children=(RENDER,),
 )

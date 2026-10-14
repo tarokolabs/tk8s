@@ -104,3 +104,16 @@ def test_completed_phases_are_recorded_in_cluster_yaml_through_the_host(ctx: Con
     Runner([p]).run(ctx)
     saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
     assert saved.status is not None and "p" in saved.status.completed
+
+
+def test_a_phase_without_completion_state_runs_every_time(tmp_path: Path) -> None:
+    ctx, host = make_ctx(tmp_path)
+    runs = {"n": 0}
+
+    def run(c: Context) -> None:
+        runs["n"] += 1
+
+    always = Phase("preflight", "check the host", None, run)
+    Runner([always]).run(ctx)
+    Runner([always]).run(ctx)
+    assert runs["n"] == 2 and host.lines == ["[preflight] check the host"] * 2
