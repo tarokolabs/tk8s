@@ -7,7 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import images, model, versions
+from . import images, model, verify, versions
 from .create import DRY_RUN_PHASES, PHASES
 from .create.plan import PlanError, load_existing, resolve, used_indices
 from .datatree import PreflightError
@@ -29,7 +29,7 @@ Usage:
   tkctl stop cluster NAME
   tkctl start cluster NAME
   tkctl use cluster NAME
-  tkctl verify cluster NAME
+  tkctl verify cluster NAME [--phase P] [--list-phases]
   tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] [--no-join]
   tkctl delete node CLUSTER NODE [--yes]
   tkctl join node CLUSTER NODE
@@ -92,7 +92,6 @@ NOT_YET = {
     "stop",
     "start",
     "use",
-    "verify",
     "add",
     "join",
 }
@@ -244,8 +243,6 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
         )
     if a.gvisor and a.datapath is None:
         a.datapath = "veth"
-    if not a.dry_run:
-        raise UsageError("create cluster is not implemented yet on this branch beyond --dry-run")
     topo = any(f in raw for f in ("--control-planes", "--workers", "--cpu", "--memory"))
     user = user_cluster_from_file(a, topo) if a.file else user_cluster_from_flags(a)
     ctx = make_context(dry_run=a.dry_run, quiet=a.quiet)
@@ -264,7 +261,40 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
     phases = DRY_RUN_PHASES if a.dry_run else PHASES
     skip = {s for s in a.skip_phases.split(",") if s}
     Runner(phases, only=a.phase, skip=skip).run(ctx)
+    if a.dry_run or a.phase:
+        return 0
+    c = ctx.require_cluster()
+    if c.status is not None and c.status.phase != "Ready":
+        status = c.status.model_copy(update={"phase": "Ready"})
+        ctx.cluster = c.model_copy(update={"status": status})
+        ctx.host.write(ctx.state_dir / "cluster.yaml", model.dumps(ctx.cluster))
+    print()
+    print(f"cluster {c.name} is ready")
+    print(f"  kubeconfig: {ctx.state_dir}/kubeconfig   (tkctl use cluster {c.name})")
+    print(f"  units:      /etc/containers/systemd/{c.name}/   target: {c.name}.target")
+    print(f"  describe:   tkctl describe cluster {c.name}")
     return 0
+
+
+# ---- verify cluster
+
+
+def cmd_verify(a: argparse.Namespace) -> int:
+    if a.list_phases:
+        print("\n".join(tree(verify.PHASES)))
+        return 0
+    if not a.name:
+        raise UsageError("usage: tkctl verify cluster NAME [--phase P]")
+    name = validate_name(a.name)
+    ctx = make_context()
+    state = ctx.paths.state_dir(name)
+    if not (state / "cluster.yaml").exists():
+        raise UsageError(
+            f"cluster {name} not found under {ctx.paths.clusters_dir} (tkctl get clusters)"
+        )
+    marker = (state / ".create-complete").exists()
+    ctx.cluster = model.load(state / "cluster.yaml", create_complete_marker=marker)
+    return 1 if verify.run(ctx, only=a.phase) else 0
 
 
 # ---- images verbs
@@ -301,6 +331,7 @@ def make_context(
         offline=os.environ.get("TK_OFFLINE") == "1",
         assume_yes=assume_yes or os.environ.get("TK_ASSUME_YES") == "1",
         refresh=refresh,
+        verify_timeout=int(os.environ.get("TK_VERIFY_TIMEOUT") or 180),
     )
     host: Host = DryRunHost(print, quiet=quiet) if dry_run else Host(print, quiet=quiet)
     return Context(
@@ -317,6 +348,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub = ap.add_subparsers(dest="verb")
     create = sub.add_parser("create", add_help=False).add_subparsers(dest="noun")
     add_create_flags(create.add_parser("cluster", add_help=False))
+    v = sub.add_parser("verify", add_help=False).add_subparsers(dest="noun")
+    vc = v.add_parser("cluster", add_help=False)
+    vc.add_argument("name", nargs="?")
+    vc.add_argument("--phase")
+    vc.add_argument("--list-phases", action="store_true")
     for verb in ("pull", "get", "delete"):
         nouns = sub.add_parser(verb, add_help=False).add_subparsers(dest="noun")
         p = nouns.add_parser("images", add_help=False)
@@ -342,6 +378,7 @@ def main(argv: list[str] | None = None) -> int:
         images.ImagesError,
         HostError,
         PreflightError,
+        verify.VerifyError,
     ) as err:
         print(f"tkctl: {err}", file=sys.stderr)
         return 1
@@ -386,6 +423,8 @@ def _main(args: list[str]) -> int:
         return int(err.code or 1)
     if a.verb == "create" and a.noun == "cluster":
         return cmd_create(a, args)
+    if a.verb == "verify" and a.noun == "cluster":
+        return cmd_verify(a)
     if a.noun == "images":
         return cmd_images(a.verb, a)
     raise UsageError(f"unknown command '{' '.join(args[:2])}' (see tkctl --help)")

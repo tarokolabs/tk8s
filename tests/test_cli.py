@@ -241,13 +241,6 @@ def test_plugins_exec_with_the_callers_environment(
     assert seen["env"]["TK_LAB_PVE_TOKEN"] == "secret"  # type: ignore[index]
 
 
-def test_create_without_dry_run_is_refused_on_this_branch(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    rc, out = run(capsys, "create", "cluster", "demo")
-    assert rc == 1 and "not implemented yet on this branch" in out
-
-
 def test_host_and_preflight_errors_are_one_line(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -279,3 +272,77 @@ def test_a_broken_cluster_yaml_of_another_cluster_does_not_block_create(
     )
     rc, out = run(capsys, "create", "cluster", "--dry-run")
     assert rc == 0 and "index: 1" in out  # the old file's index still counts
+
+
+def test_create_runs_every_phase_and_marks_the_cluster_ready(
+    capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.fixtures import ready_host
+    from tk8s import cli, model, versions
+    from tk8s.host import FakeHost
+    from tk8s.paths import Paths
+    from tk8s.phases import Context, Options
+
+    host = FakeHost()
+
+    def fake_context(**kw: object) -> Context:
+        paths = Paths.from_env(cli.HOME)
+        return Context(
+            host=host,
+            paths=paths,
+            versions=versions.load(cli.HOME / "versions.yaml"),
+            options=Options(poll=0, poll_slow=0, retry_delay=0),
+            say=print,
+        )
+
+    monkeypatch.setattr(cli, "make_context", fake_context)
+    ready_host(host, data_dir)
+    rc, out = run(capsys, "create", "cluster", "demo")
+    assert rc == 0
+    phases = [line.split("]")[0][1:] for line in out.splitlines() if line.startswith("[")]
+    assert phases == [
+        "preflight",
+        "plan",
+        "images",
+        "units",
+        "nodes/cni-plugins",
+        "nodes/up",
+        "kubeadm/render",
+        "kubeadm/init",
+        "kubeadm/kubeconfig",
+        "kubeadm/join",
+        "cni/install",
+        "cni/nodes-ready",
+        "addons/runtimeclass",
+        "addons/gvisor",
+        "addons/metrics-server",
+        "addons/local-path",
+    ]
+    assert "cluster demo is ready" in out and "tkctl use cluster demo" in out
+    saved = model.load_text(host.files[data_dir / "clusters" / "demo" / "cluster.yaml"])
+    assert saved.status is not None and saved.status.phase == "Ready"
+
+
+def test_verify_cluster_verb(
+    capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tk8s import verify
+
+    rc, out = run(capsys, "verify", "cluster", "nope")
+    assert rc == 1
+    assert f"cluster nope not found under {data_dir}/clusters (tkctl get clusters)" in out
+    calls: list[tuple[object, str | None]] = []
+
+    def fake_run(ctx: object, only: str | None = None) -> int:
+        calls.append((ctx, only))
+        return 1
+
+    monkeypatch.setattr(verify, "run", fake_run)
+    (data_dir / "clusters" / "demo").mkdir(parents=True)
+    (data_dir / "clusters" / "demo" / "cluster.yaml").write_text(TAKEN.replace("taken", "demo"))
+    monkeypatch.setenv("TK_VERIFY_TIMEOUT", "30")
+    rc, out = run(capsys, "verify", "cluster", "demo", "--phase", "nodes")
+    assert rc == 1 and calls[0][1] == "nodes"
+    assert calls[0][0].options.verify_timeout == 30  # type: ignore[attr-defined]
+    rc, out = run(capsys, "verify", "cluster", "--list-phases")
+    assert rc == 0 and out.splitlines()[0].startswith("nodes") and "tcproute" in out
