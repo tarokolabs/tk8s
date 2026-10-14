@@ -442,3 +442,41 @@ def test_cluster_verb_usage_errors(
 ) -> None:
     rc, out = run(capsys, *argv)
     assert rc != 0 and message in out, out
+
+
+def test_delete_cluster_verb(
+    capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.fixtures import ready_host
+    from tk8s import verbs
+    from tk8s.host import FakeHost
+
+    host = FakeHost()
+    monkeypatch.setattr(verbs, "make_context", lambda **kw: fake_context(host, **kw))
+    ready_host(host, data_dir)
+    state = data_dir / "clusters" / "demo"
+    state.mkdir(parents=True)
+    (state / "cluster.yaml").write_text(host.files[state / "cluster.yaml"])
+    host.dirs.add(state)
+    monkeypatch.setattr("builtins.input", lambda prompt: "n")
+    rc, out = run(capsys, "delete", "cluster", "demo")
+    assert rc == 1 and out.rstrip().endswith("tkctl: aborted")
+    assert (state / "cluster.yaml").exists()
+    rc, out = run(capsys, "delete", "cluster", "demo", "--list-phases")
+    assert rc == 0 and out.splitlines()[0].startswith("delete") and "  state" in out
+    rc, out = run(capsys, "delete", "cluster", "demo", "--yes", "--phase", "delete/stop")
+    assert rc == 0 and "[delete/stop]" in out and "deleted" not in out
+    rc, out = run(capsys, "delete", "cluster", "demo", "--yes")
+    assert rc == 0 and "[delete/stop]" in out and out.rstrip().endswith("cluster demo deleted")
+    assert ["rm", "-rf", str(state)] in [k.argv for k in host.calls]
+    rc, out = run(capsys, "delete", "cluster", "nothing", "--yes")
+    assert rc == 1 and "cluster nothing not found: no state under" in out and "no network" in out
+    rc, out = run(capsys, "delete", "cluster")
+    assert rc == 1 and "usage: tkctl delete cluster NAME [--yes]" in out
+    monkeypatch.setenv("TK_ASSUME_YES", "1")
+    (state / "cluster.yaml").write_text("metadata: {name: demo}\nspec: {runtime: crio}\n")
+    host.dirs.add(state)
+    rc, out = run(capsys, "delete", "cluster", "demo")
+    assert (
+        rc == 0 and "cluster.yaml" in out and "cluster demo deleted" in out
+    )  # reported, not fatal

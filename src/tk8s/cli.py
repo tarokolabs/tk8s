@@ -12,7 +12,15 @@ from .create.plan import PlanError
 from .datatree import PreflightError
 from .host import HostError
 from .phases import PhaseFailed, tk8s_version
-from .verbs import HOME, cmd_cluster, cmd_create, cmd_get_clusters, cmd_images, cmd_verify
+from .verbs import (
+    HOME,
+    cmd_cluster,
+    cmd_create,
+    cmd_delete_cluster,
+    cmd_get_clusters,
+    cmd_images,
+    cmd_verify,
+)
 
 USAGE = """\
 tkctl: create and manage tk8s Kubernetes clusters on a single podman host.
@@ -20,7 +28,7 @@ tkctl: create and manage tk8s Kubernetes clusters on a single podman host.
 Usage:
   tkctl create cluster [NAME] [flags]
   tkctl create cluster --list-phases
-  tkctl delete cluster NAME [--yes]
+  tkctl delete cluster NAME [--yes] [--phase P] [--list-phases]
   tkctl get clusters
   tkctl describe cluster NAME [-o yaml]
   tkctl stop cluster NAME
@@ -80,7 +88,7 @@ KNOWN_VERBS = {
     "pull",
     "version",
 }
-NOT_YET = {"delete cluster", "add", "join"}
+NOT_YET = {"add", "join"}
 NOUNS = {
     "create": {"cluster"},
     "verify": {"cluster"},
@@ -146,6 +154,12 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--yes", action="store_true")
         if verb == "get":
             nouns.add_parser("clusters", add_help=False)
+        if verb == "delete":
+            dc = nouns.add_parser("cluster", add_help=False)
+            dc.add_argument("name", nargs="?")
+            dc.add_argument("--yes", action="store_true")
+            dc.add_argument("--phase")
+            dc.add_argument("--list-phases", action="store_true")
     for verb in ("describe", "stop", "start", "use"):
         nouns = sub.add_parser(verb, add_help=False).add_subparsers(dest="noun")
         p = nouns.add_parser("cluster", add_help=False)
@@ -183,8 +197,8 @@ def _usage_of(verb: str) -> str:
     return {
         "pull": "usage: tkctl pull images [--k8s VERSION] [--refresh]",
         "get": "usage: tkctl get clusters | tkctl get images [--k8s VERSION]",
-        "delete": "usage: tkctl delete cluster NAME [--yes] | "
-        "tkctl delete images --k8s VERSION [--yes]",
+        "delete": "usage: tkctl delete cluster NAME [--yes] | tkctl delete node CLUSTER NODE "
+        "[--yes] | tkctl delete images --k8s VERSION [--yes]",
         "create": "usage: tkctl create cluster [NAME] [flags]",
         "verify": "usage: tkctl verify cluster NAME [--phase P]",
         "describe": "usage: tkctl describe cluster NAME [-o yaml]",
@@ -229,6 +243,8 @@ def _main(args: list[str]) -> int:
         return cmd_verify(a)
     if a.verb == "get" and a.noun == "clusters":
         return cmd_get_clusters()
+    if a.verb == "delete" and a.noun == "cluster":
+        return cmd_delete_cluster(a)
     if a.verb in ("describe", "stop", "start", "use") and a.noun == "cluster":
         return cmd_cluster(a.verb, a)
     if a.noun == "images":

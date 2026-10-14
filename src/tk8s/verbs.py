@@ -5,7 +5,7 @@ import argparse
 import os
 from pathlib import Path
 
-from . import images, lifecycle, model, verify, versions
+from . import delete, images, lifecycle, model, verify, versions
 from .args import (
     UsageError,
     user_cluster_from_file,
@@ -128,6 +128,37 @@ def cmd_cluster(verb: str, a: argparse.Namespace) -> int:
         lifecycle.start(ctx, c)
     else:
         lifecycle.use(ctx, c)
+    return 0
+
+
+# ---- delete cluster
+
+
+def cmd_delete_cluster(a: argparse.Namespace) -> int:
+    if a.list_phases:
+        print("\n".join(tree([delete.PHASE])))
+        return 0
+    if not a.name:
+        raise UsageError("usage: tkctl delete cluster NAME [--yes]")
+    name = validate_name(a.name)
+    ctx = make_context(assume_yes=a.yes or os.environ.get("TK_ASSUME_YES") == "1")
+    ctx.name = name
+    try:
+        lifecycle.load_cluster(ctx, name)
+    except lifecycle.ClusterError:
+        pass  # no cluster.yaml: delete what the units and podman still know
+    except model.ClusterFileError as err:
+        print(f"  {err}; deleting what the units and podman still know")
+    if not delete.found(ctx):
+        raise lifecycle.ClusterError(
+            f"cluster {name} not found: no state under {ctx.paths.clusters_dir}, no units, "
+            "no network (tkctl get clusters)"
+        )
+    delete.confirm(ctx)
+    Runner([delete.PHASE], only=a.phase, record=False).run(ctx)
+    if a.phase:
+        return 0
+    print(f"cluster {name} deleted")
     return 0
 
 
