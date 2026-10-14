@@ -130,9 +130,13 @@ def describe_status(ctx: Context, c: model.Cluster) -> None:
     for name, when in st.completed.items():
         ctx.say(f"  {name:<22} {when.strftime('%Y-%m-%d %H:%M:%S')}Z")
     if st.phase != "Ready":
-        pending = [full for p in PHASES for full, _ in p.leaves() if full not in st.completed]
-        if pending:
-            ctx.say(f"  next:       {pending[0]}   (rerun tkctl create cluster {c.name})")
+        # The phase after the last recorded one: preflight (before cluster.yaml exists) and
+        # phases skipped as already done are never recorded.
+        order = [full for p in PHASES for full, _ in p.leaves()]
+        done = [i for i, full in enumerate(order) if full in st.completed]
+        following = order[max(done) + 1 :] if done else order
+        if following:
+            ctx.say(f"  next:       {following[0]}   (rerun tkctl create cluster {c.name})")
 
 
 def describe_addons(ctx: Context, c: model.Cluster, state: str) -> None:

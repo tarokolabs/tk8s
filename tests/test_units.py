@@ -61,3 +61,11 @@ def test_done_means_every_file_has_this_content(ctx: Context, host: FakeHost) ->
     assert units.done(ctx)
     host.files[Path("/etc/systemd/system/demo.target")] = "stale"
     assert not units.done(ctx)
+
+
+def test_lb_mounts_the_lb_directory_not_the_config_file(ctx: Context) -> None:
+    """A bind mount of one file keeps the inode the container started with; haproxy.cfg is
+    rewritten by rename when a control plane is added, so the LB must see the directory."""
+    unit = units.render(ctx)[ctx.paths.unit_dir / "demo" / "demo-lb.container"]
+    assert f"Volume={ctx.state_dir}/lb:/usr/local/etc/haproxy:ro" in unit
+    assert "haproxy.cfg:" not in unit

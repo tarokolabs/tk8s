@@ -104,7 +104,9 @@ def units_run(ctx: Context) -> None:
     ctx.host.run(["rm", "-f", str(unit_file(ctx))], sudo=True)
     units.run(ctx)
     ctx.host.run(["systemctl", "daemon-reload"], sudo=True)
-    ctx.host.run(["systemctl", "reset-failed", f"{n}.service"], sudo=True, check=False)
+    ctx.host.run(
+        ["systemctl", "reset-failed", f"{n}.service"], sudo=True, capture=True, check=False
+    )
     ctx.host.run(["podman", "kill", "--signal", "USR2", f"{c.name}-lb"], sudo=True, capture=True)
 
 

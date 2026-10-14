@@ -117,7 +117,9 @@ def units_done(ctx: Context) -> bool:
 def units_run(ctx: Context) -> None:
     ctx.host.run(["rm", "-rf", *(str(path) for path in unit_paths(ctx))], sudo=True)
     ctx.host.run(["systemctl", "daemon-reload"], sudo=True)
-    ctx.host.run(["systemctl", "reset-failed", f"{ctx.cluster_name}*"], sudo=True, check=False)
+    ctx.host.run(
+        ["systemctl", "reset-failed", f"{ctx.cluster_name}*"], sudo=True, capture=True, check=False
+    )
 
 
 UNITS = Phase(

@@ -112,7 +112,9 @@ ContainerName=ha-lb
 Image=docker.io/library/haproxy:3.3.16-trixie
 Network=ha.network
 IP=172.22.0.100
-Volume=<TMP>/clusters/ha/lb/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+# The directory, not the file: haproxy.cfg is replaced by rename when a control plane is added or
+# removed, and a bind mount of one file would keep showing the inode the container started with.
+Volume=<TMP>/clusters/ha/lb:/usr/local/etc/haproxy:ro
 # The image's stop signal is SIGUSR1 (graceful: keep serving established connections for up to
 # timeout client), so a cluster stop would end in podman's SIGKILL and a failed unit.
 StopSignal=SIGTERM

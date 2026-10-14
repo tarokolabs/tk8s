@@ -200,3 +200,23 @@ def test_use_without_a_kubeconfig_says_so(
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     with pytest.raises(lifecycle.ClusterError, match="has no kubeconfig yet"):
         lifecycle.use(ctx, ctx.require_cluster())
+
+
+def test_describe_next_is_the_phase_after_the_last_recorded_one(
+    ctx: Context, host: FakeHost
+) -> None:
+    """preflight runs before cluster.yaml exists and is never recorded; `next` must not point
+    at it forever. Phases that were skipped as already done are not recorded either."""
+    from datetime import UTC, datetime
+
+    c = ctx.require_cluster()
+    assert c.status is not None
+    done = {"plan": datetime(2026, 10, 14, 8, 2, 20, tzinfo=UTC)}
+    ctx.cluster = c.model_copy(update={"status": c.status.model_copy(update={"completed": done})})
+    lifecycle.describe(ctx, on_disk(ctx, host), None)
+    assert "  next:       images   (rerun tkctl create cluster demo)" in "\n".join(host.lines)
+    host.lines.clear()
+    done = {"plan": done["plan"], "kubeadm/init": datetime(2026, 10, 14, 8, 3, 0, tzinfo=UTC)}
+    ctx.cluster = c.model_copy(update={"status": c.status.model_copy(update={"completed": done})})
+    lifecycle.describe(ctx, ctx.cluster, None)
+    assert "  next:       kubeadm/kubeconfig   (rerun" in "\n".join(host.lines)
