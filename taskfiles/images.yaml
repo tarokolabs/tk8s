@@ -102,6 +102,9 @@ tasks:
         set -eo pipefail
         start=$(date +%s)
         status=$(task --silent -d {{ .TK_HOME }} images:status K8S={{ .K8S }} REFRESH={{ .REFRESH }})
+        # images:node reports through status's output (pulled, up to date, refreshed, built); pass it on
+        echo "$status" | grep -vE '^(present|missing) ' || true
+        status=$(echo "$status" | grep -E '^(present|missing) ' || true)
         [ -n "$status" ] || { echo "images: scripts/images.sh listed no images for {{ .K8S }}" >&2; exit 1; }
         present=$(echo "$status" | grep -c '^present ' || true)
         missing=$(echo "$status" | awk '$1=="missing"{print $2}')

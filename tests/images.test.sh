@@ -183,6 +183,10 @@ rm "$TMP/store/docker.io_library_alpine_3.22"; touch "$STUB/pull-fail"; run task
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "a failed pull fails ensure"
 assert_contains "$out" "rerun to resume" "failed pull tells the user to rerun"
 rm -f "$STUB/pull-fail"
+# ensure runs images:node through images:status and captures that output; the node image line must still reach the user.
+run task images:ensure K8S="$K8S" REFRESH=1
+assert_eq "0" "$rc" "images:ensure REFRESH=1 exits 0"
+assert_contains "$out" "ghcr.io/tarokolabs/tk8s/node:v$K8S" "ensure --refresh shows what happened to the node image"
 # ---- an empty list (images.sh broke) must not look like "nothing to pull"
 touch "$STUB/kubeadm-fail"; run task images:ensure K8S="$K8S"
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "a broken image list fails ensure"
