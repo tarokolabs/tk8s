@@ -25,7 +25,8 @@ case "$*" in
   "save "*) [ -f "$STUB/../store/$(key "$2")" ] || exit 125; echo "saved $2" ;;
   "load") cat >/dev/null; [ ! -f "$STUB/load-fail" ] || exit 125 ;;
   "pull "*) img=${!#}
-            if [ -n "${CONTAINERS_STORAGE_CONF:-}" ]; then [ ! -f "$STUB/pull-fail" ] || exit 125; touch "$STUB/../store/$(key "$img")"
+            if [ -n "${CONTAINERS_STORAGE_CONF:-}" ]; then [ ! -f "$STUB/pull-fail" ] || exit 125
+              if [ -f "$STUB/pull-fail-once" ]; then rm "$STUB/pull-fail-once"; exit 125; fi; touch "$STUB/../store/$(key "$img")"
             else [ ! -f "$STUB/node-unpublished" ] || exit 125; fi ;;
   "run --rm --entrypoint kubeadm "*) [ ! -f "$STUB/kubeadm-fail" ] || exit 1
             printf 'registry.k8s.io/kube-apiserver:v%s\nregistry.k8s.io/kube-controller-manager:v%s\nregistry.k8s.io/kube-scheduler:v%s\nregistry.k8s.io/kube-proxy:v%s\nregistry.k8s.io/coredns/coredns:v1.14.6\nregistry.k8s.io/pause:3.10.2\nregistry.k8s.io/etcd:3.7.0-0\n' "$K8S" "$K8S" "$K8S" "$K8S" ;;
@@ -73,6 +74,11 @@ assert_contains "$(cat "$STUB_LOG")" "podman build --build-arg VER=$K8S --build-
 rm -f "$STUB/no-node-image" "$STUB/node-unpublished"
 run task images:node K8S="$K8S"
 if grep -qE "podman (pull|build)" "$STUB_LOG"; then echo "FAIL  images:node is a no-op when the image exists"; FAILURES=$((FAILURES+1)); else echo "PASS  images:node is a no-op when the image exists"; fi
+# REFRESH=1 pulls again even when the tag is present: a republished tag replaces the stale local image.
+run task images:node K8S="$K8S" REFRESH=1
+assert_eq "0" "$rc" "images:node REFRESH=1 exits 0"
+assert_contains "$(cat "$STUB_LOG")" "podman pull ghcr.io/tarokolabs/tk8s/node:v$K8S" "REFRESH=1 pulls a present node image again"
+assert_contains "$out" "ghcr.io/tarokolabs/tk8s/node:v$K8S" "REFRESH=1 reports the image"
 # TK_OFFLINE=1 means never download: a missing node image is refused up front, not pulled and then built.
 touch "$STUB/no-node-image"; run env TK_OFFLINE=1 task images:node K8S="$K8S"
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "images:node offline with no node image fails"
@@ -168,7 +174,11 @@ if grep -q "pull -q" "$STUB_LOG"; then echo "FAIL  offline pulls nothing"; FAILU
 run env TK_OFFLINE=1 task images:ensure K8S="$K8S" >/dev/null; touch "$STUB/../store/docker.io_library_alpine_3.22"
 run env TK_OFFLINE=1 task images:ensure K8S="$K8S"
 assert_eq "0" "$rc" "offline with everything present exits 0"
-# ---- a failing pull stops with a resumable message
+# ---- a pull that fails once (registry CDN hiccup) is retried; one that keeps failing stops with a resumable message
+rm "$TMP/store/docker.io_library_alpine_3.22"; touch "$STUB/pull-fail-once"; run task images:ensure K8S="$K8S"
+assert_eq "0" "$rc" "a pull that fails once succeeds on the retry"
+assert_eq "2" "$(grep -c 'podman \[store\] pull -q docker.io/library/alpine' "$STUB_LOG")" "the failed pull is tried again"
+assert_contains "$out" "retrying" "the retry is reported"
 rm "$TMP/store/docker.io_library_alpine_3.22"; touch "$STUB/pull-fail"; run task images:ensure K8S="$K8S"
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "a failed pull fails ensure"
 assert_contains "$out" "rerun to resume" "failed pull tells the user to rerun"

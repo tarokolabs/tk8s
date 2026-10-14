@@ -23,8 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # /usr/local/lib/systemd/system, policy.json and crio.conf.d/10-crio.conf in /etc/crio, and
 # registries.conf in /etc/containers/registries.conf.d. Its shebang lacks the "!", hence bash.
 RUN set -eux; cd /tmp; \
-    curl -fsSLO "https://storage.googleapis.com/cri-o/artifacts/cri-o.amd64.${CRIO}.tar.gz"; \
-    curl -fsSLO "https://storage.googleapis.com/cri-o/artifacts/cri-o.amd64.${CRIO}.tar.gz.sha256sum"; \
+    curl -fsSLO --retry 3 --retry-all-errors "https://storage.googleapis.com/cri-o/artifacts/cri-o.amd64.${CRIO}.tar.gz"; \
+    curl -fsSLO --retry 3 --retry-all-errors "https://storage.googleapis.com/cri-o/artifacts/cri-o.amd64.${CRIO}.tar.gz.sha256sum"; \
     sha256sum -c "cri-o.amd64.${CRIO}.tar.gz.sha256sum"; \
     tar -xzf "cri-o.amd64.${CRIO}.tar.gz"; \
     cd cri-o && bash ./install && cd / && rm -rf /tmp/cri-o* && rm -f /root/.crio-install; \
@@ -32,8 +32,8 @@ RUN set -eux; cd /tmp; \
 
 # Kubernetes binaries with their published checksums.
 RUN set -eux; cd /usr/local/bin; for b in kubeadm kubelet kubectl; do \
-      curl -fsSLO "https://dl.k8s.io/release/v${VER}/bin/linux/amd64/${b}"; \
-      echo "$(curl -fsSL "https://dl.k8s.io/release/v${VER}/bin/linux/amd64/${b}.sha256")  ${b}" | sha256sum -c -; \
+      curl -fsSLO --retry 3 --retry-all-errors "https://dl.k8s.io/release/v${VER}/bin/linux/amd64/${b}"; \
+      echo "$(curl -fsSL --retry 3 --retry-all-errors "https://dl.k8s.io/release/v${VER}/bin/linux/amd64/${b}.sha256")  ${b}" | sha256sum -c -; \
       chmod 755 "${b}"; done
 
 # kubelet: the standard kubeadm unit and drop-in; --runtime-cgroups points at crio.service.

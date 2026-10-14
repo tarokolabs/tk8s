@@ -12,11 +12,19 @@ tasks:
       CRIO: '{{ if hasKey .VERSIONS.crio .MINOR }}{{ index .VERSIONS.crio .MINOR }}{{ end }}'
       IMAGE: 'ghcr.io/tarokolabs/tk8s/node:v{{ .K8S }}'
     status:
-      - sudo podman image exists {{ .IMAGE }}
+      # REFRESH=1 (tkctl pull images --refresh): pull again even when the tag is present, so a
+      # republished tag replaces the stale local image.
+      - '{{ if eq .REFRESH "1" }}false{{ else }}sudo podman image exists {{ .IMAGE }}{{ end }}'
     cmds:
       - |
         [ "${TK_OFFLINE:-}" != 1 ] || { echo "node image {{ .IMAGE }} is not present and TK_OFFLINE=1 forbids pulling or building it" >&2; exit 1; }
-        if sudo podman pull {{ .IMAGE }} >/dev/null 2>&1; then echo "{{ .IMAGE }} pulled"; else
+        before=$(sudo podman image inspect --format '{{"{{"}}.Digest{{"}}"}}' {{ .IMAGE }} 2>/dev/null || true)
+        if sudo podman pull {{ .IMAGE }} >/dev/null 2>&1; then
+          after=$(sudo podman image inspect --format '{{"{{"}}.Digest{{"}}"}}' {{ .IMAGE }} 2>/dev/null || true)
+          if [ -z "$before" ]; then echo "{{ .IMAGE }} pulled"
+          elif [ "$before" = "$after" ]; then echo "{{ .IMAGE }} is up to date"
+          else echo "{{ .IMAGE }} refreshed (the tag was republished)"; fi
+        else
           [ -n "{{ .CRIO }}" ] || { echo "versions.yaml has no crio entry for Kubernetes minor {{ .MINOR }}; cannot build {{ .IMAGE }}" >&2; exit 1; }
           echo "{{ .IMAGE }} is not published; building locally (the first build takes a few minutes)"
           sudo podman build --build-arg VER={{ .K8S }} --build-arg CRIO={{ .CRIO }} --force-rm -t {{ .IMAGE }} {{ .TK_HOME }}/images/node
@@ -52,7 +60,7 @@ tasks:
       K8S: '{{ .K8S | default .VERSIONS.kubernetes.default }}'
       CONF: '{{ .IMAGES_DIR }}/{{ .K8S }}.conf'
     deps:
-      - { task: node, vars: { K8S: '{{ .K8S }}' } }
+      - { task: node, vars: { K8S: '{{ .K8S }}', REFRESH: '{{ .REFRESH }}' } }
     cmds:
       - task --silent -d {{ .TK_HOME }} cni:cli
       - |
@@ -81,7 +89,7 @@ tasks:
       - task: init
         vars: { K8S: '{{ .K8S }}' }
       # One writer per version directory: a second ensure waits for the first, then finds everything present.
-      - flock {{ .IMAGES_DIR }}/{{ .K8S }}.lock task --silent -d {{ .TK_HOME }} images:pull K8S={{ .K8S }}
+      - flock {{ .IMAGES_DIR }}/{{ .K8S }}.lock task --silent -d {{ .TK_HOME }} images:pull K8S={{ .K8S }} REFRESH={{ .REFRESH }}
 
   pull:
     desc: Pull the missing images of a version (ensure runs this under the lock)
@@ -93,7 +101,7 @@ tasks:
       - |
         set -eo pipefail
         start=$(date +%s)
-        status=$(task --silent -d {{ .TK_HOME }} images:status K8S={{ .K8S }})
+        status=$(task --silent -d {{ .TK_HOME }} images:status K8S={{ .K8S }} REFRESH={{ .REFRESH }})
         [ -n "$status" ] || { echo "images: scripts/images.sh listed no images for {{ .K8S }}" >&2; exit 1; }
         present=$(echo "$status" | grep -c '^present ' || true)
         missing=$(echo "$status" | awk '$1=="missing"{print $2}')
@@ -104,7 +112,11 @@ tasks:
         fi
         pulled=0
         for img in $missing; do
-          sudo env CONTAINERS_STORAGE_CONF={{ .CONF }} podman pull -q "$img" >/dev/null || { echo "images: pull of $img failed; rerun to resume" >&2; exit 1; }
+          # Registry CDNs hiccup (TLS resets, HTTP/2 errors); one retry covers that, a second failure is reported.
+          if ! sudo env CONTAINERS_STORAGE_CONF={{ .CONF }} podman pull -q "$img" >/dev/null; then
+            echo "  pull of $img failed; retrying in 5s"; sleep 5
+            sudo env CONTAINERS_STORAGE_CONF={{ .CONF }} podman pull -q "$img" >/dev/null || { echo "images: pull of $img failed twice; rerun to resume" >&2; exit 1; }
+          fi
           pulled=$((pulled+1)); echo "  pulled $img"
         done
         echo "images {{ .K8S }}: $present present, $pulled pulled in $(( $(date +%s) - start ))s ({{ .IMAGES_DIR }}/{{ .K8S }})"

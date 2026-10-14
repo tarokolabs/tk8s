@@ -83,6 +83,10 @@ assert_eq "0" "$rc" "pull images exits 0"
 assert_contains "$out" "images:ensure" "pull images runs images:ensure"
 assert_eq "0" "$(echo "$out" | grep -c 'K8S=')" "pull images without --k8s leaves the version to the taskfile default"
 out=$(TK_TASK="$TMP/task-stub" $T pull images --k8s 1.36.5 2>&1); assert_contains "$out" "images:ensure K8S=1.36.5" "pull images --k8s"
+out=$(TK_TASK="$TMP/task-stub" $T pull images --refresh 2>&1); assert_contains "$out" "images:ensure REFRESH=1" "pull images --refresh re-pulls the node image"
+out=$(TK_TASK="$TMP/task-stub" $T pull images --k8s 1.36.5 --refresh 2>&1); assert_contains "$out" "images:ensure K8S=1.36.5 REFRESH=1" "pull images --k8s --refresh"
+assert_fails "get images --refresh is rejected" env TK_TASK="$TMP/task-stub" $T get images --refresh
+out=$($T --help 2>&1); assert_contains "$out" "--refresh" "help lists --refresh"
 out=$(TK_TASK="$TMP/task-stub" $T get images 2>&1); assert_contains "$out" "images:list" "get images runs images:list"
 out=$(TK_TASK="$TMP/task-stub" $T get images --k8s 1.36.5 2>&1); assert_contains "$out" "images:list K8S=1.36.5" "get images --k8s"
 out=$(TK_TASK="$TMP/task-stub" $T delete images --k8s 1.36.5 --yes 2>&1)

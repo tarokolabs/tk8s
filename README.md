@@ -91,7 +91,7 @@ tkctl verify cluster <名稱>            # 逐項 PASS/FAIL/SKIP，任一 FAIL �
 tkctl add node <叢集> --role worker|control-plane [--cpu N] [--memory SIZE] [--no-join]
 tkctl join node <叢集> <節點>          # 對建了但沒加入的節點執行 kubeadm join
 tkctl delete node <叢集> <節點> [--yes]
-tkctl pull images [--k8s 版本]       # 把建叢集需要的全部 image 拉進共用 store（create 會自動做）
+tkctl pull images [--k8s 版本] [--refresh]   # 把建叢集需要的全部 image 拉進共用 store（create 會自動做）；--refresh 連已存在的節點 image 也重拉
 tkctl get images [--k8s 版本]        # 列清單與是否已在 store
 tkctl delete images --k8s 版本 [--yes]   # 刪掉該版本的 store；有叢集在用會被拒絕
 tkctl version
@@ -192,7 +192,7 @@ tkctl create cluster -f tkdt.yaml
 - 清單不是手寫的：`scripts/images.sh <版本>` 從 `versions.yaml`、node image 裡的 `kubeadm config images list`、`cilium install --dry-run` 與 `manifests/` 現算，`tkctl get images` 看得到（因此 `get images` 會先確保 node image 與 cilium CLI 在手上，沒有會先拉）。
 - 建叢集時主機要套的東西也都在 repo 裡：Gateway API CRD、metrics-server manifest 與 Cilium 的 Helm chart 由 `scripts/vendor-manifests.sh` 放進 `manifests/`，升版時重跑一次；cilium CLI 不會再去 helm.cilium.io 抓 chart。
 - 只有 tkctl 寫這個目錄；主機的 `podman image prune`、`podman system reset` 動的是 `/var/lib/containers/storage`，碰不到它。要清就 `tkctl delete images --k8s <版本>`。
-- 節點 image 需是 2026-10 之後的配方（掛載點 `/var/lib/containers/shared`）。更早拉的本機快取用 `sudo podman pull ghcr.io/tarokolabs/tk8s/node:v<版本>` 更新；舊 image 建叢集照樣成功，只是不會用到 store。
+- 節點 image 需是 2026-10 之後的配方（掛載點 `/var/lib/containers/shared`）。更早拉的本機快取用 `tkctl pull images --refresh` 更新（同一個 tag 重發時也是這樣換掉舊的）；舊 image 建叢集照樣成功，只是不會用到 store。
 
 ## apiserver 的入口
 

@@ -27,7 +27,7 @@ Usage:
   tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] [--no-join]
   tkctl delete node CLUSTER NODE [--yes]
   tkctl join node CLUSTER NODE
-  tkctl pull images [--k8s VERSION]
+  tkctl pull images [--k8s VERSION] [--refresh]   (--refresh: pull the node image again even when its tag is present)
   tkctl get images [--k8s VERSION]
   tkctl delete images --k8s VERSION [--yes]
   tkctl version
@@ -179,19 +179,24 @@ cmd_add_node() {
   run_task node:add CLUSTER="$cl" ROLE="$role" CPU="$ncpu" MEMORY="$nmem" JOIN="$njoin"
 }
 
-cmd_images() {  # verb task [--k8s VERSION] [--yes]
+cmd_images() {  # verb task [--k8s VERSION] [--yes] [--refresh]
   local verb=$1 task=$2 k8s="" usage; shift 2
-  usage="usage: tkctl $verb images [--k8s VERSION]"; [ "$verb" != delete ] || usage="usage: tkctl delete images --k8s VERSION [--yes]"
+  local -a args=()
+  usage="usage: tkctl $verb images [--k8s VERSION]"
+  [ "$verb" != pull ] || usage="usage: tkctl pull images [--k8s VERSION] [--refresh]"
+  [ "$verb" != delete ] || usage="usage: tkctl delete images --k8s VERSION [--yes]"
   while [ $# -gt 0 ]; do
     case "$1" in
       --k8s) k8s=${2:-}; shift 2 ;;
       --yes) [ "$verb" == delete ] || die "$usage"; export TK_ASSUME_YES=1; shift ;;
+      --refresh) [ "$verb" == pull ] || die "$usage"; args+=(REFRESH=1); shift ;;
       *) die "$usage" ;;
     esac
   done
   [ -z "$k8s" ] || validate_k8s "$k8s"
   [ "$verb" != delete ] || [ -n "$k8s" ] || die "$usage"
-  if [ -n "$k8s" ]; then run_task "$task" K8S="$k8s"; else run_task "$task"; fi
+  [ -z "$k8s" ] || args=(K8S="$k8s" "${args[@]}")
+  run_task "$task" "${args[@]}"
 }
 
 main() {
@@ -220,7 +225,7 @@ main() {
                 images) shift; cmd_images get images:list "$@" ;;
                 *) die "usage: tkctl get clusters | tkctl get images [--k8s VERSION]" ;;
               esac ;;
-    pull)     shift; [ "${1:-}" == images ] || die "usage: tkctl pull images [--k8s VERSION]"; shift; cmd_images pull images:ensure "$@" ;;
+    pull)     shift; [ "${1:-}" == images ] || die "usage: tkctl pull images [--k8s VERSION] [--refresh]"; shift; cmd_images pull images:ensure "$@" ;;
     add)      shift; cmd_add_node "$@" ;;
     join)     shift; [ "${1:-}" == node ] || die "usage: tkctl join node CLUSTER NODE"
               [ -n "${2:-}" ] && [ -n "${3:-}" ] || die "usage: tkctl join node CLUSTER NODE"; validate_name "$2"

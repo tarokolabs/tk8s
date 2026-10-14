@@ -81,4 +81,7 @@ assert_contains "$r" "debian:13-slim" "README names the base"
 assert_contains "$r" "dl.k8s.io" "README names the Kubernetes source"
 assert_contains "$r" "static bundle" "README names the CRI-O source"
 assert_eq "" "$(grep -n 'kindest' README.md || true)" "README does not mention kindest"
+# Flaky mirrors (storage.googleapis.com HTTP/2 resets, dl.k8s.io) must not fail a build on the first error.
+assert_eq "4" "$(grep -c 'curl -fsSL' images/node/Containerfile)" "Containerfile downloads with curl (CRI-O bundle, its checksum, K8s binaries, their checksums)"
+assert_eq "0" "$(grep 'curl -fsSL' images/node/Containerfile | grep -vc -- '--retry 3 --retry-all-errors')" "every download in the Containerfile retries on any error"
 finish
