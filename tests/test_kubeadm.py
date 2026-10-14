@@ -264,3 +264,17 @@ def test_render_also_places_the_audit_policy_the_apiserver_mounts(
     assert kubeadm.render_done(ctx)
     del host.files[policy]
     assert not kubeadm.render_done(ctx)
+
+
+def test_kubeconfig_waits_for_the_apiserver_through_the_lb(ctx: Context, host: FakeHost) -> None:
+    """On a resume init is already done and skipped, so kubeconfig is the phase that must wait
+    for the apiserver (a kubelet in CrashLoopBackOff brings it up seconds to minutes later)."""
+    initialised(host)
+    host.responses[("curl",)] = [Result(0, "", ""), Result(0, "", ""), Result(0, "ok", "")]
+    kubeadm.kubeconfig_run(ctx)
+    curls = [c for c in host.calls if c.argv[0] == "curl"]
+    assert len(curls) == 3 and ctx.state_dir / "kubeconfig" in host.files
+    host.calls.clear()
+    host.responses[("curl",)] = Result(0, "", "")
+    with pytest.raises(PhaseFailed, match="has no healthy control plane after 60 s"):
+        kubeadm.kubeconfig_run(ctx)

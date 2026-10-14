@@ -168,6 +168,8 @@ def kubeconfig_run(ctx: Context) -> None:
         f"server: https://api.{c.domain}:6443", f"server: https://{c.spec.network.lb}:6443"
     )
     ctx.host.write(ctx.state_dir / "kubeconfig", text, mode=0o600)
+    # On a resume init is already done and skipped: this is where the apiserver gets waited for.
+    wait_lb_ready(ctx)
 
 
 KUBECONFIG = Phase(
