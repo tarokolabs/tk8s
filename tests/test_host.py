@@ -75,3 +75,9 @@ def test_fake_host_answers_from_the_table_in_order() -> None:
     assert [c.argv for c in h.calls][:2] == [["podman", "pull", "-q", "img"]] * 2
     h.write(Path("/x"), "v")
     assert h.read(Path("/x")) == "v" and h.exists(Path("/x"))
+
+
+def test_binary_run_passes_bytes_through() -> None:
+    h = Host(lambda _: None)
+    r = h.run_bytes(["cat"], input=b"\x00\xff")
+    assert r == b"\x00\xff"

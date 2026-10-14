@@ -77,6 +77,23 @@ class Host:
             raise HostError(full, r.returncode, r.stderr)
         return r
 
+    def run_bytes(
+        self,
+        argv: Sequence[str],
+        *,
+        sudo: bool = False,
+        env: Mapping[str, str] | None = None,
+        input: bytes | None = None,
+    ) -> bytes:
+        """run() for binary streams (image tarballs); stdout comes back as bytes, failures raise."""
+        self._show(argv, sudo, env)
+        full = _full_argv(argv, sudo, env)
+        base = CLEAN_ENV | ({} if sudo else dict(env or {}))
+        p = subprocess.run(full, input=input, env=base, capture_output=True, check=False)
+        if p.returncode != 0:
+            raise HostError(full, p.returncode, p.stderr.decode(errors="replace"))
+        return p.stdout
+
     def write(self, path: Path, content: str, *, sudo: bool = False, mode: int = 0o644) -> None:
         if sudo:
             self.run(
@@ -132,6 +149,17 @@ class DryRunHost(Host):
     ) -> Result:
         self._show(argv, sudo, env)
         return Result(0, "", "")
+
+    def run_bytes(
+        self,
+        argv: Sequence[str],
+        *,
+        sudo: bool = False,
+        env: Mapping[str, str] | None = None,
+        input: bytes | None = None,
+    ) -> bytes:
+        self._show(argv, sudo, env)
+        return b""
 
     def write(self, path: Path, content: str, *, sudo: bool = False, mode: int = 0o644) -> None:
         self._say(f"# ---- {path}")
@@ -210,6 +238,17 @@ class FakeHost(Host):
         if check and answer.returncode != 0:
             raise HostError(_full_argv(argv, sudo, env), answer.returncode, answer.stderr)
         return answer
+
+    def run_bytes(
+        self,
+        argv: Sequence[str],
+        *,
+        sudo: bool = False,
+        env: Mapping[str, str] | None = None,
+        input: bytes | None = None,
+    ) -> bytes:
+        text = input.decode(errors="replace") if input is not None else None
+        return self.run(argv, sudo=sudo, env=env, input=text, capture=True).stdout.encode()
 
     def write(self, path: Path, content: str, *, sudo: bool = False, mode: int = 0o644) -> None:
         if sudo:
