@@ -84,8 +84,14 @@ tasks:
     desc: Stop every node of a cluster (state and data are kept)
     silent: true
     deps: [{ task: _exists, vars: { CLUSTER: '{{ .CLUSTER }}' } }]
+    vars:
+      STATE_DIR: '{{ .CLUSTERS_DIR }}/{{ .CLUSTER }}'
+      DEF_RAW: { sh: 'cat {{ .STATE_DIR }}/cluster.yaml 2>/dev/null || printf "spec: {nodes: []}\n"' }
+      DEF: { ref: fromYaml .DEF_RAW }
     cmds:
-      - sudo systemctl stop {{ .CLUSTER }}.target
+      # systemctl waits only for the units it was given; the nodes and the LB are PartOf= the target
+      # and would still be stopping when a bare "stop <cluster>.target" returns. Name them all.
+      - sudo systemctl stop {{ .CLUSTER }}.target {{ .CLUSTER }}-lb.service{{ range .DEF.spec.nodes }} {{ .name }}.service{{ end }}
       - echo "cluster {{ .CLUSTER }} stopped"
 
   start:
