@@ -1,4 +1,4 @@
-"""delete cluster: stop the units, remove them, then the containers, the volumes, the network, the
+"""delete cluster: stop the units, remove the containers, the volumes, the units, the network, the
 host routes and the state directory. Every phase's done() is "that thing is already gone", so a
 delete that stopped halfway is finished by running it again, and a cluster that lost its
 cluster.yaml (an interrupted create, a cleanup by hand) is deleted from what is left."""
@@ -34,12 +34,13 @@ def confirm(ctx: Context) -> None:
 
 
 def node_names(ctx: Context) -> list[str]:
-    """From cluster.yaml, or from the unit directory when the file is gone."""
+    """From cluster.yaml, or from the unit directory when the file is gone (so containers and
+    volumes are removed before units takes that directory away)."""
     if ctx.cluster is not None:
         return [n.name for n in ctx.cluster.spec.nodes]
-    unit_dir = ctx.paths.unit_dir / ctx.cluster_name
-    lb = f"{ctx.cluster_name}-lb"
-    return sorted(p.stem for p in unit_dir.glob("*.container") if p.stem != lb)
+    lb = f"{ctx.cluster_name}-lb.container"
+    entries = ctx.host.listdir(ctx.paths.unit_dir / ctx.cluster_name)
+    return [e.removesuffix(".container") for e in entries if e.endswith(".container") and e != lb]
 
 
 def node_volumes(node: str) -> list[str]:
@@ -233,5 +234,5 @@ PHASE = Phase(
     "delete the cluster",
     None,
     lambda ctx: None,
-    children=(STOP, UNITS, CONTAINERS, VOLUMES, NETWORK, ROUTES, STATE),
+    children=(STOP, CONTAINERS, VOLUMES, UNITS, NETWORK, ROUTES, STATE),
 )

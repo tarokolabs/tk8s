@@ -143,6 +143,10 @@ class Host:
     def exists(self, path: Path) -> bool:
         return path.exists()
 
+    def listdir(self, path: Path) -> list[str]:
+        """Entry names of a directory on the host (empty when it is not there)."""
+        return sorted(p.name for p in path.iterdir()) if path.is_dir() else []
+
     def writable(self, path: Path) -> bool:
         return os.access(path, os.W_OK)
 
@@ -202,6 +206,9 @@ class DryRunHost(Host):
 
     def exists(self, path: Path) -> bool:
         return False
+
+    def listdir(self, path: Path) -> list[str]:
+        return []
 
     def writable(self, path: Path) -> bool:
         return True
@@ -330,6 +337,9 @@ class FakeHost(Host):
 
     def exists(self, path: Path) -> bool:
         return path in self.files or path in self.dirs
+
+    def listdir(self, path: Path) -> list[str]:
+        return sorted({p.name for p in (*self.files, *self.dirs) if p.parent == path})
 
     def writable(self, path: Path) -> bool:
         return path not in self.unwritable

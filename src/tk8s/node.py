@@ -132,12 +132,39 @@ def start_done(ctx: Context) -> bool:
     return nodes.systemd_state(ctx, n) in ("running", "degraded")
 
 
-def start_run(ctx: Context) -> None:
-    """daemon-reload picks the new unit up. The LB's backend list came from cluster.yaml, and
-    SIGUSR2 makes HAProxy reload it without dropping connections."""
-    c, n = ctx.require_cluster(), require_node(ctx)
-    ctx.host.run(["systemctl", "daemon-reload"], sudo=True)
+OLD_LB_MOUNT = "/usr/local/etc/haproxy/haproxy.cfg"
+
+
+def reload_lb(ctx: Context) -> None:
+    """The LB's backend list came from cluster.yaml; SIGUSR2 makes HAProxy reload it without
+    dropping connections. An LB started by v2026.10.x bind-mounted the single haproxy.cfg file
+    and still reads the inode the config was replaced under: restart it once, the unit on disk
+    already mounts the directory."""
+    c = ctx.require_cluster()
+    mounts = ctx.host.run(
+        [
+            "podman",
+            "inspect",
+            f"{c.name}-lb",
+            "--format",
+            "{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}",
+        ],
+        sudo=True,
+        capture=True,
+        check=False,
+    ).stdout
+    if OLD_LB_MOUNT in mounts:
+        ctx.host.run(["systemctl", "restart", f"{c.name}-lb.service"], sudo=True)
+        nodes.wait_lb(ctx)
+        return
     ctx.host.run(["podman", "kill", "--signal", "USR2", f"{c.name}-lb"], sudo=True, capture=True)
+
+
+def start_run(ctx: Context) -> None:
+    """daemon-reload picks the new unit up, the LB learns the new backend list, the node starts."""
+    n = require_node(ctx)
+    ctx.host.run(["systemctl", "daemon-reload"], sudo=True)
+    reload_lb(ctx)
     ctx.host.run(["systemctl", "start", f"{n}.service"], sudo=True)
     nodes.wait_node(ctx, n)
 
@@ -167,8 +194,6 @@ def join_done(ctx: Context) -> bool:
 
 def join_run(ctx: Context) -> None:
     n = node_of(ctx)
-    if not ctx.host.is_active(f"{n.name}.service"):
-        raise ClusterError(f"node {n.name} is not running (systemctl status {n.name})")
     join = kubeadm.join_command(ctx)
     key = kubeadm.certificate_key(ctx, fresh=True) if n.role == "control-plane" else ""
     kubeadm.join_node(ctx, n, join, key)
@@ -215,26 +240,30 @@ def record_run(ctx: Context) -> None:
 RECORD = Phase("record", "record join: true in cluster.yaml", record_done, record_run)
 
 
+# images, units, runtimeclass and gvisor are create's own phases: each is idempotent over the
+# whole cluster, so the new node gets what the others got.
+PROVISION: tuple[Phase, ...] = (
+    create_images.PHASE,
+    units.PHASE,
+    START,
+    addons.RUNTIMECLASS,
+    addons.GVISOR,
+)
+
+
 def add_phase(join: bool) -> Phase:
-    """images, units, runtimeclass and gvisor are create's own phases: each is idempotent over
-    the whole cluster, so the new node gets what the others got."""
-    children: tuple[Phase, ...] = (
-        PLAN,
-        create_images.PHASE,
-        units.PHASE,
-        START,
-        addons.RUNTIMECLASS,
-        addons.GVISOR,
-    )
+    children: tuple[Phase, ...] = (PLAN, *PROVISION)
     if join:
         children += (JOIN, READY, RECORD)
     return Phase("add", "add a node to the cluster", None, lambda ctx: None, children=children)
 
 
+# join node finishes whatever an add left undone (a node recorded in cluster.yaml but never
+# started, or started unjoined): every phase before kubeadm is already done on a normal node.
 JOIN_PHASE = Phase(
     "join",
-    "join a node that was created unjoined",
+    "finish a node recorded in cluster.yaml and join it",
     None,
     lambda ctx: None,
-    children=(JOIN, READY, RECORD),
+    children=(*PROVISION, JOIN, READY, RECORD),
 )

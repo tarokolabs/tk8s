@@ -3,13 +3,15 @@ cluster.yaml; units go under /etc (root), haproxy.cfg into the state dir (the us
 
 from pathlib import Path
 
+from .. import model
 from ..phases import Context, Phase
 from ..render import template
 
 
-def render(ctx: Context) -> dict[Path, str]:
-    """Every file this phase owns, path -> content, in the order they are written."""
-    c = ctx.require_cluster()
+def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str]:
+    """Every file this phase owns, path -> content, in the order they are written. delete node
+    renders for the cluster without the node before cluster.yaml says so."""
+    c = cluster or ctx.require_cluster()
     p, v = ctx.paths, ctx.versions
     state, unit_dir = p.state_dir(c.name), p.unit_dir / c.name
     net, cp = c.spec.network, c.first_control_plane
@@ -76,16 +78,16 @@ def _under_etc(ctx: Context, path: Path) -> bool:
     return not path.is_relative_to(ctx.paths.data_dir)
 
 
-def done(ctx: Context) -> bool:
+def done(ctx: Context, cluster: model.Cluster | None = None) -> bool:
     """Every file is on the host with exactly this content (a changed cluster.yaml re-renders)."""
     return all(
         ctx.host.read(path, sudo=_under_etc(ctx, path)) == content
-        for path, content in render(ctx).items()
+        for path, content in render(ctx, cluster).items()
     )
 
 
-def run(ctx: Context) -> None:
-    for path, content in render(ctx).items():
+def run(ctx: Context, cluster: model.Cluster | None = None) -> None:
+    for path, content in render(ctx, cluster).items():
         ctx.host.write(path, content, sudo=_under_etc(ctx, path))
 
 

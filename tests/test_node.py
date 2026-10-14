@@ -189,22 +189,34 @@ def test_join_node_finishes_an_interrupted_add(tmp_path: Path) -> None:
     new_node_answers(host, "demo-worker-3", ready_after=2)
     ctx.node = "demo-worker-3"
     Runner([node.JOIN_PHASE], record=False).run(ctx)
-    assert phases_of(host) == ["join/kubeadm", "join/ready", "join/record"]
+    assert phases_of(host)[-3:] == ["join/kubeadm", "join/ready", "join/record"]
+    assert "[join/start] already done" in host.lines  # the node was running
     assert "[join/record] already done" in host.lines  # join: true was the plan all along
     polls = [x for x in argvs(host) if x[:5] == ["kubectl", "get", "node", "demo-worker-3", "-o"]]
     assert len(polls) == 4  # done (False), the loop (False, True), done again (True)
 
 
-def test_join_node_refuses_a_stopped_node(tmp_path: Path) -> None:
+def test_join_node_finishes_an_add_interrupted_before_the_unit_existed(tmp_path: Path) -> None:
+    """plan wrote the entry, then the add died: join node renders the unit, starts the node,
+    gives it the addons and joins it. Rerunning add would allocate a new node instead."""
     ctx, host = node_ctx(tmp_path)
-    ctx.cluster = node.with_node(ctx.require_cluster(), worker(3, "172.22.0.4", join=False))
-    new_node_answers(host, "demo-worker-3", ready_after=0)
+    ctx.cluster = node.with_node(ctx.require_cluster(), worker(3, "172.22.0.4"))
+    new_node_answers(host, "demo-worker-3", ready_after=1)
     ctx.node = "demo-worker-3"
-    with pytest.raises(
-        lifecycle.ClusterError,
-        match=r"node demo-worker-3 is not running \(systemctl status demo-worker-3\)",
-    ):
-        Runner([node.JOIN_PHASE], record=False).run(ctx)
+    Runner([node.JOIN_PHASE], record=False).run(ctx)
+    assert phases_of(host) == [
+        "join/images",
+        "join/units",
+        "join/start",
+        "join/runtimeclass",
+        "join/gvisor",
+        "join/kubeadm",
+        "join/ready",
+        "join/record",
+    ]
+    assert "IP=172.22.0.4" in host.files[ctx.paths.unit_dir / "demo" / "demo-worker-3.container"]
+    assert ["systemctl", "start", "demo-worker-3.service"] in argvs(host)
+    assert "  demo-worker-3 Ready (worker)" in host.lines
 
 
 def test_delete_node_drains_stops_removes_and_rerenders(tmp_path: Path) -> None:
@@ -218,7 +230,7 @@ def test_delete_node_drains_stops_removes_and_rerenders(tmp_path: Path) -> None:
     }
     ctx.node = "demo-worker-2"
     Runner([node_delete.PHASE], record=False).run(ctx)
-    names = ("drain", "stop", "container", "volumes", "entry", "units")
+    names = ("drain", "stop", "container", "volumes", "units", "entry")
     assert phases_of(host) == [f"delete/{p}" for p in names]
     a = argvs(host)
     drain_argv = [
@@ -250,11 +262,14 @@ def test_delete_node_drains_stops_removes_and_rerenders(tmp_path: Path) -> None:
     }
 
 
-def test_delete_node_resumes_after_the_entry_is_gone(tmp_path: Path) -> None:
+def test_delete_node_resumes_after_the_unit_file_went(tmp_path: Path) -> None:
+    """Interrupted right after rm of the unit file: the entry is still in cluster.yaml, so the
+    verb finds the node; units re-renders without it and entry removes it last."""
     ctx, host = node_ctx(tmp_path)
-    ctx.cluster = node.without_node(ctx.require_cluster(), "demo-worker-2")  # removed last time
     host.responses = {
-        ("kubectl", "get", "node", "demo-worker-2"): Result(1, "", "not found"),
+        ("kubectl", "get", "node", "demo-worker-2"): Result(
+            1, "", 'nodes "demo-worker-2" not found'
+        ),
         **host.responses,
     }
     host.active.discard("demo-worker-2.service")
@@ -262,11 +277,14 @@ def test_delete_node_resumes_after_the_entry_is_gone(tmp_path: Path) -> None:
         "container:demo-worker-2",
         *(f"volume:{v}" for v in node_volumes("demo-worker-2")),
     }
+    del host.files[ctx.paths.unit_dir / "demo" / "demo-worker-2.container"]
     ctx.node = "demo-worker-2"
     Runner([node_delete.PHASE], record=False).run(ctx)
     done = [line for line in host.lines if line.endswith("already done")]
-    assert len(done) == 5 and "[delete/units] drop the node's unit" in "\n".join(host.lines)
-    assert (ctx.paths.unit_dir / "demo" / "demo-worker-2.container") not in host.files
+    assert len(done) == 4  # drain, stop, container, volumes
+    assert "demo-worker-2.service" not in host.files[ctx.paths.systemd_dir / "demo.target"]
+    saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
+    assert [n.name for n in saved.spec.nodes] == ["demo-cp-1", "demo-worker-1"]
 
 
 def test_drain_failure_is_reported_not_fatal(tmp_path: Path) -> None:
@@ -274,7 +292,7 @@ def test_drain_failure_is_reported_not_fatal(tmp_path: Path) -> None:
     host.responses = {
         ("kubectl", "get", "node", "demo-worker-2"): [
             Result(0, "demo-worker-2", ""),
-            Result(1, "", ""),
+            Result(1, "", "NotFound"),
         ],
         ("kubectl", "drain"): Result(
             1, "", "error: cannot evict pod x: violates PodDisruptionBudget"
@@ -317,7 +335,10 @@ def test_delete_control_plane_waits_for_the_lb_before_deleting_the_node(tmp_path
         ),
     )
     host.responses = {
-        ("kubectl", "get", "node", "demo-cp-2"): [Result(0, "demo-cp-2", ""), Result(1, "", "")],
+        ("kubectl", "get", "node", "demo-cp-2"): [
+            Result(0, "demo-cp-2", ""),
+            Result(1, "", "NotFound"),
+        ],
         **host.responses,
     }
     host.responses[("curl", "-sk", "--max-time", "3")] = [  # the fixture's key, now a sequence
@@ -332,3 +353,43 @@ def test_delete_control_plane_waits_for_the_lb_before_deleting_the_node(tmp_path
     gone = a.index(["kubectl", "delete", "node", "demo-cp-2"])
     polls = [i for i, x in enumerate(a) if x[:4] == ["curl", "-sk", "--max-time", "3"]]
     assert len(polls) == 3 and reset < polls[0] and polls[-1] < gone
+
+
+def test_delete_node_refuses_to_guess_when_the_apiserver_is_unreachable(tmp_path: Path) -> None:
+    """A failed kubectl is not NotFound: a stopped or broken cluster must not lose a node's
+    volumes (and a control plane's etcd membership) without kubeadm reset."""
+    ctx, host = node_ctx(tmp_path)
+    host.responses = {
+        ("kubectl", "get", "node", "demo-worker-2"): Result(
+            1, "", "The connection to the server 172.22.0.100:6443 was refused"
+        ),
+        **host.responses,
+    }
+    ctx.node = "demo-worker-2"
+    with pytest.raises(lifecycle.ClusterError, match="cannot reach the apiserver of cluster demo"):
+        Runner([node_delete.PHASE], record=False).run(ctx)
+    assert not any(
+        x[:2] == ["podman", "rm"] or x[:3] == ["podman", "volume", "rm"] for x in argvs(host)
+    )
+
+
+def test_lb_from_the_previous_release_is_restarted_not_reloaded(tmp_path: Path) -> None:
+    """A v2026.10.x LB bind-mounted the single haproxy.cfg file; its container keeps the inode
+    the config was replaced under, so SIGUSR2 reloads stale backends. Restart it once; the unit
+    on disk already has the directory mount."""
+    ctx, host = node_ctx(tmp_path)
+    host.responses[("podman", "inspect", "demo-lb")] = Result(
+        0, "/opt/taroko/clusters/demo/lb/haproxy.cfg -> /usr/local/etc/haproxy/haproxy.cfg\n", ""
+    )
+    node.reload_lb(ctx)
+    a = argvs(host)
+    assert ["systemctl", "restart", "demo-lb.service"] in a
+    assert ["podman", "kill", "--signal", "USR2", "demo-lb"] not in a
+    host.calls.clear()
+    host.responses[("podman", "inspect", "demo-lb")] = Result(
+        0, "/opt/taroko/clusters/demo/lb -> /usr/local/etc/haproxy\n", ""
+    )
+    node.reload_lb(ctx)
+    a = argvs(host)
+    assert ["podman", "kill", "--signal", "USR2", "demo-lb"] in a
+    assert ["systemctl", "restart", "demo-lb.service"] not in a

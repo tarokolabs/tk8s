@@ -516,7 +516,7 @@ def test_node_verbs(
     host.podman.add("container:demo-worker-3")
     host.responses[("kubectl", "get", "node", "demo-worker-3")] = [
         Result(0, "", ""),
-        Result(1, "", ""),
+        Result(1, "", 'Error from server (NotFound): nodes "demo-worker-3" not found'),
     ]  # joined, then gone
     monkeypatch.setattr("builtins.input", lambda prompt: "n")
     rc, out = run(capsys, "delete", "node", "demo", "demo-worker-3")
@@ -567,3 +567,28 @@ def test_add_node_refuses_a_cluster_still_creating(
     (state / "cluster.yaml").write_text(model.dumps(c))
     rc, out = run(capsys, "add", "node", "demo", "--role", "worker")
     assert rc == 1 and "cluster demo is not fully created (tkctl get clusters)" in out
+
+
+def test_node_verbs_need_a_running_cluster(
+    capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.fixtures import ready_host
+    from tk8s import model, verbs
+    from tk8s.host import FakeHost
+
+    host = FakeHost()
+    monkeypatch.setattr(verbs, "make_context", lambda **kw: fake_context(host, **kw))
+    c = ready_host(host, data_dir)
+    assert c.status is not None
+    ready = c.model_copy(update={"status": c.status.model_copy(update={"phase": "Ready"})})
+    state = data_dir / "clusters" / "demo"
+    state.mkdir(parents=True)
+    (state / "cluster.yaml").write_text(model.dumps(ready))
+    host.active.discard("demo.target")  # Stopped
+    for argv in (
+        ["add", "node", "demo", "--role", "worker"],
+        ["join", "node", "demo", "demo-worker-2"],
+        ["delete", "node", "demo", "demo-worker-2", "--yes"],
+    ):
+        rc, out = run(capsys, *argv)
+        assert rc == 1 and "cluster demo is not running (tkctl start cluster demo)" in out, argv

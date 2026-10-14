@@ -33,7 +33,7 @@ def test_a_full_delete_removes_everything_in_order(ctx: Context, host: FakeHost)
     everything_there(ctx, host)
     Runner([delete.PHASE], record=False).run(ctx)
     phases = [line.split("]")[0][1:] for line in host.lines if line.startswith("[")]
-    names = ("stop", "units", "containers", "volumes", "network", "routes", "state")
+    names = ("stop", "containers", "volumes", "units", "network", "routes", "state")
     assert phases == [f"delete/{p}" for p in names]
     a = argvs(host)
     assert ["systemctl", "disable", "--now", "demo.target"] in a
@@ -42,6 +42,7 @@ def test_a_full_delete_removes_everything_in_order(ctx: Context, host: FakeHost)
     assert "/etc/systemd/system/demo.target" in rm
     assert "/etc/systemd/system/demo-routes.service" in rm
     assert a.index(["systemctl", "daemon-reload"]) > a.index(rm)
+    assert a.index(["podman", "rm", "-f", "demo-cp-1"]) < a.index(rm)  # nodes known before units go
     for n in (*NODES, "demo-lb"):
         assert ["podman", "rm", "-f", n] in a
     for n in NODES:
@@ -74,25 +75,36 @@ def test_rerun_after_a_failed_volume_finishes_the_delete(ctx: Context, host: Fak
     assert "volume:demo-worker-1-var" in host.podman and "container:demo-cp-1" not in host.podman
     host.lines.clear()
     Runner([delete.PHASE], record=False).run(ctx)
-    assert "[delete/units] already done" in host.lines
+    assert "[delete/stop] already done" in host.lines
     assert "[delete/containers] already done" in host.lines
     assert "[delete/volumes] remove the node volumes" in "\n".join(host.lines)
+    assert "[delete/units] remove the Quadlet units" in "\n".join(host.lines)
     assert ["podman", "network", "rm", "-f", "demo"] in argvs(host)
 
 
-def test_without_cluster_yaml_what_is_left_is_still_removed(tmp_path: Path) -> None:
+def test_without_cluster_yaml_the_units_name_the_nodes_to_remove(tmp_path: Path) -> None:
+    """No cluster.yaml: the node names come from the unit directory, which must be read before
+    the units phase removes it; otherwise the volumes survive and poison a same-name create."""
     from tests.test_phases import make_ctx
 
     ctx, host = make_ctx(tmp_path)
     ctx.name = "demo"
-    host.dirs.add(ctx.paths.unit_dir / "demo")
-    host.podman.add("container:demo-lb")
+    unit_dir = ctx.paths.unit_dir / "demo"
+    host.dirs.add(unit_dir)
+    for f in (
+        "demo.network",
+        "demo-lb.container",
+        "demo-cp-1.container",
+        "demo-worker-1.container",
+    ):
+        host.files[unit_dir / f] = "x"
+    host.podman.update({"container:demo-lb", "container:demo-cp-1", "volume:demo-worker-1-var"})
     assert delete.found(ctx)
     Runner([delete.PHASE], record=False).run(ctx)
     a = argvs(host)
-    assert any(x[:2] == ["rm", "-rf"] and "/etc/containers/systemd/demo" in x for x in a)
-    assert ["podman", "rm", "-f", "demo-lb"] in a  # no nodes known; the LB container still is
-    assert not any(x[:2] == ["podman", "rm"] and x[3] != "demo-lb" for x in a)
+    assert ["podman", "rm", "-f", "demo-lb"] in a and ["podman", "rm", "-f", "demo-cp-1"] in a
+    assert ["podman", "volume", "rm", "-f", "demo-worker-1-var"] in a
+    assert host.podman == set()
     assert "[delete/routes] already done" in host.lines  # no subnets known without the file
 
 
