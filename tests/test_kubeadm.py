@@ -146,3 +146,108 @@ def test_kubeconfig_done_needs_a_non_empty_file_and_a_ready_apiserver(
     assert kubeadm.kubeconfig_done(ctx)
     readyz = next(c for c in host.calls if c.argv[:3] == ["kubectl", "get", "--raw"])
     assert readyz.env == {"KUBECONFIG": str(ctx.state_dir / "kubeconfig")}
+
+
+def ha_ctx(ctx: Context, host: FakeHost) -> Context:
+    """demo with 3 control planes (the third deferred) and one worker."""
+    from tk8s import model
+    from tk8s.create.plan import resolve
+
+    user = model.UserCluster(
+        metadata=model.Metadata(name="demo"),
+        spec=model.UserSpec(
+            nodes=[
+                model.NodeGroup(role="control-plane"),
+                model.NodeGroup(role="control-plane"),
+                model.NodeGroup(role="control-plane", join=False),
+                model.NodeGroup(role="worker"),
+            ]
+        ),
+    )
+    ctx.cluster = resolve(
+        user,
+        k8s_default="1.37.1",
+        existing=None,
+        used_indices=set(),
+        allow_overlap=False,
+        tk8s_version="test",
+    )
+    initialised(host)
+    host.files[ctx.state_dir / "kubeconfig"] = "kind: Config\n"
+    host.responses[("podman", "exec", "demo-cp-1", "kubeadm", "token", "create")] = Result(
+        0,
+        "kubeadm join api.demo.k8s:6443 --token t.t --discovery-token-ca-cert-hash sha256:1\r\n",
+        "",
+    )
+    host.responses[("kubectl", "get", "node")] = Result(1, "", "not found")
+    return ctx
+
+
+def test_join_joins_control_planes_and_workers_and_skips_deferred(
+    ctx: Context, host: FakeHost
+) -> None:
+    ctx = ha_ctx(ctx, host)
+    host.files[ctx.state_dir / ".certificate-key"] = "abcd\n"
+    kubeadm.join_run(ctx)
+    joins = [c for c in host.calls if c.argv[:2] == ["podman", "exec"] and "bash" in c.argv]
+    cp2 = next(c for c in joins if c.argv[2] == "demo-cp-2")
+    assert cp2.argv[3:5] == ["bash", "-c"]
+    assert cp2.argv[5] == (
+        "kubeadm join api.demo.k8s:6443 --token t.t --discovery-token-ca-cert-hash sha256:1 "
+        "--control-plane --certificate-key abcd --apiserver-advertise-address 172.22.0.2 "
+        "--ignore-preflight-errors=SystemVerification"
+    )
+    wk = next(c for c in joins if c.argv[2] == "demo-worker-1")
+    assert wk.argv[5].endswith("sha256:1 --ignore-preflight-errors=SystemVerification")
+    assert not any(c.argv[2] == "demo-cp-3" for c in joins)
+    assert (
+        "  demo-cp-3 left unjoined (join: false); join later with: tkctl join node demo demo-cp-3"
+    ) in host.lines
+    assert "  demo-cp-2 joined (control-plane)" in host.lines
+    taints = [c.argv for c in host.calls if c.argv[:3] == ["kubectl", "taint", "node"]]
+    assert [t[3] for t in taints] == ["demo-cp-1", "demo-cp-2", "demo-cp-3"]
+    kube = [c for c in host.calls if c.argv[0] == "kubectl"]
+    assert all(c.env == {"KUBECONFIG": str(ctx.state_dir / "kubeconfig")} for c in kube)
+
+
+def test_join_uploads_a_fresh_certificate_key_when_none_is_stored(
+    ctx: Context, host: FakeHost
+) -> None:
+    ctx = ha_ctx(ctx, host)
+    host.responses[("podman", "exec", "demo-cp-1", "kubeadm", "init", "phase", "upload-certs")] = (
+        Result(0, "[upload-certs] Using certificate key:\nffff\n", "")
+    )
+    kubeadm.join_run(ctx)
+    assert host.files[ctx.state_dir / ".certificate-key"] == "ffff\n"
+    cp2 = next(c for c in host.calls if c.argv[:3] == ["podman", "exec", "demo-cp-2"])
+    assert "--certificate-key ffff" in cp2.argv[5]
+
+
+def test_join_skips_nodes_already_in_the_cluster(ctx: Context, host: FakeHost) -> None:
+    ctx = ha_ctx(ctx, host)
+    host.files[ctx.state_dir / ".certificate-key"] = "abcd\n"
+    general = host.responses.pop(("kubectl", "get", "node"))  # specific prefixes must come first
+    host.responses[("kubectl", "get", "node", "demo-worker-1")] = Result(
+        0, "demo-worker-1 Ready", ""
+    )
+    host.responses[("kubectl", "get", "node")] = general
+    kubeadm.join_run(ctx)
+    assert not any(c.argv[:3] == ["podman", "exec", "demo-worker-1"] for c in host.calls)
+    assert "  demo-worker-1 already joined" in host.lines
+
+
+def test_join_failure_shows_the_tail_and_names_the_node(ctx: Context, host: FakeHost) -> None:
+    ctx = ha_ctx(ctx, host)
+    host.files[ctx.state_dir / ".certificate-key"] = "abcd\n"
+    host.responses[("podman", "exec", "demo-cp-2", "bash")] = Result(
+        1, "x\n" * 30 + "error: boom\n", ""
+    )
+    with pytest.raises(PhaseFailed, match=r"demo-cp-2(.|\n)*error: boom"):
+        Runner([kubeadm.PHASE], only="kubeadm/join").run(ctx)
+
+
+def test_join_done_when_every_joining_node_is_in_the_cluster(ctx: Context, host: FakeHost) -> None:
+    ctx = ha_ctx(ctx, host)
+    assert not kubeadm.join_done(ctx)
+    host.responses[("kubectl", "get", "node")] = Result(0, "x Ready", "")
+    assert kubeadm.join_done(ctx)  # demo-cp-3 (join: false) is not required
