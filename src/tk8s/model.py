@@ -58,6 +58,15 @@ class UserCluster(Strict):
     spec: UserSpec
 
 
+class NodeRequest(Strict):
+    """tkctl add node: what was asked for; plan_add turns it into a Node."""
+
+    role: Role
+    cpu: int | None = Field(default=None, ge=1)
+    memory: str | None = Field(default=None, pattern=MEMORY)
+    join: bool = True
+
+
 # ---- what the platform keeps in <state dir>/cluster.yaml
 
 

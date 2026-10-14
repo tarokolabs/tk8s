@@ -136,3 +136,39 @@ def test_read_bytes_and_remove(tmp_path: Path) -> None:
     assert f.read_bytes(Path("/x")) == b"ab" and f.read_bytes(Path("/y")) is None
     f.remove(Path("/x"))
     assert Path("/x") not in f.files
+
+
+def test_fake_host_tracks_units_systemctl_starts_and_stops() -> None:
+    host = FakeHost()
+    host.run(["systemctl", "enable", "--now", "--quiet", "demo.target"], sudo=True)
+    assert host.is_active("demo.target")
+    host.run(["systemctl", "stop", "demo.target", "demo-lb.service"], sudo=True)
+    assert not host.is_active("demo.target")
+    host.run(["systemctl", "start", "x.service"], sudo=True)
+    assert host.is_active("x.service")
+    host.run(["systemctl", "disable", "--now", "x.service"], sudo=True, check=False)
+    assert not host.is_active("x.service")
+
+
+def test_fake_host_tracks_podman_containers_volumes_and_networks() -> None:
+    host = FakeHost(podman={"container:demo-cp-1", "volume:demo-cp-1-var", "network:demo"})
+    ok = host.run(["podman", "container", "exists", "demo-cp-1"], sudo=True, check=False)
+    missing = host.run(["podman", "volume", "exists", "nope"], sudo=True, check=False)
+    assert (ok.returncode, missing.returncode) == (0, 1)
+    host.run(["podman", "rm", "-f", "demo-cp-1"], sudo=True)
+    host.run(["podman", "volume", "rm", "-f", "demo-cp-1-var"], sudo=True)
+    host.run(["podman", "network", "rm", "-f", "demo"], sudo=True)
+    assert host.podman == set()
+    host.podman.add("container:x")
+    host.responses[("podman", "rm", "-f", "x")] = Result(125, "", "in use")
+    host.run(["podman", "rm", "-f", "x"], sudo=True, check=False)
+    assert host.podman == {"container:x"}  # a failed rm removes nothing
+    host.responses[("podman", "image", "exists")] = Result(0, "", "")
+    assert host.run(["podman", "image", "exists", "i"], check=False).returncode == 0  # as before
+
+
+def test_fake_host_rm_forgets_files_and_dirs() -> None:
+    host = FakeHost(files={Path("/etc/x/a.container"): "a"}, dirs={Path("/etc/x"), Path("/opt/s")})
+    host.run(["rm", "-f", "/etc/x/a.container"], sudo=True)
+    host.run(["rm", "-rf", "/etc/x", "/opt/s"], sudo=True)
+    assert not host.exists(Path("/etc/x/a.container")) and not host.exists(Path("/opt/s"))

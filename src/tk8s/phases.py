@@ -45,6 +45,9 @@ class Context:
     options: Options
     say: Callable[[str], None]
     cluster: model.Cluster | None = None  # set by plan; later phases require it
+    name: str | None = None  # the cluster named on the command line (delete works without a file)
+    node: str | None = None  # the node a node verb works on (add node's plan phase sets it)
+    request: model.NodeRequest | None = None  # what add node was asked for
 
     def require_cluster(self) -> model.Cluster:
         if self.cluster is None:
@@ -52,8 +55,16 @@ class Context:
         return self.cluster
 
     @property
+    def cluster_name(self) -> str:
+        if self.cluster is not None:
+            return self.cluster.name
+        if self.name is None:
+            raise PhaseFailed("no cluster in this context; plan runs first")
+        return self.name
+
+    @property
     def state_dir(self) -> Path:
-        return self.paths.state_dir(self.require_cluster().name)
+        return self.paths.state_dir(self.cluster_name)
 
 
 @dataclass(frozen=True)
@@ -78,6 +89,7 @@ class Runner:
     phases: list[Phase]
     only: str | None = None
     skip: set[str] = field(default_factory=set)
+    record: bool = True  # status.completed is create's record; delete and node verbs leave it alone
 
     def run(self, ctx: Context) -> None:
         for full, phase in self._selected():
@@ -97,7 +109,8 @@ class Runner:
                     raise PhaseFailed(f"[{full}] ran but is not done")
             except HostError as err:
                 raise PhaseFailed(f"[{full}] failed: {err}") from err
-            self._record(ctx, full)
+            if self.record:
+                self._record(ctx, full)
 
     def _selected(self) -> list[tuple[str, Phase]]:
         leaves = [leaf for p in self.phases for leaf in p.leaves()]

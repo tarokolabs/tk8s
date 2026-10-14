@@ -28,3 +28,8 @@ def test_crio_table_covers_both_supported_minors() -> None:
     assert v.crio_for(v.kubernetes.default) == "v1.37.2"
     assert v.crio_for(v.kubernetes.previous) == "v1.36.7"
     assert v.crio_for("1.35.5") is None
+
+
+def test_uv_is_pinned() -> None:
+    v = versions.load(HOME / "versions.yaml")
+    assert v.uv == "0.13.1"

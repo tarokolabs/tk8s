@@ -139,3 +139,12 @@ def test_user_network_accepts_lb_pin() -> None:
         }
     )
     assert u.spec.network is not None and u.spec.network.lb == IPv4Address("172.22.9.240")
+
+
+def test_node_request_is_frozen_and_defaults_to_join() -> None:
+    from pydantic import ValidationError
+
+    r = model.NodeRequest(role="worker")
+    assert r.cpu is None and r.memory is None and r.join is True
+    with pytest.raises(ValidationError):
+        model.NodeRequest(role="worker", cpu=0)

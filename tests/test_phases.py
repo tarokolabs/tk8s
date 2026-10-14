@@ -152,3 +152,26 @@ def test_nothing_is_recorded_before_plan_wrote_cluster_yaml(ctx: Context) -> Non
     assert ran == ["plan"] and host.lines == ["[preflight] check", "[plan] plan"]
     saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
     assert saved.status is not None and list(saved.status.completed) == ["plan"]
+
+
+def test_record_false_leaves_status_completed_alone(ctx: Context, host: FakeHost) -> None:
+    from tk8s import model
+
+    c = ctx.require_cluster()
+    host.files[ctx.state_dir / "cluster.yaml"] = model.dumps(c)
+    phase, _ = counter_phase("x", 1)
+    Runner([phase], record=False).run(ctx)
+    saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
+    assert saved.status is not None and "x" not in saved.status.completed
+    again, _ = counter_phase("x", 1)  # a fresh phase: the first one is done now
+    Runner([again]).run(ctx)  # the default still records
+    saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
+    assert saved.status is not None and "x" in saved.status.completed
+
+
+def test_context_name_stands_in_for_a_missing_cluster(tmp_path: Path) -> None:
+    ctx, _ = make_ctx(tmp_path)
+    with pytest.raises(PhaseFailed):
+        _ = ctx.state_dir
+    ctx.name = "gone"
+    assert ctx.cluster_name == "gone" and ctx.state_dir == tmp_path / "clusters" / "gone"

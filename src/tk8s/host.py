@@ -236,6 +236,7 @@ class FakeHost(Host):
     dirs: set[Path] = field(default_factory=set)
     unwritable: set[Path] = field(default_factory=set)
     active: set[str] = field(default_factory=set)
+    podman: set[str] = field(default_factory=set)  # "container:NAME", "volume:NAME", "network:NAME"
     lines: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -247,7 +248,30 @@ class FakeHost(Host):
                 if isinstance(a, list):
                     return a.pop(0) if len(a) > 1 else a[0]
                 return a
+        a = list(argv)
+        kinds = ("container", "volume", "network")
+        if a[:1] == ["podman"] and len(a) == 4 and a[1] in kinds and a[2] == "exists":
+            return Result(0 if f"{a[1]}:{a[3]}" in self.podman else 1, "", "")
         return Result(0, "", "")
+
+    def _track(self, argv: Sequence[str]) -> None:
+        """What a successful command changes on this host: units started and stopped, podman
+        objects and files removed. Enough for done() to turn true after run()."""
+        a = list(argv)
+        if a[:1] == ["systemctl"] and len(a) > 2:
+            units = {u for u in a[2:] if not u.startswith("-")}
+            if a[1] in ("start", "enable"):
+                self.active |= units
+            elif a[1] in ("stop", "disable"):
+                self.active -= units
+        elif a[:3] == ["podman", "rm", "-f"]:
+            self.podman.discard(f"container:{a[3]}")
+        elif a[:4] in (["podman", "volume", "rm", "-f"], ["podman", "network", "rm", "-f"]):
+            self.podman.discard(f"{a[1]}:{a[4]}")
+        elif a[:2] in (["rm", "-f"], ["rm", "-rf"]):
+            for path in map(Path, a[2:]):
+                self.files.pop(path, None)
+                self.dirs.discard(path)
 
     def run(
         self,
@@ -266,6 +290,8 @@ class FakeHost(Host):
         if isinstance(answer, Exception):
             raise answer
         assert isinstance(answer, Result)
+        if answer.returncode == 0:
+            self._track(argv)
         if check and answer.returncode != 0:
             raise HostError(_full_argv(argv, sudo, env), answer.returncode, answer.stderr)
         return answer

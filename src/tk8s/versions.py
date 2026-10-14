@@ -27,6 +27,7 @@ class Versions(BaseModel):
     haproxy: str
     crun: str
     podman: str
+    uv: str
     verify_busybox: str
     verify_alpine: str
     verify_agnhost: str

@@ -1,5 +1,5 @@
 # Single source of truth for pinned component versions.
-# Read by the Taskfile (fromYaml), install.sh, and the release workflow.
+# Read by tk8s (versions.py), install.sh, build-images.sh and the release workflow (sed).
 kubernetes:
   default: "1.37.1"
   previous: "1.36.5"
@@ -23,6 +23,9 @@ haproxy: "docker.io/library/haproxy:3.3.16-trixie"
 crun: "1.30.1"
 # podman built from source on the L3 runner (Ubuntu 24.04 ships 4.9); hosts need >= 5.4
 podman: "5.4.2"
+# uv for install.sh: fetches Python 3.14 and the locked dependencies; the release tarball is
+# checked against its published sha256
+uv: "0.13.1"
 # Images used by tkctl verify's test pods
 verify_busybox: "docker.io/library/busybox:1.37.0"
 verify_alpine: "docker.io/library/alpine:3.22"
