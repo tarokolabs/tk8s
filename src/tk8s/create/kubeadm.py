@@ -5,6 +5,7 @@ Plan 1 ships the render sub-phase; init, join and kubeconfig follow with the sam
 
 import re
 import time
+from pathlib import Path
 
 from .. import model
 from ..phases import Context, Phase, PhaseFailed
@@ -36,12 +37,25 @@ def render_init(ctx: Context) -> str:
     )
 
 
+def audit_policy(ctx: Context) -> tuple[Path, str]:
+    """The apiserver's --audit-policy-file: the state dir is /opt/taroko inside the node, and
+    logs/ belongs to the user while the apiserver (root in the node) writes audit.log into it."""
+    path = ctx.state_dir / "logs" / "apiserver" / "audit-policy.yaml"
+    return path, (ctx.paths.home / "manifests" / "audit-policy.yaml").read_text()
+
+
 def render_done(ctx: Context) -> bool:
-    return ctx.host.read(ctx.state_dir / "init-config.yaml") == render_init(ctx)
+    policy, text = audit_policy(ctx)
+    return (
+        ctx.host.read(ctx.state_dir / "init-config.yaml") == render_init(ctx)
+        and ctx.host.read(policy) == text
+    )
 
 
 def render_run(ctx: Context) -> None:
     ctx.host.write(ctx.state_dir / "init-config.yaml", render_init(ctx), mode=0o600)
+    policy, text = audit_policy(ctx)
+    ctx.host.write(policy, text)
 
 
 RENDER = Phase(

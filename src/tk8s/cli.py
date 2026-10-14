@@ -366,6 +366,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
+    # Every [phase] and `$` line lands in a redirected log as it happens, not when the buffer fills.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
     try:
         return _main(args)
     except UsageError as err:

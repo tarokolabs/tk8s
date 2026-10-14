@@ -251,3 +251,16 @@ def test_join_done_when_every_joining_node_is_in_the_cluster(ctx: Context, host:
     assert not kubeadm.join_done(ctx)
     host.responses[("kubectl", "get", "node")] = Result(0, "x Ready", "")
     assert kubeadm.join_done(ctx)  # demo-cp-3 (join: false) is not required
+
+
+def test_render_also_places_the_audit_policy_the_apiserver_mounts(
+    ctx: Context, host: FakeHost
+) -> None:
+    """kube-apiserver's --audit-policy-file points at /opt/taroko/logs/apiserver/audit-policy.yaml,
+    the state dir mounted into the node; without the file the apiserver crash-loops."""
+    Runner([kubeadm.PHASE], only="kubeadm/render").run(ctx)
+    policy = ctx.state_dir / "logs" / "apiserver" / "audit-policy.yaml"
+    assert host.files[policy] == (ctx.paths.home / "manifests" / "audit-policy.yaml").read_text()
+    assert kubeadm.render_done(ctx)
+    del host.files[policy]
+    assert not kubeadm.render_done(ctx)

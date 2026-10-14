@@ -346,3 +346,17 @@ def test_verify_cluster_verb(
     assert calls[0][0].options.verify_timeout == 30  # type: ignore[attr-defined]
     rc, out = run(capsys, "verify", "cluster", "--list-phases")
     assert rc == 0 and out.splitlines()[0].startswith("nodes") and "tcproute" in out
+
+
+def test_stdout_is_line_buffered_so_redirected_logs_show_each_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import io
+    import sys
+
+    from tk8s import cli
+
+    fake = io.TextIOWrapper(io.BytesIO(), line_buffering=False)
+    monkeypatch.setattr(sys, "stdout", fake)
+    cli.main(["version"])
+    assert fake.line_buffering  # a `tkctl create … > log` shows every phase as it happens
