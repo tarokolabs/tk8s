@@ -76,6 +76,18 @@ out=$(task lifecycle:describe CLUSTER=demo OUTPUT=yaml 2>&1)
 assert_contains "$out" "apiVersion" "describe -o yaml prints cluster.yaml"
 assert_fails "describe unknown cluster fails" task lifecycle:describe CLUSTER=nope
 assert_fails "stop unknown cluster fails" task lifecycle:stop CLUSTER=nope
+# systemctl only waits for the jobs of the units it was given; the nodes and the LB stop through
+# PartOf= afterwards, so stop names every unit of the cluster and returns once all of them are down.
+printf '#!/usr/bin/env bash\necho "systemctl $*" >> "$STUB_LOG"; [ "$1" != is-active ]\n' > "$STUB/systemctl"
+printf '#!/usr/bin/env bash\nexec "$@"\n' > "$STUB/sudo"; chmod +x "$STUB/systemctl" "$STUB/sudo"
+: > "$STUB_LOG"; out=$(PATH="$STUB:$PATH" task lifecycle:stop CLUSTER=demo 2>&1); rc=$?
+assert_eq "0" "$rc" "stop exits 0"
+stopline=$(grep '^systemctl stop' "$STUB_LOG")
+assert_contains "$stopline" "demo.target" "stop stops the target"
+assert_contains "$stopline" "demo-lb.service" "stop names the LB unit"
+assert_contains "$stopline" "demo-cp-1.service" "stop names the control plane unit"
+assert_contains "$stopline" "demo-worker-1.service" "stop names the worker unit"
+assert_contains "$out" "cluster demo stopped" "stop reports"
 out=$(TK_ASSUME_YES=1 task lifecycle:delete CLUSTER=nope 2>&1); rc=$?
 assert_eq "1" "$([ $rc -ne 0 ] && echo 1)" "delete unknown cluster exits non-zero"
 assert_contains "$out" "cluster nope not found" "delete unknown cluster names the cluster"
