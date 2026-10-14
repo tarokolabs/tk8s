@@ -175,3 +175,14 @@ def test_context_name_stands_in_for_a_missing_cluster(tmp_path: Path) -> None:
         _ = ctx.state_dir
     ctx.name = "gone"
     assert ctx.cluster_name == "gone" and ctx.state_dir == tmp_path / "clusters" / "gone"
+
+
+def test_only_accepts_a_leaf_name_as_well_as_the_full_path(tmp_path: Path) -> None:
+    ctx, _ = make_ctx(tmp_path)
+    a, sa = counter_phase("a", 1)
+    b, sb = counter_phase("b", 1)
+    parent = Phase("p", "parent", None, lambda c: None, children=(a, b))
+    Runner([parent], only="b").run(ctx)
+    assert (sa["runs"], sb["runs"]) == (0, 1)
+    Runner([parent], only="p/a").run(ctx)
+    assert (sa["runs"], sb["runs"]) == (1, 1)

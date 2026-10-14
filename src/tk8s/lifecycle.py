@@ -182,7 +182,11 @@ def stop(ctx: Context, c: model.Cluster) -> None:
         f"{c.name}-lb.service",
         *(f"{n.name}.service" for n in c.spec.nodes),
     ]
-    ctx.host.run(["systemctl", "stop", *units], sudo=True)
+    # A node recorded in cluster.yaml but never given a unit (an add that died early) makes
+    # systemctl exit non-zero after stopping everything else; that is not a failed stop.
+    r = ctx.host.run(["systemctl", "stop", *units], sudo=True, capture=True, check=False)
+    if r.returncode != 0 and r.stderr.strip():
+        ctx.say(f"  {r.stderr.strip().splitlines()[-1]}")
     ctx.say(f"cluster {c.name} stopped")
 
 

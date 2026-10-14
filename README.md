@@ -136,7 +136,7 @@ tkctl use cluster <名稱>               # 切 ~/.kube/config（原檔留在 ~/.
 tkctl verify cluster <名稱> [--phase P] [--list-phases]   # 逐項 PASS/FAIL/SKIP，任一 FAIL 結束碼 1
 tkctl add node <叢集> --role worker|control-plane [--cpu N] [--memory SIZE] [--no-join]
 tkctl join node <叢集> <節點>          # 對建了但沒加入的節點執行 kubeadm join
-tkctl delete node <叢集> <節點> [--yes] [--phase P]
+tkctl delete node <叢集> <節點> [--yes] [--phase P] [--list-phases]
 tkctl pull images [--k8s 版本] [--refresh]   # 把建叢集需要的全部 image 拉進共用 store（create 會自動做）；--refresh 連已存在的節點 image 也重拉
 tkctl get images [--k8s 版本]        # 列清單與是否已在 store
 tkctl delete images --k8s 版本 [--yes]   # 刪掉該版本的 store；有叢集在用會被拒絕
@@ -154,7 +154,7 @@ tkctl version
 - `--memory` 接受 `4G`、`4096M` 這種寫法，`4Gi` 不行。
 - control plane 可以加在任何叢集上（上限 5）。
 - `create` 中斷後再跑同一個指令會從沒做完的地方續行（`tkctl describe cluster` 的 `Status:` 看得到停在哪一步）；已完成的叢集再 `create` 會被拒絕。
-- `--phase`、`--skip-phases`、`--list-phases`：phase 的名字是 `--list-phases` 印的（子 phase 寫成 `kubeadm/init`）。`delete cluster`、`delete node` 也有 `--phase`：每個 phase 的「做過沒」就是「那樣東西還在不在」，所以中途失敗再跑一次就會接下去。`add node` 沒有：中斷的 add 用 `tkctl join node` 收尾。
+- `--phase`、`--skip-phases`、`--list-phases`：phase 的名字是 `--list-phases` 印的（子 phase 寫成 `kubeadm/init`，只寫 `init` 也行）。`delete cluster`、`delete node` 也有 `--phase`：每個 phase 的「做過沒」就是「那樣東西還在不在」，所以中途失敗再跑一次就會接下去。`add node` 沒有：中斷的 add 用 `tkctl join node` 收尾。
 - `--dry-run` 印出解析後的 `cluster.yaml`、全部 Quadlet unit 與 kubeadm 設定，不動主機。
 
 ## 叢集定義檔

@@ -39,7 +39,7 @@ Usage:
   tkctl use cluster NAME
   tkctl verify cluster NAME [--phase P] [--list-phases]
   tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] [--no-join]
-  tkctl delete node CLUSTER NODE [--yes] [--phase P]
+  tkctl delete node CLUSTER NODE [--yes] [--phase P] [--list-phases]
   tkctl join node CLUSTER NODE
   tkctl pull images [--k8s VERSION] [--refresh]
                          (--refresh: pull the node image again even when its tag is present)
@@ -167,6 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
             dn.add_argument("node", nargs="?")
             dn.add_argument("--yes", action="store_true")
             dn.add_argument("--phase")
+            dn.add_argument("--list-phases", action="store_true")
     an = (
         sub.add_parser("add", add_help=False)
         .add_subparsers(dest="noun")

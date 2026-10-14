@@ -592,3 +592,30 @@ def test_node_verbs_need_a_running_cluster(
     ):
         rc, out = run(capsys, *argv)
         assert rc == 1 and "cluster demo is not running (tkctl start cluster demo)" in out, argv
+
+
+def test_delete_node_lists_its_phases_and_accepts_short_names(
+    capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rc, out = run(capsys, "delete", "node", "--list-phases")
+    assert (
+        rc == 0
+        and out.splitlines()[0].startswith("delete")
+        and "  drain" in out
+        and "  entry" in out
+    )
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["join", "node", "demo", "../x"], "invalid node name '../x'"),
+        (["delete", "node", "demo", "Demo-cp-1", "--yes"], "invalid node name 'Demo-cp-1'"),
+        (["join", "node", "demo", "demo-worker-1/x"], "invalid node name"),
+    ],
+)
+def test_node_names_are_validated_before_anything_runs(
+    capsys: pytest.CaptureFixture[str], argv: list[str], message: str
+) -> None:
+    rc, out = run(capsys, *argv)
+    assert rc != 0 and message in out, out

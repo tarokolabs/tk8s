@@ -13,6 +13,7 @@ from .args import (
     user_cluster_from_flags,
     validate_k8s,
     validate_name,
+    validate_node_name,
 )
 from .create import DRY_RUN_PHASES, PHASES
 from .create.plan import load_existing, resolve, used_indices
@@ -204,6 +205,7 @@ def cmd_add_node(a: argparse.Namespace) -> int:
 def cmd_join_node(a: argparse.Namespace) -> int:
     if not a.cluster or not a.node:
         raise UsageError("usage: tkctl join node CLUSTER NODE")
+    validate_node_name(a.node)
     ctx = make_context()
     c = running_cluster(ctx, a.cluster)
     if node.find(c, a.node) is None:
@@ -216,8 +218,12 @@ def cmd_join_node(a: argparse.Namespace) -> int:
 
 
 def cmd_delete_node(a: argparse.Namespace) -> int:
+    if a.list_phases:
+        print("\n".join(tree([node_delete.PHASE])))
+        return 0
     if not a.cluster or not a.node:
         raise UsageError("usage: tkctl delete node CLUSTER NODE [--yes]")
+    validate_node_name(a.node)
     ctx = make_context(assume_yes=a.yes or os.environ.get("TK_ASSUME_YES") == "1")
     c = running_cluster(ctx, a.cluster)
     ctx.node = a.node

@@ -24,6 +24,16 @@ def validate_name(name: str) -> str:
     return name
 
 
+def validate_node_name(name: str) -> str:
+    """Node names land in unit paths and podman names: the same shape plan gives them."""
+    if not re.fullmatch(model.NODE_NAME, name):
+        raise UsageError(
+            f"invalid node name '{name}': use lowercase letters, digits and '-', "
+            "start with a letter"
+        )
+    return name
+
+
 def normalize_memory(m: str) -> str:
     if not re.fullmatch(r"[0-9]+[GgMm]", m):
         raise UsageError(

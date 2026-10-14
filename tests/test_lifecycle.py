@@ -220,3 +220,13 @@ def test_describe_next_is_the_phase_after_the_last_recorded_one(
     ctx.cluster = c.model_copy(update={"status": c.status.model_copy(update={"completed": done})})
     lifecycle.describe(ctx, ctx.cluster, None)
     assert "  next:       kubeadm/kubeconfig   (rerun" in "\n".join(host.lines)
+
+
+def test_stop_survives_a_node_recorded_without_a_unit(ctx: Context, host: FakeHost) -> None:
+    """An add that died after plan leaves a node in cluster.yaml with no unit; stop cluster must
+    still stop the rest (systemctl stops what it can and exits non-zero for the unknown unit)."""
+    host.responses[("systemctl", "stop")] = Result(
+        5, "", "Failed to stop demo-worker-2.service: Unit demo-worker-2.service not loaded."
+    )
+    lifecycle.stop(ctx, ctx.require_cluster())
+    assert host.lines[-1] == "cluster demo stopped"

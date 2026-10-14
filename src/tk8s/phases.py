@@ -116,7 +116,11 @@ class Runner:
         leaves = [leaf for p in self.phases for leaf in p.leaves()]
         if self.only is None:
             return leaves
-        picked = [(f, p) for f, p in leaves if f == self.only or f.startswith(self.only + "/")]
+        picked = [
+            (f, p)
+            for f, p in leaves
+            if f == self.only or f.startswith(self.only + "/") or f.split("/")[-1] == self.only
+        ]
         if not picked:
             names = ", ".join(f for f, _ in leaves)
             raise PhaseFailed(f"unknown phase {self.only!r}; phases: {names}")
