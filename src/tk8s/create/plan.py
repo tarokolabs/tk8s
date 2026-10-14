@@ -95,7 +95,8 @@ def network(index: int, want_lb: IPv4Address | None) -> model.Network:
 
 
 def expand_nodes(name: str, groups: list[model.NodeGroup], index: int) -> list[model.Node]:
-    """Each group becomes count nodes named <cluster>-cp-N / <cluster>-worker-N; IPs skip .100."""
+    """Each group becomes count nodes named <cluster>-control-plane-N / <cluster>-worker-N; IPs
+    skip .100."""
     nodes: list[model.Node] = []
     ip, cp, wk = 0, 0, 0
     for g in groups:
@@ -105,7 +106,7 @@ def expand_nodes(name: str, groups: list[model.NodeGroup], index: int) -> list[m
                 ip = 101
             if g.role == "control-plane":
                 cp += 1
-                auto = f"{name}-cp-{cp}"
+                auto = f"{name}-control-plane-{cp}"
             else:
                 wk += 1
                 auto = f"{name}-worker-{wk}"

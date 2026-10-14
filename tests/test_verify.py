@@ -5,11 +5,11 @@ from tk8s.host import FakeHost, Result
 from tk8s.phases import Context
 
 NODES = (
-    "demo-cp-1 Ready control-plane 1m v1.37.1\ndemo-worker-1 Ready <none> 1m v1.37.1\n"
+    "demo-control-plane-1 Ready control-plane 1m v1.37.1\ndemo-worker-1 Ready <none> 1m v1.37.1\n"
     "demo-worker-2 Ready <none> 1m v1.37.1\n"
 )
 STATS = (
-    "control-planes,demo-cp-1,0,0,0,0,,0,0,0,,0,,0,0,0,0,UP,1\n"
+    "control-planes,demo-control-plane-1,0,0,0,0,,0,0,0,,0,,0,0,0,0,UP,1\n"
     "control-planes,BACKEND,0,0,0,0,200,0,0,0,0,0,,0,0,0,0,UP,1\n"
 )
 
@@ -23,9 +23,9 @@ def healthy(ctx: Context, host: FakeHost) -> None:
     host.active.add("demo.target")
     host.responses[("kubectl", "get", "nodes", "--no-headers")] = Result(0, NODES, "")
     host.responses[("kubectl", "get", "nodes", "-o", "custom-columns")] = Result(
-        0, "demo-cp-1 v1.37.1 cri-o://1.37.2 6.12\n", ""
+        0, "demo-control-plane-1 v1.37.1 cri-o://1.37.2 6.12\n", ""
     )
-    host.responses[("podman", "exec", "demo-cp-1", "journalctl")] = Result(0, "", "")
+    host.responses[("podman", "exec", "demo-control-plane-1", "journalctl")] = Result(0, "", "")
     host.responses[("kubectl", "get", "pods", "-n", "kube-system", "--no-headers")] = [
         Result(0, "coredns-1 0/1 ContainerCreating 0 1m\n", ""),
         Result(0, "coredns-1 1/1 Running 0 1m\ncilium-1 1/1 Running 0 1m\n", ""),
@@ -111,7 +111,7 @@ def test_one_broken_component_is_one_fail_and_exit_1(ctx: Context, host: FakeHos
 
 def test_kubelet_noise_is_reported_with_the_cgroup(ctx: Context, host: FakeHost) -> None:
     healthy(ctx, host)
-    host.responses[("podman", "exec", "demo-cp-1", "journalctl")] = Result(
+    host.responses[("podman", "exec", "demo-control-plane-1", "journalctl")] = Result(
         0,
         'E0929 summary_sys_containers.go:91] "Failed to get system container stats" '
         'err="failed to get cgroup stats for /system.slice/containerd.service"\n',

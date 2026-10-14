@@ -6,7 +6,7 @@ from tk8s import delete, lifecycle
 from tk8s.host import FakeHost, HostError, Result
 from tk8s.phases import Context, PhaseFailed, Runner
 
-NODES = ("demo-cp-1", "demo-worker-1", "demo-worker-2")
+NODES = ("demo-control-plane-1", "demo-worker-1", "demo-worker-2")
 
 
 def everything_there(ctx: Context, host: FakeHost) -> None:
@@ -42,7 +42,9 @@ def test_a_full_delete_removes_everything_in_order(ctx: Context, host: FakeHost)
     assert "/etc/systemd/system/demo.target" in rm
     assert "/etc/systemd/system/demo-routes.service" in rm
     assert a.index(["systemctl", "daemon-reload"]) > a.index(rm)
-    assert a.index(["podman", "rm", "-f", "demo-cp-1"]) < a.index(rm)  # nodes known before units go
+    assert a.index(["podman", "rm", "-f", "demo-control-plane-1"]) < a.index(
+        rm
+    )  # nodes known before units go
     for n in (*NODES, "demo-lb"):
         assert ["podman", "rm", "-f", n] in a
     for n in NODES:
@@ -72,7 +74,10 @@ def test_rerun_after_a_failed_volume_finishes_the_delete(ctx: Context, host: Fak
     with pytest.raises(PhaseFailed, match=r"\[delete/volumes\] failed: .*volume is being used"):
         Runner([delete.PHASE], record=False).run(ctx)
     assert ["podman", "network", "rm", "-f", "demo"] not in argvs(host)  # stopped there
-    assert "volume:demo-worker-1-var" in host.podman and "container:demo-cp-1" not in host.podman
+    assert (
+        "volume:demo-worker-1-var" in host.podman
+        and "container:demo-control-plane-1" not in host.podman
+    )
     host.lines.clear()
     Runner([delete.PHASE], record=False).run(ctx)
     assert "[delete/stop] already done" in host.lines
@@ -94,15 +99,22 @@ def test_without_cluster_yaml_the_units_name_the_nodes_to_remove(tmp_path: Path)
     for f in (
         "demo.network",
         "demo-lb.container",
-        "demo-cp-1.container",
+        "demo-control-plane-1.container",
         "demo-worker-1.container",
     ):
         host.files[unit_dir / f] = "x"
-    host.podman.update({"container:demo-lb", "container:demo-cp-1", "volume:demo-worker-1-var"})
+    host.podman.update(
+        {"container:demo-lb", "container:demo-control-plane-1", "volume:demo-worker-1-var"}
+    )
     assert delete.found(ctx)
     Runner([delete.PHASE], record=False).run(ctx)
     a = argvs(host)
-    assert ["podman", "rm", "-f", "demo-lb"] in a and ["podman", "rm", "-f", "demo-cp-1"] in a
+    assert ["podman", "rm", "-f", "demo-lb"] in a and [
+        "podman",
+        "rm",
+        "-f",
+        "demo-control-plane-1",
+    ] in a
     assert ["podman", "volume", "rm", "-f", "demo-worker-1-var"] in a
     assert host.podman == set()
     assert "[delete/routes] already done" in host.lines  # no subnets known without the file

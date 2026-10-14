@@ -46,7 +46,11 @@ def test_gvisor_downloads_once_verifies_and_installs_into_every_node(
     v = ctx.versions.gvisor
     tar = b"stub-download\n"
     sha = hashlib.sha512(tar).hexdigest()
-    for n in ("demo-cp-1", "demo-worker-1", "demo-worker-2"):  # no marker, no zstd, no conf
+    for n in (
+        "demo-control-plane-1",
+        "demo-worker-1",
+        "demo-worker-2",
+    ):  # no marker, no zstd, no conf
         host.responses[("podman", "exec", n, "test")] = Result(1, "", "")
     host.responses[("kubectl", "get", "runtimeclass", "gvisor")] = Result(1, "", "")
     cache = ctx.paths.cache_dir
@@ -66,7 +70,7 @@ def test_gvisor_downloads_once_verifies_and_installs_into_every_node(
         f"{url}/gvisor.tar.zstd",
     ] in a
     assert ["mv", str(cache / "gvisor.tar.zstd"), str(cache / f"gvisor-{v}.tar.zstd")] in a
-    for n in ("demo-cp-1", "demo-worker-1", "demo-worker-2"):
+    for n in ("demo-control-plane-1", "demo-worker-1", "demo-worker-2"):
         assert ["podman", "exec", n, "sh", "-c", APT] in a
         assert [
             "podman",
@@ -89,12 +93,12 @@ def test_gvisor_downloads_once_verifies_and_installs_into_every_node(
         conf = str(ctx.paths.home / "templates" / "crio" / "20-gvisor.conf")
         assert ["podman", "cp", conf, f"{n}:/etc/crio/crio.conf.d/20-gvisor.conf"] in a
         assert ["podman", "exec", n, "systemctl", "restart", "crio"] in a
-    apt_at = a.index(["podman", "exec", "demo-cp-1", "sh", "-c", APT])
+    apt_at = a.index(["podman", "exec", "demo-control-plane-1", "sh", "-c", APT])
     tar_at = a.index(
         [
             "podman",
             "exec",
-            "demo-cp-1",
+            "demo-control-plane-1",
             "tar",
             "--zstd",
             "-xf",
@@ -115,7 +119,7 @@ def test_gvisor_checksum_mismatch_fails_and_drops_the_download(
     ctx: Context, host: FakeHost
 ) -> None:
     ctx = with_gvisor(ctx)
-    host.responses[("podman", "exec", "demo-cp-1", "test")] = Result(1, "", "")
+    host.responses[("podman", "exec", "demo-control-plane-1", "test")] = Result(1, "", "")
     cache = ctx.paths.cache_dir
     host.files[cache / "gvisor.tar.zstd"] = "stub-download\n"
     host.files[cache / "gvisor.tar.zstd.sha512"] = "0" * 128 + "  gvisor.tar.zstd\n"
@@ -140,9 +144,9 @@ def test_gvisor_second_run_is_done_and_does_not_restart_crio(ctx: Context, host:
 
 def test_gvisor_node_with_zstd_skips_apt(ctx: Context, host: FakeHost) -> None:
     ctx = with_gvisor(ctx)
-    host.responses[("podman", "exec", "demo-cp-1", "test", "-e")] = Result(1, "", "")
-    host.responses[("podman", "exec", "demo-cp-1", "test", "-x", "/usr/bin/zstd")] = Result(
-        0, "", ""
+    host.responses[("podman", "exec", "demo-control-plane-1", "test", "-e")] = Result(1, "", "")
+    host.responses[("podman", "exec", "demo-control-plane-1", "test", "-x", "/usr/bin/zstd")] = (
+        Result(0, "", "")
     )
     host.responses[("podman", "exec")] = Result(0, "", "")
     host.files[ctx.paths.cache_dir / f"gvisor-{ctx.versions.gvisor}.tar.zstd"] = "cached"

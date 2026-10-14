@@ -25,7 +25,7 @@ spec:
     services: 10.98.3.0/24
   nodes:
     - role: control-plane
-      name: demo-cp-1
+      name: demo-control-plane-1
       ip: 172.22.3.1
       cpu: 2
       memory: 4g
@@ -44,7 +44,7 @@ def test_round_trip_keeps_the_exact_text(tmp_path: Path) -> None:
     p.write_text(GOOD)
     c = model.load(p)
     assert c.name == "demo" and c.domain == "demo.k8s"
-    assert c.first_control_plane.name == "demo-cp-1" and len(c.workers) == 1
+    assert c.first_control_plane.name == "demo-control-plane-1" and len(c.workers) == 1
     assert c.spec.network.pods == IPv4Network("10.244.24.0/21")
     assert c.node_image == "ghcr.io/tarokolabs/tk8s/node:v1.37.1"
     assert model.dumps(c) == GOOD  # quoted version, indented lists, key order

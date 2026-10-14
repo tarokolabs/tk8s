@@ -68,7 +68,7 @@ def test_flags(capsys: pytest.CaptureFixture[str]) -> None:
         "1.36.5",
         "--dry-run",
     )
-    assert rc == 0 and "name: demo-cp-3" in out and "name: demo-worker-4" in out
+    assert rc == 0 and "name: demo-control-plane-3" in out and "name: demo-worker-4" in out
     assert 'kubernetes: "1.36.5"' in out and "lb: 172.22." in out
     rc, out = run(
         capsys, "create", "cluster", "demo", "--control-planes", "3", "--defer-join", "--dry-run"
@@ -132,8 +132,8 @@ TAKEN = (
     'spec:\n  kubernetes: "1.37.1"\n  cni: cilium\n  datapath: auto\n  gvisor: false\n'
     "  network: {index: 0, nodes: 172.22.0.0/24, gateway: 172.22.0.254, lb: 172.22.0.100, "
     "lb_range: 172.22.0.200-172.22.0.219, pods: 10.244.0.0/21, services: 10.98.0.0/24}\n"
-    "  nodes: [{role: control-plane, name: taken-cp-1, ip: 172.22.0.1, cpu: 2, memory: 4g, "
-    "join: true}]\n"
+    "  nodes: [{role: control-plane, name: taken-control-plane-1, ip: 172.22.0.1, cpu: 2, "
+    "memory: 4g, join: true}]\n"
 )
 
 
@@ -524,8 +524,8 @@ def test_node_verbs(
     rc, out = run(capsys, "delete", "node", "demo", "demo-worker-3", "--yes")
     assert rc == 0 and "[delete/drain]" in out
     assert out.rstrip().endswith("node demo-worker-3 removed")
-    rc, out = run(capsys, "delete", "node", "demo", "demo-cp-1", "--yes")
-    assert rc == 1 and "the first control plane demo-cp-1 cannot be deleted" in out
+    rc, out = run(capsys, "delete", "node", "demo", "demo-control-plane-1", "--yes")
+    assert rc == 1 and "the first control plane demo-control-plane-1 cannot be deleted" in out
 
 
 @pytest.mark.parametrize(
@@ -610,7 +610,10 @@ def test_delete_node_lists_its_phases_and_accepts_short_names(
     ("argv", "message"),
     [
         (["join", "node", "demo", "../x"], "invalid node name '../x'"),
-        (["delete", "node", "demo", "Demo-cp-1", "--yes"], "invalid node name 'Demo-cp-1'"),
+        (
+            ["delete", "node", "demo", "Demo-control-plane-1", "--yes"],
+            "invalid node name 'Demo-control-plane-1'",
+        ),
         (["join", "node", "demo", "demo-worker-1/x"], "invalid node name"),
     ],
 )

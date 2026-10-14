@@ -7,7 +7,7 @@ from tk8s.phases import Context, PhaseFailed, Runner
 STATS = (
     "# pxname,svname,qcur,qmax,scur,smax,slim,stot,bin,bout,dreq,dresp,ereq,econ,eresp,wretr,"
     "wredis,status\n"
-    "control-planes,demo-cp-1,0,0,0,0,,0,0,0,,0,,0,0,0,0,DOWN\n"
+    "control-planes,demo-control-plane-1,0,0,0,0,,0,0,0,,0,,0,0,0,0,DOWN\n"
     "control-planes,BACKEND,0,0,0,0,200,0,0,0,0,0,,0,0,0,0,DOWN\n"
 )
 
@@ -16,7 +16,7 @@ def healthy(host: FakeHost, ctx: Context) -> None:
     host.responses[("id", "-u")] = Result(0, "1000\n", "")
     host.responses[("id", "-g")] = Result(0, "1000\n", "")
     host.responses[("podman", "exec", "demo-lb")] = Result(0, STATS, "")
-    for n in ("demo-cp-1", "demo-worker-1", "demo-worker-2"):
+    for n in ("demo-control-plane-1", "demo-worker-1", "demo-worker-2"):
         host.responses[("podman", "exec", n, "systemctl", "is-system-running")] = Result(
             0, "running\n", ""
         )
@@ -75,13 +75,13 @@ def test_up_copies_the_lb_image_starts_the_target_and_waits(ctx: Context, host: 
 def test_stale_volumes_of_a_new_node_are_removed(ctx: Context, host: FakeHost) -> None:
     healthy(host, ctx)
     host.responses[("podman", "container", "exists")] = Result(1, "", "")  # nodes are new
-    host.responses[("podman", "volume", "exists", "demo-cp-1-var")] = Result(0, "", "")
+    host.responses[("podman", "volume", "exists", "demo-control-plane-1-var")] = Result(0, "", "")
     host.responses[("podman", "volume", "exists")] = Result(1, "", "")
     nodes.up_run(ctx)
     a = argvs(host)
-    assert ["podman", "volume", "rm", "-f", "demo-cp-1-var"] in a
+    assert ["podman", "volume", "rm", "-f", "demo-control-plane-1-var"] in a
     assert ["podman", "volume", "rm", "-f", "demo-worker-1-var"] not in a  # did not exist
-    assert "  removed stale volume demo-cp-1-var" in host.lines
+    assert "  removed stale volume demo-control-plane-1-var" in host.lines
 
 
 def test_stale_volumes_are_kept_when_a_kubeconfig_exists(ctx: Context, host: FakeHost) -> None:
@@ -115,12 +115,12 @@ def test_up_is_done_when_target_nodes_and_lb_are_up(ctx: Context, host: FakeHost
     host.active.discard("demo.target")
     assert not nodes.up_done(ctx)
     host.active.add("demo.target")
-    host.responses[("podman", "exec", "demo-cp-1", "systemctl", "is-system-running")] = Result(
-        1, "degraded\n", ""
+    host.responses[("podman", "exec", "demo-control-plane-1", "systemctl", "is-system-running")] = (
+        Result(1, "degraded\n", "")
     )
     assert nodes.up_done(ctx)  # degraded counts, like before
-    host.responses[("podman", "exec", "demo-cp-1", "systemctl", "is-system-running")] = Result(
-        1, "starting\n", ""
+    host.responses[("podman", "exec", "demo-control-plane-1", "systemctl", "is-system-running")] = (
+        Result(1, "starting\n", "")
     )
     assert not nodes.up_done(ctx)
 

@@ -10,7 +10,7 @@ def test_init_config_names_cluster_endpoint_and_sans(ctx: Context) -> None:
         "  certSANs:\n    - api.demo.k8s\n    - 172.22.0.100\n    - 172.22.0.1\n  extraArgs:"
         in text
     )
-    assert "advertiseAddress: 172.22.0.1" in text and "name: demo-cp-1" in text
+    assert "advertiseAddress: 172.22.0.1" in text and "name: demo-control-plane-1" in text
     assert "podSubnet: 10.244.0.0/21\n  serviceSubnet: 10.98.0.0/24" in text
 
 
@@ -37,27 +37,29 @@ ADMIN_CONF = (
 
 
 def initialised(host: FakeHost) -> None:
-    host.responses[("podman", "exec", "demo-cp-1", "test", "-f", "/etc/kubernetes/admin.conf")] = (
-        Result(0, "", "")
-    )
-    host.responses[("podman", "exec", "demo-cp-1", "cat", "/etc/kubernetes/admin.conf")] = Result(
-        0, ADMIN_CONF, ""
-    )
+    host.responses[
+        ("podman", "exec", "demo-control-plane-1", "test", "-f", "/etc/kubernetes/admin.conf")
+    ] = Result(0, "", "")
+    host.responses[
+        ("podman", "exec", "demo-control-plane-1", "cat", "/etc/kubernetes/admin.conf")
+    ] = Result(0, ADMIN_CONF, "")
     host.responses[("curl",)] = Result(0, "ok", "")
 
 
 def test_init_runs_kubeadm_stores_the_key_and_waits_for_the_lb(
     ctx: Context, host: FakeHost
 ) -> None:
-    host.responses[("podman", "exec", "demo-cp-1", "test", "-f")] = Result(1, "", "")
-    host.responses[("podman", "exec", "demo-cp-1", "kubeadm", "init")] = Result(0, INIT_OUT, "")
+    host.responses[("podman", "exec", "demo-control-plane-1", "test", "-f")] = Result(1, "", "")
+    host.responses[("podman", "exec", "demo-control-plane-1", "kubeadm", "init")] = Result(
+        0, INIT_OUT, ""
+    )
     host.responses[("curl",)] = [Result(0, "", ""), Result(0, "ok", "")]
     kubeadm.init_run(ctx)
     init = next(c for c in host.calls if c.argv[3:5] == ["kubeadm", "init"])
     assert init.argv == [
         "podman",
         "exec",
-        "demo-cp-1",
+        "demo-control-plane-1",
         "kubeadm",
         "init",
         "--config=/opt/taroko/init-config.yaml",
@@ -74,7 +76,7 @@ def test_init_runs_kubeadm_stores_the_key_and_waits_for_the_lb(
         "3",
         "https://172.22.0.100:6443/readyz",
     ]
-    assert "  demo-cp-1 initialized" in host.lines
+    assert "  demo-control-plane-1 initialized" in host.lines
 
 
 def test_init_is_skipped_when_admin_conf_exists_but_still_waits_for_the_lb(
@@ -83,13 +85,13 @@ def test_init_is_skipped_when_admin_conf_exists_but_still_waits_for_the_lb(
     initialised(host)
     kubeadm.init_run(ctx)
     assert not any(c.argv[3:5] == ["kubeadm", "init"] for c in host.calls)
-    assert "  demo-cp-1 already initialized" in host.lines
+    assert "  demo-control-plane-1 already initialized" in host.lines
     assert any(c.argv[0] == "curl" for c in host.calls)
 
 
 def test_init_fails_when_kubeadm_fails_and_shows_the_tail(ctx: Context, host: FakeHost) -> None:
-    host.responses[("podman", "exec", "demo-cp-1", "test", "-f")] = Result(1, "", "")
-    host.responses[("podman", "exec", "demo-cp-1", "kubeadm", "init")] = Result(
+    host.responses[("podman", "exec", "demo-control-plane-1", "test", "-f")] = Result(1, "", "")
+    host.responses[("podman", "exec", "demo-control-plane-1", "kubeadm", "init")] = Result(
         1, "line1\n" * 40 + "error execution phase preflight: boom\n", ""
     )
     with pytest.raises(PhaseFailed, match="error execution phase preflight: boom"):
@@ -123,11 +125,11 @@ def test_init_leaves_no_kubeconfig_when_admin_conf_cannot_be_read(
     ctx: Context, host: FakeHost
 ) -> None:
     initialised(host)
-    host.responses[("podman", "exec", "demo-cp-1", "cat", "/etc/kubernetes/admin.conf")] = Result(
-        125, "", "container not running"
-    )
+    host.responses[
+        ("podman", "exec", "demo-control-plane-1", "cat", "/etc/kubernetes/admin.conf")
+    ] = Result(125, "", "container not running")
     with pytest.raises(
-        PhaseFailed, match=r"could not read /etc/kubernetes/admin\.conf from demo-cp-1"
+        PhaseFailed, match=r"could not read /etc/kubernetes/admin\.conf from demo-control-plane-1"
     ):
         Runner([kubeadm.PHASE], only="kubeadm/kubeconfig").run(ctx)
     assert ctx.state_dir / "kubeconfig" not in host.files
@@ -174,10 +176,13 @@ def ha_ctx(ctx: Context, host: FakeHost) -> Context:
     )
     initialised(host)
     host.files[ctx.state_dir / "kubeconfig"] = "kind: Config\n"
-    host.responses[("podman", "exec", "demo-cp-1", "kubeadm", "token", "create")] = Result(
-        0,
-        "kubeadm join api.demo.k8s:6443 --token t.t --discovery-token-ca-cert-hash sha256:1\r\n",
-        "",
+    host.responses[("podman", "exec", "demo-control-plane-1", "kubeadm", "token", "create")] = (
+        Result(
+            0,
+            "kubeadm join api.demo.k8s:6443 --token t.t "
+            "--discovery-token-ca-cert-hash sha256:1\r\n",
+            "",
+        )
     )
     host.responses[("kubectl", "get", "node")] = Result(1, "", "not found")
     return ctx
@@ -190,7 +195,7 @@ def test_join_joins_control_planes_and_workers_and_skips_deferred(
     host.files[ctx.state_dir / ".certificate-key"] = "abcd\n"
     kubeadm.join_run(ctx)
     joins = [c for c in host.calls if c.argv[:2] == ["podman", "exec"] and "bash" in c.argv]
-    cp2 = next(c for c in joins if c.argv[2] == "demo-cp-2")
+    cp2 = next(c for c in joins if c.argv[2] == "demo-control-plane-2")
     assert cp2.argv[3:5] == ["bash", "-c"]
     assert cp2.argv[5] == (
         "kubeadm join api.demo.k8s:6443 --token t.t --discovery-token-ca-cert-hash sha256:1 "
@@ -199,13 +204,18 @@ def test_join_joins_control_planes_and_workers_and_skips_deferred(
     )
     wk = next(c for c in joins if c.argv[2] == "demo-worker-1")
     assert wk.argv[5].endswith("sha256:1 --ignore-preflight-errors=SystemVerification")
-    assert not any(c.argv[2] == "demo-cp-3" for c in joins)
+    assert not any(c.argv[2] == "demo-control-plane-3" for c in joins)
     assert (
-        "  demo-cp-3 left unjoined (join: false); join later with: tkctl join node demo demo-cp-3"
+        "  demo-control-plane-3 left unjoined (join: false); join later with: "
+        "tkctl join node demo demo-control-plane-3"
     ) in host.lines
-    assert "  demo-cp-2 joined (control-plane)" in host.lines
+    assert "  demo-control-plane-2 joined (control-plane)" in host.lines
     taints = [c.argv for c in host.calls if c.argv[:3] == ["kubectl", "taint", "node"]]
-    assert [t[3] for t in taints] == ["demo-cp-1", "demo-cp-2", "demo-cp-3"]
+    assert [t[3] for t in taints] == [
+        "demo-control-plane-1",
+        "demo-control-plane-2",
+        "demo-control-plane-3",
+    ]
     kube = [c for c in host.calls if c.argv[0] == "kubectl"]
     assert all(c.env == {"KUBECONFIG": str(ctx.state_dir / "kubeconfig")} for c in kube)
 
@@ -214,12 +224,12 @@ def test_join_uploads_a_fresh_certificate_key_when_none_is_stored(
     ctx: Context, host: FakeHost
 ) -> None:
     ctx = ha_ctx(ctx, host)
-    host.responses[("podman", "exec", "demo-cp-1", "kubeadm", "init", "phase", "upload-certs")] = (
-        Result(0, "[upload-certs] Using certificate key:\nffff\n", "")
-    )
+    host.responses[
+        ("podman", "exec", "demo-control-plane-1", "kubeadm", "init", "phase", "upload-certs")
+    ] = Result(0, "[upload-certs] Using certificate key:\nffff\n", "")
     kubeadm.join_run(ctx)
     assert host.files[ctx.state_dir / ".certificate-key"] == "ffff\n"
-    cp2 = next(c for c in host.calls if c.argv[:3] == ["podman", "exec", "demo-cp-2"])
+    cp2 = next(c for c in host.calls if c.argv[:3] == ["podman", "exec", "demo-control-plane-2"])
     assert "--certificate-key ffff" in cp2.argv[5]
 
 
@@ -239,10 +249,10 @@ def test_join_skips_nodes_already_in_the_cluster(ctx: Context, host: FakeHost) -
 def test_join_failure_shows_the_tail_and_names_the_node(ctx: Context, host: FakeHost) -> None:
     ctx = ha_ctx(ctx, host)
     host.files[ctx.state_dir / ".certificate-key"] = "abcd\n"
-    host.responses[("podman", "exec", "demo-cp-2", "bash")] = Result(
+    host.responses[("podman", "exec", "demo-control-plane-2", "bash")] = Result(
         1, "x\n" * 30 + "error: boom\n", ""
     )
-    with pytest.raises(PhaseFailed, match=r"demo-cp-2(.|\n)*error: boom"):
+    with pytest.raises(PhaseFailed, match=r"demo-control-plane-2(.|\n)*error: boom"):
         Runner([kubeadm.PHASE], only="kubeadm/join").run(ctx)
 
 
@@ -250,7 +260,7 @@ def test_join_done_when_every_joining_node_is_in_the_cluster(ctx: Context, host:
     ctx = ha_ctx(ctx, host)
     assert not kubeadm.join_done(ctx)
     host.responses[("kubectl", "get", "node")] = Result(0, "x Ready", "")
-    assert kubeadm.join_done(ctx)  # demo-cp-3 (join: false) is not required
+    assert kubeadm.join_done(ctx)  # demo-control-plane-3 (join: false) is not required
 
 
 def test_render_also_places_the_audit_policy_the_apiserver_mounts(
@@ -284,15 +294,19 @@ def test_init_that_did_not_complete_is_refused_not_skipped(ctx: Context, host: F
     """admin.conf exists after a kubeadm init that died in wait-control-plane; the cluster has no
     bootstrap token, no CoreDNS and an admin that cannot do anything. Say so instead of going on."""
     initialised(host)
-    host.responses[("podman", "exec", "demo-cp-1", "kubectl")] = Result(1, "", "forbidden")
+    host.responses[("podman", "exec", "demo-control-plane-1", "kubectl")] = Result(
+        1, "", "forbidden"
+    )
     assert not kubeadm.init_done(ctx)
-    with pytest.raises(PhaseFailed, match=r"kubeadm init on demo-cp-1 did not complete"):
+    with pytest.raises(PhaseFailed, match=r"kubeadm init on demo-control-plane-1 did not complete"):
         kubeadm.init_run(ctx)
-    host.responses[("podman", "exec", "demo-cp-1", "kubectl")] = Result(0, "kubeadm-config", "")
+    host.responses[("podman", "exec", "demo-control-plane-1", "kubectl")] = Result(
+        0, "kubeadm-config", ""
+    )
     assert kubeadm.init_done(ctx)
     host.calls.clear()
     kubeadm.init_run(ctx)
-    assert "  demo-cp-1 already initialized" in host.lines
+    assert "  demo-control-plane-1 already initialized" in host.lines
 
 
 def test_init_already_done_waits_for_the_apiserver_before_judging_completion(
@@ -301,28 +315,28 @@ def test_init_already_done_waits_for_the_apiserver_before_judging_completion(
     """A resume right after a restart: admin.conf exists, the apiserver is still coming up. The
     completion check must come after the LB wait, or a healthy cluster is told to delete itself."""
     initialised(host)
-    host.responses[("podman", "exec", "demo-cp-1", "kubectl")] = [
+    host.responses[("podman", "exec", "demo-control-plane-1", "kubectl")] = [
         Result(1, "", "connection refused"),
         Result(0, "kubeadm-config", ""),
     ]
     host.responses[("curl",)] = [Result(0, "", ""), Result(0, "ok", "")]
     assert not kubeadm.init_done(ctx)  # the blip
     kubeadm.init_run(ctx)  # waits for the LB, then finds the cluster bootstrapped
-    assert "  demo-cp-1 already initialized" in host.lines
+    assert "  demo-control-plane-1 already initialized" in host.lines
     curl_at = next(i for i, c in enumerate(host.calls) if c.argv[0] == "curl")
     cm_at = next(
         i
         for i, c in enumerate(host.calls)
-        if c.argv[:4] == ["podman", "exec", "demo-cp-1", "kubectl"] and i > curl_at
+        if c.argv[:4] == ["podman", "exec", "demo-control-plane-1", "kubectl"] and i > curl_at
     )
     assert curl_at < cm_at
 
 
 def test_certificate_key_fresh_ignores_the_stored_key(ctx: Context, host: FakeHost) -> None:
     host.files[ctx.state_dir / ".certificate-key"] = "stale\n"
-    host.responses[("podman", "exec", "demo-cp-1", "kubeadm", "init", "phase", "upload-certs")] = (
-        Result(0, "[upload-certs] Using certificate key:\nnewkey\n", "")
-    )
+    host.responses[
+        ("podman", "exec", "demo-control-plane-1", "kubeadm", "init", "phase", "upload-certs")
+    ] = Result(0, "[upload-certs] Using certificate key:\nnewkey\n", "")
     assert kubeadm.certificate_key(ctx) == "stale"
     assert kubeadm.certificate_key(ctx, fresh=True) == "newkey"
     assert host.files[ctx.state_dir / ".certificate-key"] == "newkey\n"

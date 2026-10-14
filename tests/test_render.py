@@ -31,7 +31,7 @@ def test_node_container_has_the_variables_units_will_pass() -> None:
         role="worker",
         name="c-worker-1",
         ip="172.22.0.2",
-        after="\nAfter=c-cp-1.service",
+        after="\nAfter=c-control-plane-1.service",
         image="img",
         domain="c.k8s",
         lb_ip="172.22.0.100",
@@ -43,6 +43,6 @@ def test_node_container_has_the_variables_units_will_pass() -> None:
         cpu=2,
         memory="4g",
     )
-    assert "PartOf=c.target\nAfter=c-cp-1.service\n\n[Container]" in out
+    assert "PartOf=c.target\nAfter=c-control-plane-1.service\n\n[Container]" in out
     assert "Volume=/d/images/1.37.1:/var/lib/containers/shared:ro" in out
     assert "PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g" in out

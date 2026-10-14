@@ -12,7 +12,7 @@ def test_render_produces_every_file_in_write_order(ctx: Context) -> None:
         "demo.network",
         "haproxy.cfg",
         "demo-lb.container",
-        "demo-cp-1.container",
+        "demo-control-plane-1.container",
         "demo-worker-1.container",
         "demo-worker-2.container",
         "demo.target",
@@ -26,23 +26,23 @@ def test_render_produces_every_file_in_write_order(ctx: Context) -> None:
 
 def test_control_plane_has_no_after_and_workers_wait_for_it(ctx: Context) -> None:
     files = units.render(ctx)
-    cp = files[Path("/etc/containers/systemd/demo/demo-cp-1.container")]
+    cp = files[Path("/etc/containers/systemd/demo/demo-control-plane-1.container")]
     wk = files[Path("/etc/containers/systemd/demo/demo-worker-1.container")]
     assert "PartOf=demo.target\n\n[Container]" in cp and "After=" not in cp
-    assert "PartOf=demo.target\nAfter=demo-cp-1.service\n" in wk
+    assert "PartOf=demo.target\nAfter=demo-control-plane-1.service\n" in wk
 
 
 def test_haproxy_lists_one_server_per_control_plane(ctx: Context) -> None:
     cfg = units.render(ctx)[ctx.state_dir / "lb" / "haproxy.cfg"]
-    assert cfg.endswith("    server demo-cp-1 172.22.0.1:6443\n")
+    assert cfg.endswith("    server demo-control-plane-1 172.22.0.1:6443\n")
     assert "server-template" not in cfg and "resolvers" not in cfg
 
 
 def test_target_wants_lb_every_node_and_routes(ctx: Context) -> None:
     t = units.render(ctx)[Path("/etc/systemd/system/demo.target")]
     assert (
-        "Wants=demo-lb.service demo-cp-1.service demo-worker-1.service demo-worker-2.service "
-        "demo-routes.service"
+        "Wants=demo-lb.service demo-control-plane-1.service demo-worker-1.service "
+        "demo-worker-2.service demo-routes.service"
     ) in t
 
 

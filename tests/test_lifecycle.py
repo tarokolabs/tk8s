@@ -152,7 +152,7 @@ def test_stop_names_every_unit_at_once(ctx: Context, host: FakeHost) -> None:
     assert stops[0].argv[2:] == [
         "demo.target",
         "demo-lb.service",
-        "demo-cp-1.service",
+        "demo-control-plane-1.service",
         "demo-worker-1.service",
         "demo-worker-2.service",
     ]
@@ -161,19 +161,22 @@ def test_stop_names_every_unit_at_once(ctx: Context, host: FakeHost) -> None:
 
 def test_start_waits_for_fresh_ready_heartbeats(ctx: Context, host: FakeHost) -> None:
     stale = (
-        "demo-cp-1 True 2000-01-01T00:00:00Z\ndemo-worker-1 True 2000-01-01T00:00:00Z\n"
+        "demo-control-plane-1 True 2000-01-01T00:00:00Z\ndemo-worker-1 True 2000-01-01T00:00:00Z\n"
         "demo-worker-2 True 2000-01-01T00:00:00Z\n"
     )
     fresh = stale.replace("2000-01-01", "2999-01-01")
     host.responses[("kubectl", "get", "nodes", "-o")] = [Result(0, stale, ""), Result(0, fresh, "")]
     host.responses[("kubectl", "get", "nodes", "--no-headers")] = Result(
-        0, "demo-cp-1 Ready control-plane 1d v1.37.1\ndemo-worker-1 Ready <none> 1d v1.37.1\n", ""
+        0,
+        "demo-control-plane-1 Ready control-plane 1d v1.37.1\n"
+        "demo-worker-1 Ready <none> 1d v1.37.1\n",
+        "",
     )
     lifecycle.start(ctx, ctx.require_cluster())
     argvs = [k.argv for k in host.calls]
     assert ["systemctl", "start", "demo.target"] in argvs
     assert sum(1 for a in argvs if a[:4] == ["kubectl", "get", "nodes", "-o"]) == 2
-    assert host.lines[-2:] == ["  demo-cp-1 Ready", "  demo-worker-1 Ready"]
+    assert host.lines[-2:] == ["  demo-control-plane-1 Ready", "  demo-worker-1 Ready"]
 
 
 def test_use_creates_kube_dir_and_keeps_the_previous_config(

@@ -53,7 +53,11 @@ def test_resolve_fills_defaults_and_skips_a_used_index() -> None:
     assert n.pods == IPv4Network("10.244.8.0/21") and n.services == IPv4Network("10.98.1.0/24")
     assert n.gateway == IPv4Address("172.22.1.254") and n.lb == IPv4Address("172.22.1.100")
     assert n.lb_range == "172.22.1.200-172.22.1.219"
-    assert [x.name for x in c.spec.nodes] == ["demo-cp-1", "demo-worker-1", "demo-worker-2"]
+    assert [x.name for x in c.spec.nodes] == [
+        "demo-control-plane-1",
+        "demo-worker-1",
+        "demo-worker-2",
+    ]
     assert str(c.spec.nodes[2].ip) == "172.22.1.3" and c.spec.nodes[2].memory == "4g"
     assert c.spec.kubernetes == K8S and all(x.join for x in c.spec.nodes)
     assert c.status is not None and c.status.phase == "Creating" and c.status.tk8s == "test"
@@ -67,7 +71,11 @@ def test_ha_and_deferred_join() -> None:
             "{role: control-plane, count: 2, join: false}]\n"
         )
     )
-    assert [x.name for x in c.control_planes] == ["defer-cp-1", "defer-cp-2", "defer-cp-3"]
+    assert [x.name for x in c.control_planes] == [
+        "defer-control-plane-1",
+        "defer-control-plane-2",
+        "defer-control-plane-3",
+    ]
     assert [x.join for x in c.spec.nodes] == [True, False, False]
     assert c.spec.network.lb == IPv4Address("172.22.0.100")
 

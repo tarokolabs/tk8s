@@ -11,7 +11,7 @@ from tk8s.phases import Context, Options
 
 HOME = Path(__file__).resolve().parents[1]
 STATS = (
-    "control-planes,demo-cp-1,0,0,0,0,,0,0,0,,0,,0,0,0,0,UP,1\n"
+    "control-planes,demo-control-plane-1,0,0,0,0,,0,0,0,,0,,0,0,0,0,UP,1\n"
     "control-planes,BACKEND,0,0,0,0,200,0,0,0,0,0,,0,0,0,0,UP,1\n"
 )
 
