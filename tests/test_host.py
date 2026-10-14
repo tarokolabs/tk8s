@@ -49,6 +49,7 @@ def test_write_without_sudo_creates_parents_and_sets_mode(tmp_path: Path) -> Non
     p = tmp_path / "a" / "b.conf"
     h.write(p, "x\n", mode=0o600)
     assert p.read_text() == "x\n" and (p.stat().st_mode & 0o777) == 0o600
+    assert not (tmp_path / "a" / "b.conf.tmp").exists()  # written atomically, tmp renamed away
     assert h.read(p) == "x\n" and h.read(tmp_path / "nope") is None
     assert h.exists(p) and not h.exists(tmp_path / "nope")
 

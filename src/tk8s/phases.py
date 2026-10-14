@@ -113,7 +113,7 @@ class Runner:
         completed = {**ctx.cluster.status.completed, full: datetime.now(UTC)}
         status = ctx.cluster.status.model_copy(update={"completed": completed})
         ctx.cluster = ctx.cluster.model_copy(update={"status": status})
-        model.save(ctx.cluster, ctx.state_dir / "cluster.yaml")
+        ctx.host.write(ctx.state_dir / "cluster.yaml", model.dumps(ctx.cluster))
 
 
 def tree(phases: list[Phase], indent: str = "") -> list[str]:

@@ -85,10 +85,12 @@ class Host:
                 input=content,
                 capture=True,
             )
-        else:
+        else:  # atomic: a crash mid-write never leaves half a file behind
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content)
-            path.chmod(mode)
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(content)
+            tmp.chmod(mode)
+            tmp.replace(path)
 
     def read(self, path: Path, *, sudo: bool = False) -> str | None:
         if sudo:

@@ -93,3 +93,14 @@ def test_dry_run_never_checks_done_after_run(tmp_path: Path) -> None:
     p, s = counter_phase("p", 99)  # would never be done
     Runner([p]).run(ctx)
     assert s["runs"] == 1 and host.lines == ["[p] do p", ""]
+
+
+def test_completed_phases_are_recorded_in_cluster_yaml_through_the_host(ctx: Context) -> None:
+    from tk8s import model
+
+    host = ctx.host
+    assert isinstance(host, FakeHost)
+    p, _ = counter_phase("p", 1)
+    Runner([p]).run(ctx)
+    saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
+    assert saved.status is not None and "p" in saved.status.completed
