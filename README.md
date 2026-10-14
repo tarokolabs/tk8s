@@ -27,15 +27,60 @@
 
 ## 架構
 
-三層，各管一件事：
+兩層，各管一件事：
 
 | 層 | 負責 | 學員看到什麼 |
 |---|---|---|
-| `bin/tkctl` | 把旗標翻成 `cluster.yaml`，呼叫 go-task。一支 bash，沒有叢集邏輯 | `tkctl --help` 一頁 |
-| `Taskfile.yaml` 與 `taskfiles/` | 網段分配、渲染節點 unit、kubeadm init 與 join、cilium、日常操作。每個 task 有說明、依賴與「做過就跳過」的判斷 | `task --list`；打開 Taskfile 就是流程 |
+| `tkctl`（`src/tk8s/`） | 把旗標翻成 `cluster.yaml`，然後一個 phase 一個 phase 做：網段分配、渲染 unit、`kubeadm init` 與 `join`、cilium、addons、日常操作。每個 phase 有一行說明、`done()`（看主機判斷做過沒）與 `run()` | `tkctl create cluster --list-phases` 是流程；執行時每個 phase 一行、每道指令一行 `$ …`，可以照抄重現 |
 | Podman Quadlet | 每個節點一個 systemd 服務，一個叢集一個 target | `systemctl status <叢集>.target` |
 
-建叢集的流程與實體機上的 kubeadm 一致：建網路與節點容器、第一個 control plane `kubeadm init`、其餘節點 `kubeadm join`、裝 CNI。這是教學上想讓學員讀得懂的部分，所以全部是可讀的 shell。
+建叢集的流程與實體機上的 kubeadm 一致，phase 的名字也跟著它：
+
+```
+$ tkctl create cluster --list-phases
+preflight          check the host: podman, systemd, cgroup v2, swap, sudo, sysctls, data tree
+plan               resolve cluster.yaml: defaults, subnet, node names
+images             pull every image the cluster needs into the shared store
+units              write the Quadlet units, the target, the routes and the LB config
+nodes              start the nodes
+  cni-plugins        install the CNI plugins the nodes mount
+  up                 start the cluster target and wait for every node and the LB
+kubeadm            initialise the first control plane and join the others
+  render             write the kubeadm init configuration into the state dir
+  init               kubeadm init on the first control plane
+  kubeconfig         hand the host a kubeconfig that points at the LB
+  join               join the other control planes and the workers
+cni                install the CNI and wait for the nodes
+  install            install the CNI (cilium: kube-proxy replacement, LB-IPAM, Gateway API)
+  nodes-ready        wait for every node to be Ready
+addons             RuntimeClass, gVisor, metrics-server, local-path
+  runtimeclass       RuntimeClass crun (CRI-O's default runtime)
+  gvisor             gVisor into every node and RuntimeClass gvisor (only with --gvisor)
+  metrics-server     metrics-server (kubectl top)
+  local-path         local-path-provisioner with PV data under the state dir
+```
+
+程式碼怎麼讀：`src/tk8s/create/<phase>.py` 從上讀到下就是那個 phase 的步驟，一個函式一步；`src/tk8s/host.py` 是唯一執行指令、寫 `/etc` 的檔；`templates/` 裡的檔跟寫到主機上的只差 `$變數`；`src/tk8s/model.py` 是 `cluster.yaml` 的型別（pydantic）。沒有 class 階層、沒有 plugin 註冊、沒有 dispatch table。
+
+執行時看到的：
+
+```
+[preflight] check the host: podman, systemd, cgroup v2, swap, sudo, sysctls, data tree
+  preflight ok: podman 5.4.2, systemd, cgroup v2, swap off, host bridge-nf off, ip_forward on, /opt/taroko owned by student
+[plan] resolve cluster.yaml: defaults, subnet, node names
+  cluster demo: 1 control plane + 2 workers, K8s 1.37.1, subnet 172.22.0.0/24
+[images] already done
+[units] write the Quadlet units, the target, the routes and the LB config
+  $ sudo -n install -D -m 644 /dev/stdin /etc/containers/systemd/demo/demo.network
+  …
+[kubeadm/init] kubeadm init on the first control plane
+  $ sudo -n podman exec demo-cp-1 kubeadm init --config=/opt/taroko/init-config.yaml --upload-certs --ignore-preflight-errors=SystemVerification
+  demo-cp-1 initialized
+…
+cluster demo is ready
+```
+
+`already done` 是 `done()` 看主機說這步做過了；中斷後再跑同一個指令，做過的跳過、沒做的接著做。`--phase P` 只跑一個 phase（或一棵子樹，例如 `kubeadm`），`--skip-phases a,b` 跳過幾個，`--dry-run` 印出會寫的每個檔與會跑的指令而不動主機。`tkctl describe cluster <名稱>` 的 `Status:` 列出哪些 phase 何時完成、下一步是什麼。
 
 節點 image 為 `ghcr.io/tarokolabs/tk8s/node:v<K8s 版本>`，拉不到時以 `images/node/` 的配方本地建置（見「節點 image」）。
 
@@ -52,7 +97,7 @@
 | 主機防火牆 | 前置檢查會把主機的 `net.bridge.bridge-nf-call-iptables` 設為 0 並寫入 `/etc/sysctl.d/90-tk8s.conf`：節點之間的橋接流量不經主機 iptables，否則裝了 Docker 的主機（FORWARD 預設 DROP）會擋掉 pod 到其他節點的流量 |
 | 其他 | `curl`、`git` |
 
-`task` 與 `kubectl` 由 `install.sh` 下載到 `/usr/local/bin`。
+`uv` 與 `kubectl` 由 `install.sh` 下載到 `/usr/local/bin`；uv 再抓一份 Python 3.14（獨立的 CPython，約 30 MB，放在使用者的 `~/.local/share/uv/`）與 `uv.lock` 釘住的相依，裝進 `/opt/taroko/tk8s/.venv/`。
 
 ## 安裝
 
@@ -61,9 +106,9 @@ curl -fsSL https://raw.githubusercontent.com/tarokolabs/tk8s/main/install.sh | s
 tkctl create cluster
 ```
 
-`install.sh` 做四件事，可重跑：檢查前置條件（podman ≥ 5.4、systemd、cgroup v2、swap 關閉、免密碼 sudo、curl、git）；依 `versions.yaml` 下載 `task` 與 `kubectl` 到 `/usr/local/bin` 並驗 checksum；clone 到 `/opt/taroko/tk8s`；把 `tkctl` 連結到 `/usr/local/bin`。`TK_VERSION=v2026.10.6 sh` 釘版本；開發者可以 clone 到任何位置直接用 `bin/tkctl`。
+`install.sh` 做四件事，可重跑：檢查前置條件（podman ≥ 5.4、systemd、cgroup v2、swap 關閉、免密碼 sudo、curl、git）；依 `versions.yaml` 下載 `uv` 與 `kubectl` 到 `/usr/local/bin` 並驗 checksum；clone 到 `/opt/taroko/tk8s`；`uv sync --locked` 把 Python 3.14 與相依裝進 `/opt/taroko/tk8s/.venv/`，把 `tkctl` 連結到 `/usr/local/bin`。`TK_VERSION=v2026.11.0 sh` 釘版本。開發者 clone 到任何位置後 `uv sync`，再用 `uv run tkctl …`。
 
-約四分鐘後印出 `cluster tk8s is ready`。接著：
+約三分鐘後印出 `cluster tk8s is ready`。接著：
 
 ```bash
 tkctl use cluster tk8s      # ~/.kube/config 指向它
@@ -71,7 +116,7 @@ kubectl get nodes
 tkctl get clusters
 ```
 
-放哪裡都可以，`tkctl` 依自身位置找到 repo；不需要 source 任何 profile。
+不需要 source 任何 profile；`tkctl` 依自身位置找到 repo（樣板、manifest、`versions.yaml`）。
 
 ## 指令
 
@@ -81,16 +126,17 @@ kubectl 風格，動詞在前。全部如下：
 tkctl create cluster [名稱] [--control-planes N] [--workers N] [--cpu N] [--memory SIZE]
                      [--k8s 版本] [--datapath auto|netkit|veth] [--gvisor] [--defer-join]
                      [-f cluster.yaml] [--allow-overlap] [--dry-run]
-tkctl delete cluster <名稱> [--yes]
+                     [--phase P] [--skip-phases P,...] [--list-phases] [--quiet]
+tkctl delete cluster <名稱> [--yes] [--phase P] [--list-phases]
 tkctl get clusters
-tkctl describe cluster <名稱> [-o yaml]
+tkctl describe cluster <名稱> [-o yaml]   # 含 Status: 哪些 phase 何時完成
 tkctl stop cluster <名稱>              # 停下所有節點，狀態與資料保留
 tkctl start cluster <名稱>             # 拉起來，等到節點以新的心跳回報 Ready
 tkctl use cluster <名稱>               # 切 ~/.kube/config（原檔留在 ~/.kube/config.bak）
-tkctl verify cluster <名稱>            # 逐項 PASS/FAIL/SKIP，任一 FAIL 結束碼 1
+tkctl verify cluster <名稱> [--phase P] [--list-phases]   # 逐項 PASS/FAIL/SKIP，任一 FAIL 結束碼 1
 tkctl add node <叢集> --role worker|control-plane [--cpu N] [--memory SIZE] [--no-join]
 tkctl join node <叢集> <節點>          # 對建了但沒加入的節點執行 kubeadm join
-tkctl delete node <叢集> <節點> [--yes]
+tkctl delete node <叢集> <節點> [--yes] [--phase P] [--list-phases]
 tkctl pull images [--k8s 版本] [--refresh]   # 把建叢集需要的全部 image 拉進共用 store（create 會自動做）；--refresh 連已存在的節點 image 也重拉
 tkctl get images [--k8s 版本]        # 列清單與是否已在 store
 tkctl delete images --k8s 版本 [--yes]   # 刪掉該版本的 store；有叢集在用會被拒絕
@@ -107,7 +153,8 @@ tkctl version
 - `--gvisor` 需要 veth datapath，會自動選；明確指定 `--datapath netkit` 加 `--gvisor` 會被拒絕。
 - `--memory` 接受 `4G`、`4096M` 這種寫法，`4Gi` 不行。
 - control plane 可以加在任何叢集上（上限 5）。
-- `create` 中斷後再跑同一個指令會從沒做完的地方續行；已完成的叢集再 `create` 會被拒絕。
+- `create` 中斷後再跑同一個指令會從沒做完的地方續行（`tkctl describe cluster` 的 `Status:` 看得到停在哪一步）；已完成的叢集再 `create` 會被拒絕。
+- `--phase`、`--skip-phases`、`--list-phases`：phase 的名字是 `--list-phases` 印的（子 phase 寫成 `kubeadm/init`，只寫 `init` 也行）。`delete cluster`、`delete node` 也有 `--phase`：每個 phase 的「做過沒」就是「那樣東西還在不在」，所以中途失敗再跑一次就會接下去。`add node` 沒有：中斷的 add 用 `tkctl join node` 收尾。
 - `--dry-run` 印出解析後的 `cluster.yaml`、全部 Quadlet unit 與 kubeadm 設定，不動主機。
 
 ## 叢集定義檔
@@ -163,7 +210,9 @@ tkctl create cluster -f tkdt.yaml
 /etc/systemd/system/<名稱>-routes.service   # 主機到 pod 與 service 網段的路由，跟 target 一起啟停
 ```
 
-環境變數一律 `TK_` 前綴：`TK_DATA_DIR` 換掉 `/opt/taroko`、`TK_WULIN_DIR` 指定教材位置、`TK_ASSUME_YES=1` 等同 `--yes`、`TK_OFFLINE=1` 絕不下載（缺 image 直接報錯）、`TK_TASK` 指定 go-task 執行檔。`tkctl --help` 有完整清單。
+環境變數一律 `TK_` 前綴：`TK_DATA_DIR` 換掉 `/opt/taroko`、`TK_WULIN_DIR` 指定教材位置、`TK_ASSUME_YES=1` 等同 `--yes`、`TK_OFFLINE=1` 絕不下載（缺 image 直接報錯）。`tkctl --help` 有完整清單。
+
+`cluster.yaml` 的 `status` 區塊（`phase: Creating|Ready`、`completed:` 每個 phase 的完成時間、`tk8s:` 建它的版本）由 tkctl 寫，`-f` 的檔不能有。v2026.10.x 建的叢集沒有 `status`，靠 `.create-complete` 標記視為 Ready，第一次改到 `cluster.yaml`（加減節點）時補上並刪掉標記。
 
 節點容器是 Quadlet 管的，每次啟停會重建；節點必須保留的 `/var`、`/etc`、`/usr/local/bin` 放在每節點的 named volume（`<節點>-var`、`-etc`、`-usr-local-bin`），`delete` 會一起清掉。
 
@@ -189,7 +238,7 @@ tkctl create cluster -f tkdt.yaml
 - 第一次 `tkctl create cluster` 多花一次下載（約 2 GB、一兩分鐘），之後每個叢集、每個節點都是零下載；`--k8s` 不同版本各有一個目錄。
 - 斷網的教室先在有網路時 `tkctl pull images`，上課時 `TK_OFFLINE=1 tkctl create cluster`：缺任何 image 會直接列出來而不是卡在 pull。CI 的 L3 就是這樣建的。
 - 唯讀是刻意的：多個 CRI-O 寫同一個 store 沒有安全的用法（節點沒乾淨關機時 `crio wipe` 會清掉整個 storage 目錄）。學員 `kubectl run` 自己拉的 image 進節點本身的 volume，不會污染共用目錄。
-- 清單不是手寫的：`scripts/images.sh <版本>` 從 `versions.yaml`、node image 裡的 `kubeadm config images list`、`cilium install --dry-run` 與 `manifests/` 現算，`tkctl get images` 看得到（因此 `get images` 會先確保 node image 與 cilium CLI 在手上，沒有會先拉）。
+- 清單不是手寫的：`tkctl get images --k8s <版本>` 從 `versions.yaml`、node image 裡的 `kubeadm config images list`、`cilium install --dry-run` 與 `manifests/` 現算，`tkctl get images` 看得到（因此 `get images` 會先確保 node image 與 cilium CLI 在手上，沒有會先拉）。
 - 建叢集時主機要套的東西也都在 repo 裡：Gateway API CRD、metrics-server manifest 與 Cilium 的 Helm chart 由 `scripts/vendor-manifests.sh` 放進 `manifests/`，升版時重跑一次；cilium CLI 不會再去 helm.cilium.io 抓 chart。
 - 只有 tkctl 寫這個目錄；主機的 `podman image prune`、`podman system reset` 動的是 `/var/lib/containers/storage`，碰不到它。要清就 `tkctl delete images --k8s <版本>`。
 - 節點 image 需是 2026-10 之後的配方（掛載點 `/var/lib/containers/shared`）。更早拉的本機快取用 `tkctl pull images --refresh` 更新（同一個 tag 重發時也是這樣換掉舊的）；舊 image 建叢集照樣成功，只是不會用到 store。
@@ -212,6 +261,20 @@ tkctl create cluster -f tkdt.yaml
 
   `tkctl describe cluster <名稱>` 的 `Access:` 會印出填好的指令。macOS 用 `sudo route -n add 172.22.N.0/24 <主機 IP>`，Windows 用 `route add 172.22.N.0 mask 255.255.255.0 <主機 IP>`。
 - 不再有 v1 的 `tkport` 註解與 DNAT 腳本；教材一律用 `type: LoadBalancer` 或 Gateway 曝露服務。
+
+## 開發
+
+```bash
+git clone https://github.com/tarokolabs/tk8s.git && cd tk8s
+uv sync                       # Python 3.14、相依、開發工具（pytest、ruff、mypy）
+uv run pytest -q              # 單元與流程測試，全部在假主機上，幾秒
+uv run ruff check . && uv run ruff format --check . && uv run mypy src tests
+uv run tkctl create cluster --dry-run
+```
+
+測試的規矩：沒有假的可執行檔、沒有 monkeypatch `subprocess`；每個 phase 有全新、已完成、中斷後續跑三種案例；`tests/golden/` 是兩種拓樸的完整 `--dry-run` 輸出，改了就要說得出為什麼（`UPDATE_GOLDEN=1 uv run pytest tests/test_golden.py` 重產）。真主機的驗證是 CI 的 `l3` workflow：每次 push 到 `main` 與每個 tag，在 GitHub runner 上以兩個 K8s 版本各建一個叢集、離線、`verify` 全過、節點零 pull。
+
+幾條絆線，過了要先討論再接受：任一模組超過 300 行、任一函式超過 60 行、`src/tk8s/host.py` 以外出現 `subprocess`、樣板裡出現條件或迴圈。
 
 ## 支援的 K8s 版本
 

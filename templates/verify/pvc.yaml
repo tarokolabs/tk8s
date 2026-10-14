@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: pvc}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources: {requests: {storage: 100Mi}}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: writer}
+spec:
+  restartPolicy: Never
+  containers:
+  - name: w
+    image: $busybox
+    command: ["sh","-c","echo verify-ok > /data/f && cat /data/f"]
+    volumeMounts: [{name: d, mountPath: /data}]
+  volumes: [{name: d, persistentVolumeClaim: {claimName: pvc}}]

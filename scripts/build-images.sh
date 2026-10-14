@@ -20,7 +20,8 @@ TK="${TK:-$(cd "$(dirname "$(realpath "$0")")/.." && pwd)}"
 SUDO="${SUDO-sudo}"
 
 build_push() {  # <name:tag> <context 目錄> [額外 build 參數...]
-   local ref="${REG}/${1}" dir="${TK}/${2}" safe="$(echo ${1} | tr '/:' '--')"
+   local ref="${REG}/${1}" dir="${TK}/${2}" safe
+   safe="$(echo "${1}" | tr '/:' '--')"
    local log="/tmp/build-${safe}.out"
    shift 2
    echo "building ${ref}"
