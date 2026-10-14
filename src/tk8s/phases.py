@@ -28,6 +28,8 @@ class Options:
     assume_yes: bool = False  # TK_ASSUME_YES=1 or --yes
     refresh: bool = False  # pull images --refresh
     retry_delay: float = 5.0  # seconds between the two attempts of a pull
+    poll: float = 2.0  # seconds between polls while waiting for a node or the LB
+    poll_slow: float = 5.0  # seconds between polls while waiting for pods and nodes to be Ready
 
 
 class PhaseFailed(Exception):

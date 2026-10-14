@@ -37,7 +37,7 @@ def ctx(paths: Paths, host: FakeHost) -> Context:
         host=host,
         paths=paths,
         versions=vers,
-        options=Options(retry_delay=0),
+        options=Options(retry_delay=0, poll=0, poll_slow=0),
         say=host.lines.append,
     )
     c.cluster = resolve(
