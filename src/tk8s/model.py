@@ -242,3 +242,19 @@ def save(cluster: Cluster, path: Path) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(dumps(cluster))
     tmp.replace(path)
+
+
+def peek(path: Path) -> tuple[int | None, str | None]:
+    """(spec.network.index, spec.kubernetes) of any cluster.yaml on the host, however old or
+    broken: subnet allocation and store pruning must not be blocked by another cluster's file."""
+    try:
+        raw = yaml.safe_load(path.read_text())
+    except OSError, yaml.YAMLError:
+        return None, None
+    spec = raw.get("spec") if isinstance(raw, dict) else None
+    if not isinstance(spec, dict):
+        return None, None
+    net = spec.get("network")
+    index = net.get("index") if isinstance(net, dict) else None
+    k8s = spec.get("kubernetes")
+    return (index if isinstance(index, int) else None, str(k8s) if k8s is not None else None)

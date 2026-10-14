@@ -189,26 +189,93 @@ def test_help_and_version(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_plugins_follow_kubectl_rules(
-    capfd: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
+    capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     plug = data_dir / "plugins"
     plug.mkdir()
-    for name, body in (
-        ("tkctl-hello", 'echo "hello: $*"'),
-        ("tkctl-hello-world", 'echo "hello-world: $*"'),
-        ("tkctl-create", "echo never"),
-    ):
+    for name in ("tkctl-hello", "tkctl-hello-world", "tkctl-create"):
         f = plug / name
-        f.write_text(f"#!/bin/sh\n{body}\n")
+        f.write_text("#!/bin/sh\necho never\n")
         f.chmod(f.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("PATH", f"{plug}{os.pathsep}{os.environ['PATH']}")
-    rc = main(["hello", "create", "class", "k8s-101", "--students", "3"])
-    out = capfd.readouterr().out
-    assert rc == 0 and out.strip().endswith("hello: create class k8s-101 --students 3")
-    main(["hello", "world", "a", "--x"])
-    assert capfd.readouterr().out.strip().endswith("hello-world: a --x")
-    main(["create", "cluster", "--dry-run"])
-    assert "name: tk8s" in capfd.readouterr().out  # a plugin cannot shadow a built-in verb
-    main(["--help"])
-    assert "Plugins found on PATH: create hello hello-world" in capfd.readouterr().out
-    assert main(["frobnicate", "cluster", "demo"]) != 0
+    execs: list[list[str]] = []
+
+    def fake_execvp(file: str, args: list[str]) -> None:
+        execs.append(args)
+        raise SystemExit(0)
+
+    monkeypatch.setattr("tk8s.cli.os.execvp", fake_execvp)
+    with pytest.raises(SystemExit):
+        main(["hello", "create", "class", "k8s-101", "--students", "3"])
+    assert execs[-1] == [str(plug / "tkctl-hello"), "create", "class", "k8s-101", "--students", "3"]
+    with pytest.raises(SystemExit):
+        main(["hello", "world", "a", "--x"])
+    assert execs[-1] == [str(plug / "tkctl-hello-world"), "a", "--x"]  # longest match wins
+    _rc, out = run(capsys, "create", "cluster", "--dry-run")
+    assert "name: tk8s" in out and len(execs) == 2  # a plugin cannot shadow a built-in verb
+    _, out = run(capsys, "--help")
+    assert "Plugins found on PATH: create hello hello-world" in out
+    assert main(["frobnicate", "cluster", "demo"]) != 0 and len(execs) == 2
+
+
+def test_plugins_exec_with_the_callers_environment(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plug = data_dir / "plugins"
+    plug.mkdir()
+    f = plug / "tkctl-lab"
+    f.write_text("#!/bin/sh\necho lab\n")
+    f.chmod(f.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{plug}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("TK_LAB_PVE_TOKEN", "secret")
+    seen: dict[str, object] = {}
+
+    def fake_execvp(file: str, args: list[str]) -> None:
+        seen["file"], seen["args"], seen["env"] = file, args, dict(os.environ)
+        raise SystemExit(0)
+
+    monkeypatch.setattr("tk8s.cli.os.execvp", fake_execvp)
+    with pytest.raises(SystemExit):
+        main(["lab", "create", "class", "k8s-101"])
+    assert seen["file"] == str(f) and seen["args"] == [str(f), "create", "class", "k8s-101"]
+    assert seen["env"]["TK_LAB_PVE_TOKEN"] == "secret"  # type: ignore[index]
+
+
+def test_create_without_dry_run_is_refused_on_this_branch(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc, out = run(capsys, "create", "cluster", "demo")
+    assert rc == 1 and "not implemented yet on this branch" in out
+
+
+def test_host_and_preflight_errors_are_one_line(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tk8s.datatree import PreflightError
+    from tk8s.host import HostError
+
+    def boom(ctx: object, k8s: str) -> None:
+        raise PreflightError("/opt/taroko is owned by someone, not student")
+
+    monkeypatch.setattr("tk8s.cli.images.ensure", boom)
+    rc, out = run(capsys, "pull", "images")
+    assert rc == 1 and out.strip() == "tkctl: /opt/taroko is owned by someone, not student"
+
+    def boom2(ctx: object, k8s: str) -> None:
+        raise HostError(["curl", "x"], 22, "The requested URL returned error: 404")
+
+    monkeypatch.setattr("tk8s.cli.images.ensure", boom2)
+    rc, out = run(capsys, "pull", "images")
+    assert rc == 1 and out.startswith("tkctl: curl x exited 22")
+
+
+def test_a_broken_cluster_yaml_of_another_cluster_does_not_block_create(
+    capsys: pytest.CaptureFixture[str], data_dir: Path
+) -> None:
+    old = data_dir / "clusters" / "old"
+    old.mkdir(parents=True)
+    (old / "cluster.yaml").write_text(
+        "metadata: {name: old}\nspec:\n  runtime: crio\n  network: {index: 0}\n  nodes: []\n"
+    )
+    rc, out = run(capsys, "create", "cluster", "--dry-run")
+    assert rc == 0 and "index: 1" in out  # the old file's index still counts

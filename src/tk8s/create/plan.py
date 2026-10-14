@@ -163,14 +163,24 @@ def load_existing(paths: Paths, name: str) -> model.Cluster | None:
 
 def used_indices(paths: Paths) -> set[int]:
     """Subnet indices of every cluster on this host (dry-run reads the real directory too)."""
-    return {model.load(p).spec.network.index for p in paths.clusters_dir.glob("*/cluster.yaml")}
+    found = (model.peek(p)[0] for p in paths.clusters_dir.glob("*/cluster.yaml"))
+    return {i for i in found if i is not None}
 
 
 # ---- the phase
 
 
 def done(ctx: Context) -> bool:
-    return ctx.cluster is not None and ctx.host.exists(ctx.state_dir / "cluster.yaml")
+    """The file on the host holds this very spec (a resume with other flags re-plans)."""
+    if ctx.cluster is None:
+        return False
+    text = ctx.host.read(ctx.state_dir / "cluster.yaml")
+    if text is None:
+        return False
+    try:
+        return model.load_text(text).spec == ctx.cluster.spec
+    except model.ClusterFileError:
+        return False
 
 
 def run(ctx: Context) -> None:

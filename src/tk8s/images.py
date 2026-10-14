@@ -63,9 +63,7 @@ def with_lock(path: Path) -> Iterator[None]:
 
 
 def init_store(ctx: Context, k8s: str) -> None:
-    """tkctl pull images may be the first command on a fresh host: build the data tree preflight
-    would, then the root-owned graphroot and the version's storage.conf."""
-    data_dirs(ctx)
+    """The root-owned graphroot and the version's storage.conf; runs under the version's lock."""
     ctx.host.mkdir(store_dir(ctx.paths, k8s), sudo=True)
     conf = conf_path(ctx.paths, k8s)
     if ctx.host.read(conf) != storage_conf(ctx.paths, k8s):
@@ -238,8 +236,9 @@ def _pull(ctx: Context, k8s: str, img: str) -> None:
 def ensure(ctx: Context, k8s: str) -> None:
     """Every image the version needs is in the store (skips what is there; TK_OFFLINE=1 checks
     only). Serialised per version: a second ensure waits for the first, then finds everything."""
-    init_store(ctx, k8s)
+    data_dirs(ctx)  # tkctl pull images may be the first command on a fresh host
     with with_lock(ctx.paths.images_dir / f"{k8s}.lock"):
+        init_store(ctx, k8s)
         start = time.monotonic()
         rows = status(ctx, k8s)
         present = [i for s, i in rows if s == "present"]
@@ -265,9 +264,7 @@ def ensure(ctx: Context, k8s: str) -> None:
 
 def clusters_using(paths: Paths, k8s: str) -> list[str]:
     return sorted(
-        c.name
-        for p in paths.clusters_dir.glob("*/cluster.yaml")
-        if (c := model.load(p)).spec.kubernetes == k8s
+        p.parent.name for p in paths.clusters_dir.glob("*/cluster.yaml") if model.peek(p)[1] == k8s
     )
 
 

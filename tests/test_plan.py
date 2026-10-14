@@ -172,3 +172,37 @@ def test_index_and_existing_come_from_the_clusters_dir(tmp_path: Path) -> None:
     assert used_indices(paths) == {0}
     assert load_existing(paths, "a") is not None and load_existing(paths, "b") is None
     assert pick_index(user(DEMO), None, used_indices(paths)) == 1
+
+
+def test_plan_done_means_the_file_holds_this_spec(tmp_path: Path) -> None:
+    from tk8s import versions
+    from tk8s.create import plan as plan_phase
+    from tk8s.host import FakeHost
+    from tk8s.phases import Context, Options
+
+    host = FakeHost()
+    paths = Paths(tmp_path, tmp_path / "wulin", HOME)
+    ctx = Context(
+        host=host,
+        paths=paths,
+        versions=versions.load(HOME / "versions.yaml"),
+        options=Options(),
+        say=host.lines.append,
+    )
+    ctx.cluster = res(user(DEMO))
+    assert not plan_phase.done(ctx)
+    plan_phase.run(ctx)
+    assert plan_phase.done(ctx)
+    ctx.cluster = res(user(DEMO.replace("count: 2", "count: 3")), existing=ctx.cluster)
+    assert not plan_phase.done(ctx)  # the file holds the old topology
+
+
+def test_used_indices_tolerates_a_file_from_an_older_tk8s(tmp_path: Path) -> None:
+    paths = Paths(tmp_path, tmp_path / "wulin", HOME)
+    (tmp_path / "clusters" / "old").mkdir(parents=True)
+    (tmp_path / "clusters" / "old" / "cluster.yaml").write_text(
+        "metadata: {name: old}\nspec:\n  runtime: crio\n  network: {index: 3}\n  nodes: []\n"
+    )
+    (tmp_path / "clusters" / "junk").mkdir()
+    (tmp_path / "clusters" / "junk" / "cluster.yaml").write_text("not: [valid")
+    assert used_indices(paths) == {3}

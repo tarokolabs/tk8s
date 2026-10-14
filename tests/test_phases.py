@@ -117,3 +117,16 @@ def test_a_phase_without_completion_state_runs_every_time(tmp_path: Path) -> Non
     Runner([always]).run(ctx)
     Runner([always]).run(ctx)
     assert runs["n"] == 2 and host.lines == ["[preflight] check the host"] * 2
+
+
+def test_a_done_check_that_hits_the_host_fails_the_phase_not_the_program(tmp_path: Path) -> None:
+    ctx, host = make_ctx(tmp_path)
+    host.responses[("podman", "build")] = Result(1, "", "build broke")
+
+    def done(c: Context) -> bool:
+        c.host.run(["podman", "build", "x"])
+        return True
+
+    p = Phase("images", "x", done, lambda c: None)
+    with pytest.raises(PhaseFailed, match=r"\[images\] failed: podman build x exited 1"):
+        Runner([p]).run(ctx)

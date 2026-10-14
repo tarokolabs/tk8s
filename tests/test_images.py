@@ -1,5 +1,6 @@
 import re
 import threading
+from contextlib import AbstractContextManager
 from pathlib import Path
 
 import pytest
@@ -240,3 +241,30 @@ def test_phase_done_and_run(ctx: Context, host: FakeHost) -> None:
     assert not images_phase.done(ctx)
     with pytest.raises(PhaseFailed, match=r"\[images\] ran but is not done"):
         Runner([images_phase.PHASE]).run(ctx)  # the fake keeps saying "missing" after the pull
+
+
+def test_store_conf_is_written_inside_the_lock(
+    ctx: Context, host: FakeHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sources(host)
+    order: list[str] = []
+    real = images.with_lock
+
+    def spy(path: Path) -> AbstractContextManager[None]:
+        order.append("lock")
+        return real(path)
+
+    monkeypatch.setattr(images, "with_lock", spy)
+    images.ensure(ctx, K8S)
+    calls = [c.argv[:2] for c in host.calls]
+    data_at = calls.index(["mkdir", str(ctx.paths.data_dir)])
+    conf_at = calls.index(["mkdir", str(ctx.paths.images_dir / K8S)])
+    assert order == ["lock"] and data_at < conf_at
+
+
+def test_clusters_using_tolerates_a_broken_file(tmp_path: Path, ctx: Context) -> None:
+    (ctx.paths.clusters_dir / "junk").mkdir(parents=True)
+    (ctx.paths.clusters_dir / "junk" / "cluster.yaml").write_text("not: [valid")
+    (ctx.paths.clusters_dir / "demo").mkdir()
+    model.save(ctx.require_cluster(), ctx.paths.clusters_dir / "demo" / "cluster.yaml")
+    assert images.clusters_using(ctx.paths, K8S) == ["demo"]

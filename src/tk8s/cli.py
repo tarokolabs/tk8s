@@ -10,7 +10,8 @@ from pathlib import Path
 from . import images, model, versions
 from .create import PHASES
 from .create.plan import PlanError, load_existing, resolve, used_indices
-from .host import DryRunHost, Host
+from .datatree import PreflightError
+from .host import DryRunHost, Host, HostError
 from .paths import Paths
 from .phases import Context, Options, PhaseFailed, Runner, tk8s_version, tree
 
@@ -140,7 +141,8 @@ def plugins_on_path() -> list[str]:
     return sorted(found)
 
 
-def run_plugin(host: Host, argv: list[str]) -> int | None:
+def plugin_argv(argv: list[str]) -> list[str] | None:
+    """The plugin to hand over to, with its arguments, or None when no plugin matches."""
     words: list[str] = []
     for a in argv:
         if a.startswith("-"):
@@ -149,7 +151,7 @@ def run_plugin(host: Host, argv: list[str]) -> int | None:
     for n in range(len(words), 0, -1):
         path = shutil.which("tkctl-" + "-".join(words[:n]))
         if path:
-            return host.run([path, *argv[n:]], check=False).returncode
+            return [path, *argv[n:]]
     return None
 
 
@@ -242,6 +244,8 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
         )
     if a.gvisor and a.datapath is None:
         a.datapath = "veth"
+    if not a.dry_run:
+        raise UsageError("create cluster is not implemented yet on this branch beyond --dry-run")
     topo = any(f in raw for f in ("--control-planes", "--workers", "--cpu", "--memory"))
     user = user_cluster_from_file(a, topo) if a.file else user_cluster_from_flags(a)
     ctx = make_context(dry_run=a.dry_run, quiet=a.quiet)
@@ -333,7 +337,14 @@ def main(argv: list[str] | None = None) -> int:
     except UsageError as err:
         print(f"tkctl: {err}", file=sys.stderr)
         return 1
-    except (model.ClusterFileError, PlanError, PhaseFailed, images.ImagesError) as err:
+    except (
+        model.ClusterFileError,
+        PlanError,
+        PhaseFailed,
+        images.ImagesError,
+        HostError,
+        PreflightError,
+    ) as err:
         print(f"tkctl: {err}", file=sys.stderr)
         return 1
 
@@ -360,9 +371,9 @@ def _main(args: list[str]) -> int:
         print(f"kubernetes default {versions.load(HOME / 'versions.yaml').kubernetes.default}")
         return 0
     if verb not in KNOWN_VERBS:
-        rc = run_plugin(Host(print), args)
-        if rc is not None:
-            return rc
+        plugin = plugin_argv(args)
+        if plugin is not None:  # the plugin replaces tkctl, with the caller's whole environment
+            os.execvp(plugin[0], plugin)
         raise UsageError(f"unknown command '{verb}' (see tkctl --help)")
     noun = args[1] if len(args) > 1 else ""
     if verb in ("pull", "get", "delete") and noun != "images":

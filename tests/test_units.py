@@ -48,7 +48,7 @@ def test_target_wants_lb_every_node_and_routes(ctx: Context) -> None:
 
 def test_run_writes_etc_with_sudo_and_state_dir_without(ctx: Context, host: FakeHost) -> None:
     Runner([units.PHASE]).run(ctx)
-    etc = [c for c in host.calls if c.argv[:2] == ["install", "-m"]]
+    etc = [c for c in host.calls if c.argv[:2] == ["install", "-D"]]
     assert len(etc) == 7 and all(c.sudo for c in etc)  # 5 units + target + routes
     assert ctx.state_dir / "lb" / "haproxy.cfg" in host.files
     assert host.lines[-1] != "[units] already done"

@@ -7,11 +7,18 @@ that can be pasted back into a terminal, so a student can redo any step by hand.
 import os
 import shlex
 import subprocess
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 CLEAN_ENV = {"PATH": "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C"}
+PASS_THROUGH = ("http_proxy", "https_proxy", "no_proxy", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY")
+
+
+def _base_env() -> dict[str, str]:
+    """A clean environment: PATH and LANG fixed, only proxy settings inherited."""
+    return CLEAN_ENV | {k: v for k, v in os.environ.items() if k in PASS_THROUGH}
 
 
 @dataclass(frozen=True)
@@ -30,12 +37,12 @@ class HostError(Exception):
 
 
 def _full_argv(argv: Sequence[str], sudo: bool, env: Mapping[str, str] | None) -> list[str]:
-    """What actually runs. Under sudo the environment rides on the command line, because sudo
-    drops the caller's environment."""
-    if not sudo:
-        return list(argv)
+    """What actually runs, and what the `$` line shows: the environment a command needs rides on
+    the command line (`env K=V cmd`), so the printed line is the executed one; under sudo it is
+    also the only way, because sudo drops the caller's environment."""
     envs = [f"{k}={v}" for k, v in (env or {}).items()]
-    return ["sudo", "-n", *(["env", *envs] if envs else []), *argv]
+    full = [*(["env", *envs] if envs else []), *argv]
+    return ["sudo", "-n", *full] if sudo else full
 
 
 class Host:
@@ -62,17 +69,19 @@ class Host:
     ) -> Result:
         self._show(argv, sudo, env)
         full = _full_argv(argv, sudo, env)
-        base = CLEAN_ENV | ({} if sudo else dict(env or {}))
-        p = subprocess.run(
-            full,
-            input=input,
-            text=True,
-            env=base,
-            timeout=timeout,
-            capture_output=capture,
-            check=False,
-        )
-        r = Result(p.returncode, p.stdout or "", p.stderr or "")
+        try:
+            p = subprocess.run(
+                full,
+                input=input,
+                text=True,
+                env=_base_env(),
+                timeout=timeout,
+                capture_output=capture,
+                check=False,
+            )
+            r = Result(p.returncode, p.stdout or "", p.stderr or "")
+        except FileNotFoundError:  # shell semantics: 127, a message, no traceback
+            r = Result(127, "", f"{full[0]}: command not found")
         if check and r.returncode != 0:
             raise HostError(full, r.returncode, r.stderr)
         return r
@@ -88,26 +97,36 @@ class Host:
         """run() for binary streams (image tarballs); stdout comes back as bytes, failures raise."""
         self._show(argv, sudo, env)
         full = _full_argv(argv, sudo, env)
-        base = CLEAN_ENV | ({} if sudo else dict(env or {}))
-        p = subprocess.run(full, input=input, env=base, capture_output=True, check=False)
+        try:
+            p = subprocess.run(full, input=input, env=_base_env(), capture_output=True, check=False)
+        except FileNotFoundError:
+            raise HostError(full, 127, f"{full[0]}: command not found") from None
         if p.returncode != 0:
             raise HostError(full, p.returncode, p.stderr.decode(errors="replace"))
         return p.stdout
 
     def write(self, path: Path, content: str, *, sudo: bool = False, mode: int = 0o644) -> None:
-        if sudo:
+        if sudo:  # -D creates the parent directories (a cluster's unit directory)
             self.run(
-                ["install", "-m", f"{mode:o}", "/dev/stdin", str(path)],
+                ["install", "-D", "-m", f"{mode:o}", "/dev/stdin", str(path)],
                 sudo=True,
                 input=content,
                 capture=True,
             )
-        else:  # atomic: a crash mid-write never leaves half a file behind
+        else:  # atomic, from a private temp file: two writers never share a name, and a crash
+            # mid-write never leaves half a file behind
             path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_name(path.name + ".tmp")
-            tmp.write_text(content)
-            tmp.chmod(mode)
-            tmp.replace(path)
+            fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    f.write(content)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.chmod(tmp_name, mode)
+                os.replace(tmp_name, path)
+            except BaseException:
+                Path(tmp_name).unlink(missing_ok=True)
+                raise
 
     def read(self, path: Path, *, sudo: bool = False) -> str | None:
         if sudo:
@@ -253,7 +272,9 @@ class FakeHost(Host):
     def write(self, path: Path, content: str, *, sudo: bool = False, mode: int = 0o644) -> None:
         if sudo:
             self.calls.append(
-                Call(["install", "-m", f"{mode:o}", "/dev/stdin", str(path)], True, {}, content)
+                Call(
+                    ["install", "-D", "-m", f"{mode:o}", "/dev/stdin", str(path)], True, {}, content
+                )
             )
         self.files[path] = content
 

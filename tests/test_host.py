@@ -81,3 +81,43 @@ def test_binary_run_passes_bytes_through() -> None:
     h = Host(lambda _: None)
     r = h.run_bytes(["cat"], input=b"\x00\xff")
     assert r == b"\x00\xff"
+
+
+def test_missing_binary_is_exit_127_not_a_traceback() -> None:
+    h = Host(lambda _: None)
+    r = h.run(["definitely-not-a-command-xyz"], check=False, capture=True)
+    assert r.returncode == 127 and "command not found" in r.stderr
+    with pytest.raises(HostError, match="exited 127"):
+        h.run(["definitely-not-a-command-xyz"])
+    with pytest.raises(HostError, match="exited 127"):
+        h.run_bytes(["definitely-not-a-command-xyz"])
+
+
+def test_env_is_shown_for_non_sudo_commands_too() -> None:
+    lines: list[str] = []
+    h = DryRunHost(lines.append)
+    h.run(["cilium", "install", "--dry-run"], env={"KUBECONFIG": "/nonexistent", "HOME": "/tmp"})
+    assert lines == ["  $ env KUBECONFIG=/nonexistent HOME=/tmp cilium install --dry-run"]
+
+
+def test_proxy_variables_pass_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("https_proxy", "http://proxy:3128")
+    monkeypatch.setenv("HOME", "/leak")
+    h = Host(lambda _: None)
+    out = h.run(["sh", "-c", "echo ${https_proxy}:${HOME:-unset}"], capture=True).stdout
+    assert out == "http://proxy:3128:unset\n"
+
+
+def test_write_uses_a_unique_temp_name_and_install_D(tmp_path: Path) -> None:
+    h = Host(lambda _: None)
+    p = tmp_path / "c.conf"
+    h.write(p, "one\n")
+    h.write(p, "two\n")
+    assert p.read_text() == "two\n" and list(tmp_path.iterdir()) == [p]
+    lines: list[str] = []
+    f = FakeHost()
+    f.write(Path("/etc/x/y.conf"), "v", sudo=True)
+    assert f.calls[-1].argv[:3] == ["install", "-D", "-m"]
+    d = DryRunHost(lines.append)
+    d.write(Path("/etc/x/y.conf"), "v", sudo=True)
+    assert lines[0] == "# ---- /etc/x/y.conf"

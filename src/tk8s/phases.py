@@ -81,19 +81,19 @@ class Runner:
             if full in self.skip or full.split("/")[0] in self.skip:
                 ctx.say(f"[{full}] skipped")
                 continue
-            if phase.done is not None and phase.done(ctx):
-                ctx.say(f"[{full}] already done")
-                continue
-            ctx.say(f"[{full}] {phase.summary}")
             try:
+                if phase.done is not None and phase.done(ctx):
+                    ctx.say(f"[{full}] already done")
+                    continue
+                ctx.say(f"[{full}] {phase.summary}")
                 phase.run(ctx)
+                if ctx.options.dry_run:
+                    ctx.say("")  # keep the file blocks apart from the next phase line
+                    continue
+                if phase.done is not None and not phase.done(ctx):
+                    raise PhaseFailed(f"[{full}] ran but is not done")
             except HostError as err:
                 raise PhaseFailed(f"[{full}] failed: {err}") from err
-            if ctx.options.dry_run:
-                ctx.say("")  # keep the file blocks apart from the next phase line
-                continue
-            if phase.done is not None and not phase.done(ctx):
-                raise PhaseFailed(f"[{full}] ran but is not done")
             self._record(ctx, full)
 
     def _selected(self) -> list[tuple[str, Phase]]:
