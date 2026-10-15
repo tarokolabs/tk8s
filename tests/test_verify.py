@@ -30,6 +30,12 @@ def healthy(ctx: Context, host: FakeHost) -> None:
         Result(0, "coredns-1 0/1 ContainerCreating 0 1m\n", ""),
         Result(0, "coredns-1 1/1 Running 0 1m\ncilium-1 1/1 Running 0 1m\n", ""),
     ]
+    host.responses[
+        ("kubectl", "-n", "kube-system", "get", "pods", "-l", "name=cilium-operator")
+    ] = Result(0, "0\n", "")
+    host.responses[("kubectl", "-n", "kube-system", "logs", "deploy/cilium-operator")] = Result(
+        0, 'level=info msg="LB-IPAM done initializing"\n', ""
+    )
     host.responses[("cilium", "version", "--client")] = Result(0, "", "")
     host.responses[("cilium", "status")] = Result(0, "", "")
     host.responses[("kubectl", "-n", "kube-system", "get", "cm", "cilium-config")] = Result(
@@ -65,14 +71,15 @@ def lines(host: FakeHost, prefix: str) -> list[str]:
     return [line for line in host.lines if line.startswith(prefix)]
 
 
-def test_all_healthy_is_14_pass_1_skip(ctx: Context, host: FakeHost) -> None:
+def test_all_healthy_is_15_pass_1_skip(ctx: Context, host: FakeHost) -> None:
     healthy(ctx, host)
     assert verify.run(ctx) == 0
-    assert host.lines[-1] == "PASS 14  FAIL 0  SKIP 1"
+    assert host.lines[-1] == "PASS 15  FAIL 0  SKIP 1"
     for s in (
         "PASS  nodes: 3/3 Ready",
         "PASS  kubelet: no runtime cgroup errors",
         "PASS  kube-system pods all Running",
+        "PASS  cilium-operator: 0 restarts, Gateway API on",
         "PASS  cilium status",
         "PASS  kubectl top nodes",
         "PASS  PVC bound and pod wrote data",
@@ -106,7 +113,7 @@ def test_one_broken_component_is_one_fail_and_exit_1(ctx: Context, host: FakeHos
     host.responses[("kubectl", "top", "nodes")] = Result(1, "", "")
     assert verify.run(ctx) == 1
     assert "FAIL  kubectl top nodes — metrics-server not ready" in host.lines
-    assert host.lines[-1] == "PASS 13  FAIL 1  SKIP 1"
+    assert host.lines[-1] == "PASS 14  FAIL 1  SKIP 1"
 
 
 def test_kubelet_noise_is_reported_with_the_cgroup(ctx: Context, host: FakeHost) -> None:
@@ -158,6 +165,50 @@ def test_namespace_is_deleted_even_when_a_check_raises(ctx: Context, host: FakeH
     assert verify.run(ctx) == 1
     assert "FAIL  create namespace tk-verify" in host.lines
     assert host.calls[-1].argv[:4] == ["kubectl", "delete", "ns", "tk-verify"]
+
+
+def test_cleanup_removes_the_gateway_objects_before_the_namespace(
+    ctx: Context, host: FakeHost
+) -> None:
+    """Deleting the namespace with a live Gateway in it makes cilium-operator reconcile against a
+    terminating namespace until it loses its lease; the routes and the Gateway go first."""
+    healthy(ctx, host)
+    verify.run(ctx)
+    argvs = [c.argv for c in host.calls]
+    objects = argvs.index(
+        [
+            "kubectl",
+            "delete",
+            "-n",
+            "tk-verify",
+            "gateway,httproute,tcproute",
+            "--all",
+            "--ignore-not-found",
+            "--wait=true",
+            "--timeout=60s",
+        ]
+    )
+    assert objects < len(argvs) - 1 and argvs[-1][:4] == ["kubectl", "delete", "ns", "tk-verify"]
+
+
+def test_operator_that_came_back_without_gateway_api_fails_with_the_recovery(
+    ctx: Context, host: FakeHost
+) -> None:
+    """cilium-operator restarted into a flaky apiserver takes a CRD discovery error for "CRDs not
+    installed" and runs Ready with Gateway API off (cilium/cilium#48083)."""
+    healthy(ctx, host)
+    host.responses[
+        ("kubectl", "-n", "kube-system", "get", "pods", "-l", "name=cilium-operator")
+    ] = Result(0, "1\n", "")
+    host.responses[("kubectl", "-n", "kube-system", "logs", "deploy/cilium-operator")] = Result(
+        0,
+        'level=error msg="Required GatewayAPI resources are not found, please refer to docs"\n',
+        "",
+    )
+    assert verify.run(ctx) == 1
+    line = next(ln for ln in host.lines if ln.startswith("FAIL  cilium-operator"))
+    assert "1 restart" in line and "Gateway API off" in line
+    assert "kubectl -n kube-system rollout restart deploy/cilium-operator" in line
 
 
 def test_stopped_or_unfinished_cluster_is_refused(ctx: Context, host: FakeHost) -> None:

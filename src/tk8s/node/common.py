@@ -40,6 +40,11 @@ def next_ip(c: model.Cluster) -> IPv4Address:
 
 def plan_add(c: model.Cluster, req: model.NodeRequest) -> model.Node:
     """The size defaults to the first node of the same role (or the first node at all)."""
+    if req.role == "control-plane" and sum(n.role == "control-plane" for n in c.spec.nodes) >= 5:
+        raise ClusterError(
+            f"cluster {c.name} already has 5 control planes; at most 5 "
+            "(the apiserver LB has five backend slots, the same limit create enforces)"
+        )
     like = next((n for n in c.spec.nodes if n.role == req.role), c.first_control_plane)
     return model.Node(
         role=req.role,

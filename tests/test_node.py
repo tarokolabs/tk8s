@@ -60,6 +60,19 @@ def test_plan_add_inherits_the_size_of_the_first_node_of_the_role(ctx: Context) 
     assert added.cpu == c.first_control_plane.cpu
 
 
+def test_plan_add_refuses_a_sixth_control_plane(ctx: Context) -> None:
+    """The apiserver LB has five backend slots, the same limit create enforces."""
+    c = ctx.require_cluster()
+    for _ in range(2, 6):
+        c = node_common.with_node(
+            c, node_common.plan_add(c, model.NodeRequest(role="control-plane"))
+        )
+    assert sum(n.role == "control-plane" for n in c.spec.nodes) == 5
+    with pytest.raises(lifecycle.ClusterError, match="at most 5"):
+        node_common.plan_add(c, model.NodeRequest(role="control-plane"))
+    node_common.plan_add(c, model.NodeRequest(role="worker"))  # workers are not capped
+
+
 def test_without_node_refuses_the_first_control_plane_and_unknown_nodes(ctx: Context) -> None:
     c = ctx.require_cluster()
     with pytest.raises(

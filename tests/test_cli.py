@@ -622,3 +622,30 @@ def test_node_names_are_validated_before_anything_runs(
 ) -> None:
     rc, out = run(capsys, *argv)
     assert rc != 0 and message in out, out
+
+
+def test_a_closed_pipe_ends_quietly(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`tkctl version | head -1`: the reader goes away, tkctl must not print a traceback."""
+    from tk8s import cli
+
+    def boom(args: list[str]) -> int:
+        raise BrokenPipeError
+
+    monkeypatch.setattr(cli, "_main", boom)
+    assert main(["version"]) == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_ctrl_c_is_one_line_and_130(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tk8s import cli
+
+    def boom(args: list[str]) -> int:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "_main", boom)
+    assert main(["create", "cluster"]) == 130
+    assert capsys.readouterr().err == "tkctl: interrupted\n"
