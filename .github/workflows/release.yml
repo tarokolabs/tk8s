@@ -1,5 +1,5 @@
 # Release (#13): pushing a v* tag builds the node image for both supported Kubernetes versions,
-# waits for the L3 run of the same commit, and creates the GitHub Release with notes rendered
+# waits for the e2e run of the same commit, and creates the GitHub Release with notes rendered
 # from versions.yaml and the image digests (the digest table is the compatibility contract).
 # First-time setup: the GHCR package tk8s/node must grant this repo write access under
 # "Manage Actions access" for GITHUB_TOKEN to push.
@@ -52,21 +52,21 @@ jobs:
           pattern: digests-*
           merge-multiple: true
           path: digests
-      - name: Wait for L3 on this commit
+      - name: Wait for e2e on this commit
         env:
           GH_TOKEN: ${{ github.token }}
-        # Green as soon as any L3 run for the commit succeeded; red once every run is complete without
+        # Green as soon as any e2e run for the commit succeeded; red once every run is complete without
         # a success (a tag push and a main push each get a run, and the concurrency group may cancel one).
         run: |
           for _ in $(seq 1 90); do
-            runs=$(gh run list -R "$GITHUB_REPOSITORY" --workflow l3.yaml --commit "$GITHUB_SHA" --json status,conclusion)
-            if echo "$runs" | grep -q '"conclusion":"success"'; then echo "L3 green for $GITHUB_SHA"; exit 0; fi
+            runs=$(gh run list -R "$GITHUB_REPOSITORY" --workflow e2e.yaml --commit "$GITHUB_SHA" --json status,conclusion)
+            if echo "$runs" | grep -q '"conclusion":"success"'; then echo "e2e green for $GITHUB_SHA"; exit 0; fi
             if [ "$runs" != "[]" ] && ! echo "$runs" | grep -qE '"status":"(queued|in_progress|waiting|requested|pending)"'; then
-              echo "L3 red for $GITHUB_SHA: $(echo "$runs" | grep -oE '"conclusion":"[a-z_]+"' | cut -d'"' -f4 | paste -sd, -)" >&2; exit 1
+              echo "e2e red for $GITHUB_SHA: $(echo "$runs" | grep -oE '"conclusion":"[a-z_]+"' | cut -d'"' -f4 | paste -sd, -)" >&2; exit 1
             fi
             sleep 30
           done
-          echo "L3 did not finish for $GITHUB_SHA within 45 min" >&2; exit 1
+          echo "e2e did not finish for $GITHUB_SHA within 45 min" >&2; exit 1
       - name: Render release notes
         run: scripts/release-notes.sh "$GITHUB_REF_NAME" digests > /tmp/notes.md && cat /tmp/notes.md
       - name: Create the Release

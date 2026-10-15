@@ -1,4 +1,4 @@
-"""install.sh is shell; L3 runs it for real. Here: the shape a person reads and the pins it
+"""install.sh is shell; e2e runs it for real. Here: the shape a person reads and the pins it
 honours, without executing it."""
 
 import re

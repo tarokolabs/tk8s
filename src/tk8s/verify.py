@@ -1,6 +1,6 @@
 """Platform health checks, one PASS/FAIL/SKIP line each, exit 1 on any FAIL. Test resources live
 in namespace tk-verify and are removed at the end, including on interruption. Shared by people
-and the L3 CI. TK_VERIFY_TIMEOUT is the per-check wait in seconds (default 180).
+and the e2e CI. TK_VERIFY_TIMEOUT is the per-check wait in seconds (default 180).
 
 Each check is a phase (tkctl verify cluster NAME --phase <check>); verify walks them itself so
 the output keeps the [section] lines people and tklab's logs expect."""
