@@ -32,15 +32,9 @@ def test_kubectl_is_still_downloaded_and_checked() -> None:
 
 
 def test_the_checkout_is_synced_from_the_lock_and_linked() -> None:
-    # uv's CPython lands next to the checkout, under /opt/taroko, not in the installer's home;
-    # that needs the parent directory to be the user's too (install -d -o owns the last one only)
-    assert 'UV_PYTHON_INSTALL_DIR="$(dirname "$TK_INSTALL_DIR")/python" \\' in SCRIPT
     assert '"$TK_BIN_DIR/uv" sync --locked --no-dev --project "$TK_INSTALL_DIR"' in SCRIPT
     assert 'sudo ln -sfn "$TK_INSTALL_DIR/.venv/bin/tkctl" "$TK_BIN_DIR/tkctl"' in SCRIPT
-    assert (
-        'sudo install -d -o "$(id -u)" -g "$(id -g)" '
-        '"$(dirname "$TK_INSTALL_DIR")" "$TK_INSTALL_DIR"'
-    ) in SCRIPT
+    assert 'sudo install -d -o "$(id -u)" -g "$(id -g)" "$TK_INSTALL_DIR"' in SCRIPT
     assert "sudo git" not in SCRIPT and "sudo uv" not in SCRIPT  # both belong to the user
 
 
