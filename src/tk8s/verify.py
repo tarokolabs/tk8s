@@ -152,6 +152,36 @@ def check_cilium(r: Report) -> None:
     r.ctx.say(f"  datapath: {dp.strip() or 'unknown'}")
 
 
+OPERATOR_GATEWAY_OFF = "Required GatewayAPI resources are not found"
+
+
+def check_operator(r: Report) -> None:
+    """cilium-operator restarted into a flaky apiserver takes a CRD discovery error for "CRDs not
+    installed" and then runs Ready with Gateway API off for the life of the container
+    (cilium/cilium#48083); LB-IPAM still works, so the symptom surfaces three checks later as a
+    Gateway without an address. A rollout restart is the recovery."""
+    _, out = r.kubectl(
+        "-n",
+        "kube-system",
+        "get",
+        "pods",
+        "-l",
+        "name=cilium-operator",
+        "-o",
+        'jsonpath={range .items[*]}{.status.containerStatuses[0].restartCount}{"\\n"}{end}',
+    )
+    restarts = sum(int(x) for x in out.split() if x.isdigit())
+    _, log = r.kubectl("-n", "kube-system", "logs", "deploy/cilium-operator", "--tail=5000")
+    if OPERATOR_GATEWAY_OFF in log:
+        r.ng(
+            "cilium-operator",
+            f"{restarts} restart(s), Gateway API off since the last start (cilium/cilium#48083); "
+            "recover with: kubectl -n kube-system rollout restart deploy/cilium-operator",
+        )
+        return
+    r.ok(f"cilium-operator: {restarts} restarts, Gateway API on")
+
+
 def check_metrics(r: Report) -> None:
     """metrics-server serves data only after its first scrape; after a boot that takes a minute."""
     if r.poll(r.timeout // 5, lambda: r.kubectl("top", "nodes")[0] == 0):
@@ -402,6 +432,7 @@ CHECKS = [
     ("kubelet", "no runtime cgroup errors in the kubelet log", check_kubelet),
     ("kube-system", "every kube-system pod Running", check_kube_system),
     ("cilium", "cilium status", check_cilium),
+    ("cilium-operator", "cilium-operator without restarts and with Gateway API on", check_operator),
     ("metrics", "kubectl top nodes", check_metrics),
     ("storage", "a PVC bound and written, data under the state dir", check_storage),
     ("runtimeclass-crun", "a pod under RuntimeClass crun", check_runtimeclass_crun),
@@ -475,6 +506,18 @@ def run(ctx: Context, only: str | None = None) -> int:
                 printed = section
             check(r)
     finally:
+        # The Gateway and its routes go before the namespace: cilium-operator reconciling a
+        # Gateway inside a terminating namespace fails in a loop until it loses its lease.
+        r.kubectl(
+            "delete",
+            "-n",
+            NS,
+            "gateway,httproute,tcproute",
+            "--all",
+            "--ignore-not-found",
+            "--wait=true",
+            "--timeout=60s",
+        )
         r.kubectl("delete", "ns", NS, "--ignore-not-found", "--wait=false")
         ctx.say("")
         ctx.say(f"PASS {r.passed}  FAIL {r.failed}  SKIP {r.skipped}")

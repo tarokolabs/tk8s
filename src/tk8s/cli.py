@@ -1,6 +1,8 @@
 """tkctl: kubectl-style verbs. Flags become a cluster definition, phases do the work."""
 
 import argparse
+import contextlib
+import io
 import os
 import shutil
 import sys
@@ -201,6 +203,15 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(line_buffering=True)
     try:
         return _main(args)
+    except BrokenPipeError:
+        # The reader went away (`tkctl … | head`): nothing left to say, and stdout is pointed at
+        # /dev/null so the interpreter does not complain about the flush at exit.
+        with contextlib.suppress(OSError, ValueError, io.UnsupportedOperation):
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 0
+    except KeyboardInterrupt:
+        print("tkctl: interrupted", file=sys.stderr)
+        return 130
     except UsageError as err:
         print(f"tkctl: {err}", file=sys.stderr)
         return 1
