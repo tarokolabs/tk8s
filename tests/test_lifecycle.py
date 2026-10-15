@@ -66,6 +66,17 @@ def test_list_with_no_clusters(ctx: Context, host: FakeHost) -> None:
     assert host.lines == ["no clusters"]
 
 
+def test_list_names_a_directory_without_cluster_yaml(ctx: Context, host: FakeHost) -> None:
+    """A create interrupted before plan leaves the directory and nothing else; hidden, it makes
+    a second create of that name fail on a clash the student cannot see."""
+    (ctx.paths.clusters_dir / "half").mkdir(parents=True)
+    lifecycle.list_clusters(ctx)
+    out = "\n".join(host.lines)
+    assert "no clusters" not in out
+    line = next(ln for ln in host.lines if ln.startswith("half"))
+    assert "Incomplete" in line and "tkctl delete cluster half" in line
+
+
 def test_describe_sections(ctx: Context, host: FakeHost) -> None:
     c = on_disk(ctx, host)
     lifecycle.describe(ctx, c, None)

@@ -41,6 +41,14 @@ def test_next_ip_follows_the_highest_address_and_skips_the_lb(ctx: Context) -> N
         node_common.next_ip(c)
 
 
+def test_plan_add_records_the_node_as_not_joined(ctx: Context) -> None:
+    """cluster.yaml says what is true: join: true is written by the record phase after kubeadm
+    join and Ready, so an add interrupted in between describes the node as not joined."""
+    c = ctx.require_cluster()
+    assert node_common.plan_add(c, model.NodeRequest(role="worker")).join is False
+    assert node_common.plan_add(c, model.NodeRequest(role="worker", join=False)).join is False
+
+
 def test_plan_add_inherits_the_size_of_the_first_node_of_the_role(ctx: Context) -> None:
     c = ctx.require_cluster()
     n = node_common.plan_add(c, model.NodeRequest(role="worker"))
@@ -49,7 +57,7 @@ def test_plan_add_inherits_the_size_of_the_first_node_of_the_role(ctx: Context) 
         "172.22.0.4",
         2,
         "4g",
-        True,
+        False,  # join: true is the record phase's to write
     )
     req = model.NodeRequest(role="control-plane", cpu=4, memory="8g", join=False)
     n = node_common.plan_add(c, req)

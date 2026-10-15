@@ -52,7 +52,9 @@ def plan_add(c: model.Cluster, req: model.NodeRequest) -> model.Node:
         ip=next_ip(c),
         cpu=req.cpu or like.cpu,
         memory=req.memory or like.memory,
-        join=req.join,
+        # cluster.yaml says what is true: the record phase writes join: true after kubeadm join
+        # and Ready, so an add interrupted in between describes the node as not joined.
+        join=False,
     )
 
 
