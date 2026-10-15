@@ -31,7 +31,7 @@ CI 的 `release` workflow 在每個 tag 以同一份配方建兩個支援版本�
 建叢集需要的 image（control plane、Cilium、metrics-server、local-path、HAProxy、`verify` 的測試 image）由主機拉一次，放在 `/opt/taroko/images/<K8s 版本>/`，每個節點容器以唯讀掛在 `/var/lib/containers/shared`，CRI-O 把它當 additional image store：查 image 先看這裡，有就直接用，沒有才照常 pull 進節點自己的 `/var`。
 
 - 第一次 `tkctl create cluster` 多花一次下載（約 2 GB、一兩分鐘），之後每個叢集、每個節點都是零下載；`--k8s` 不同版本各有一個目錄。
-- 離線的教室先在有網路時 `tkctl pull images` 與 `tkctl create cluster --phase nodes/cni-plugins`（CNI plugins 不在 store 裡），上課時 `TK_OFFLINE=1 tkctl create cluster`：缺任何 image 會直接列出而不嘗試下載。CI 的 L3 就是這樣建的。`--gvisor` 的叢集另外需要 gVisor 的下載，目前不受 `TK_OFFLINE` 管。
+- 離線的教室先在有網路時 `tkctl pull images` 與 `tkctl create cluster --phase nodes/cni-plugins`（CNI plugins 不在 store 裡），上課時 `TK_OFFLINE=1 tkctl create cluster`：缺任何 image 會直接列出而不嘗試下載。CI 的 e2e 就是這樣建的。`--gvisor` 的叢集另外需要 gVisor 的下載，目前不受 `TK_OFFLINE` 管。
 - 唯讀是刻意的：多個 CRI-O 寫同一個 store 沒有安全的用法（節點沒乾淨關機時 `crio wipe` 會清空整個 storage 目錄）。學員 `kubectl run` 自行拉取的 image 進節點本身的 volume，不會污染共用目錄。
 - 清單不是手寫的：`tkctl get images --k8s <版本>` 從 `versions.yaml`、node image 裡的 `kubeadm config images list`、`cilium install --dry-run` 與 `manifests/` 動態計算（因此 `get images` 會先確保 node image 與 cilium CLI 已在本機，沒有會先下載）。
 - 建叢集時主機要套用的 manifest 也都在 repo 裡：Gateway API CRD、metrics-server manifest 與 Cilium 的 Helm chart 由 `scripts/vendor-manifests.sh` 放進 `manifests/`，升版時重新執行一次；cilium CLI 不會再向 helm.cilium.io 下載 chart。

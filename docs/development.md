@@ -16,7 +16,7 @@ uv run tkctl create cluster --dry-run
 - 每個 phase 有全新、已完成、中斷後接續三種案例。
 - `tests/golden/` 是兩種拓樸的完整 `--dry-run` 輸出，更新時要說明原因（`UPDATE_GOLDEN=1 uv run pytest tests/test_golden.py` 重新產生）。
 - README 的指令表與 phase 樹由測試固定：指令表是 `tkctl --help` 的動詞集合，phase 樹是 `--list-phases` 的逐字輸出。
-- 實際主機的驗證是 CI 的 `l3` workflow：每次 push 到 `main` 與每個 tag，在 GitHub runner 上以兩個 K8s 版本各建一個叢集、離線、`verify` 全部通過、節點不下載任何 image。PR 分支不會自動執行，要用 `gh workflow run l3.yaml --ref <分支>`。
+- 實際主機的驗證是 `e2e` workflow：每次 push 到 `main` 與每個 tag，在 GitHub runner 上以兩個 K8s 版本各建一個叢集、離線、`verify` 全部通過、節點不下載任何 image。PR 只跑 `ci`（lint 與 pytest）；要在 PR 分支跑 e2e 用 `gh workflow run e2e.yaml --ref <分支>`。
 
 幾條界線，越過要先討論再接受：任一模組超過 300 行、任一函式超過 60 行、`src/tk8s/host.py` 以外出現 `subprocess`（目前唯一的例外是 `phases.py` 查版本的 `git describe`）、樣板裡出現條件或迴圈。
 
