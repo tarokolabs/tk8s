@@ -3,5 +3,7 @@
 NetworkName=$cluster
 Subnet=$nodes
 Gateway=$gateway
+DNS=1.1.1.1
+DNS=1.0.0.1
 DNS=8.8.8.8
-DNS=168.95.1.1
+DNS=8.8.4.4
