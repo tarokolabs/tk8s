@@ -17,7 +17,7 @@ local_path_provisioner: "v0.0.37"
 gvisor: "20261005.0"
 gateway_api: "v1.6.3"
 # apiserver LB per cluster (host-side container at .100)
-haproxy: "docker.io/library/haproxy:3.3.16-trixie"
+haproxy: "docker.io/library/haproxy:3.3.17-trixie"
 # crun for the e2e runner only (Ubuntu 24.04 ships 1.14, too old for podman 5); nodes get crun from CRI-O
 crun: "1.30.1"
 # podman built from source on the e2e runner (Ubuntu 24.04 ships 4.9); hosts need >= 5.4
@@ -26,6 +26,6 @@ podman: "5.4.2"
 # checked against its published sha256
 uv: "0.13.1"
 # Images used by tkctl verify's test pods
-verify_busybox: "docker.io/library/busybox:1.37.0"
-verify_alpine: "docker.io/library/alpine:3.22"
-verify_agnhost: "registry.k8s.io/e2e-test-images/agnhost:2.53"
+verify_busybox: "docker.io/library/busybox:1.38.0"
+verify_alpine: "docker.io/library/alpine:3.24"
+verify_agnhost: "registry.k8s.io/e2e-test-images/agnhost:2.66.1"
