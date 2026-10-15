@@ -148,3 +148,8 @@ def test_node_request_is_frozen_and_defaults_to_join() -> None:
     assert r.cpu is None and r.memory is None and r.join is True
     with pytest.raises(ValidationError):
         model.NodeRequest(role="worker", cpu=0)
+
+
+def test_cni_is_cilium_only() -> None:
+    with pytest.raises(model.ClusterFileError):
+        model.load_text(GOOD.replace("cni: cilium", "cni: canal"))

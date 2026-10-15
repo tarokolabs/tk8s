@@ -17,6 +17,7 @@ tk8s 在單一 Linux 主機上以 podman 容器作為節點建立 Kubernetes 叢
 - `--dry-run` 換成一個只印不做的 host，只執行 plan、units 與 kubeadm/render：印出解析後的 `cluster.yaml` 與會寫入主機的每個檔。
 - `delete cluster`、`delete node` 的 phase 也是同一套，只是 `done()` 的意思是「該資源已不存在」；`get`、`describe`、`verify` 不寫 `status`。
 - `add node` 沒有 `--phase`：它的 phase 是 create 的子集加 join，新增中斷後用 `tkctl join node` 完成後續步驟。
+- 有跳過任何 phase 的叢集不標 Ready：`get clusters` 顯示 Creating，節點動詞會拒絕，再執行同一個 `create` 把跳過的做完才算完成。`--skip-phases cni,addons` 因此可以當「只到 kubeadm、CNI 自己裝」的練習環境，裝好 CNI 後叢集仍停在 Creating，這是刻意的。
 
 步驟的切法仿照 kubeadm 的 phase：preflight、plan、images、units、nodes、kubeadm（render、init、kubeconfig、join）、cni、addons。
 

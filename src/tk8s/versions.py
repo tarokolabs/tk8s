@@ -19,7 +19,6 @@ class Versions(BaseModel):
     cilium: str
     cilium_cli: str
     cni_plugins: str
-    calico: str
     metrics_server: str
     local_path_provisioner: str
     gvisor: str

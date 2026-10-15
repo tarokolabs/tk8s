@@ -40,7 +40,7 @@ class UserNetwork(Strict):
 
 class UserSpec(Strict):
     kubernetes: str | None = None
-    cni: Literal["cilium", "canal"] = "cilium"
+    cni: Literal["cilium"] = "cilium"
     datapath: Literal["auto", "netkit", "veth"] | None = None
     gvisor: bool = False
     network: UserNetwork | None = None
@@ -91,7 +91,7 @@ class Network(Strict):
 
 class Spec(Strict):
     kubernetes: str
-    cni: Literal["cilium", "canal"]
+    cni: Literal["cilium"]
     datapath: Literal["auto", "netkit", "veth"]
     datapath_resolved: Literal["netkit", "veth"] | None = None
     gvisor: bool
