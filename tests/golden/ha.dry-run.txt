@@ -444,7 +444,7 @@ rules:
     verbs: ["create","update","patch","delete","watch","get","list","deletecollection"]
     resources:
       - group: ""  # core
-        resources: ["pods", "services", "secrets", "configmaps","container"]
+        resources: ["pods", "services", "secrets", "configmaps"]
       - group: "apps"
         resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
       - group: "batch"
