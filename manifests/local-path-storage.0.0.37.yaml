@@ -1,6 +1,9 @@
-# 上游 rancher/local-path-provisioner v0.0.37 的 deploy/local-path-storage.yaml，兩處平台客製：
-#   1. StorageClass volumeBindingMode: Immediate（教學上 PVC 一建立就 Bound，不等 pod）
-#   2. ConfigMap 改用 sharedFileSystemPath=/opt/taroko/storage（節點內 /opt/taroko 即主機 clusters/<cn>，PVC 資料落在主機側）
+# local-path-provisioner v0.0.37, upstream deploy/local-path-storage.yaml with three platform edits:
+#   1. StorageClass volumeBindingMode: Immediate (a PVC binds as soon as it is created, no pod needed)
+#   2. ConfigMap sharedFileSystemPath=/opt/taroko/storage (a node's /opt/taroko is the host's
+#      clusters/<name>, so PV data lands on the host side)
+#   3. the helper image pinned to versions.yaml verify_busybox
+# Vendored by scripts/vendor-manifests.sh from https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.37/deploy/local-path-storage.yaml ; do not edit, rerun the script after a bump.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -146,7 +149,7 @@ metadata:
   name: local-path
 provisioner: rancher.io/local-path
 volumeBindingMode: Immediate
-reclaimPolicy: Delete  # Options: Delete (default) or Retain
+reclaimPolicy: Delete
 
 ---
 kind: ConfigMap
@@ -159,7 +162,7 @@ data:
     {
       "nodePathMap": [],
       "sharedFileSystemPath": "/opt/taroko/storage"
-      }
+    }
   setup: |-
     #!/bin/sh
     set -eu
