@@ -15,6 +15,17 @@
 
 節點內的短名稱 image（`kubectl run --image=nginx`）一律解析到 `docker.io`。
 
+### Podman 的 systemd 模式
+
+容器的進入點是 `/sbin/init` 時，podman 自動進 systemd 模式（`--systemd` 預設是自動判斷，`always` 可強制），替 systemd 準備它開機時假設存在、但一般容器沒有的東西：
+
+- `/run`、`/run/lock`、`/tmp`、`/var/log/journal` 掛成 tmpfs，systemd 在這些地方寫 socket、PID 檔與 journal。
+- 容器自己的 cgroup 子樹以可寫方式掛進 `/sys/fs/cgroup`（cgroup v2 下就是把子樹委派給容器），節點內的 systemd 才能替每個 unit 建 cgroup。CRI-O 用 systemd cgroup driver，透過 sd-bus 請 systemd 建 cgroup，所以 image 要裝 dbus。
+- 停止訊號是 `SIGRTMIN+3`（image 的 `STOPSIGNAL`），systemd 收到就走正常關機：先停 kubelet 與 CRI-O，再退出；`node.container` 的 `StopTimeout=60` 是給這段流程的時間，沒收到訊號的 SIGTERM 會直接殺掉節點。
+- 環境變數 `container=podman`，systemd 看到就知道自己在容器裡，略過硬體相關的 unit；udev、getty、apt 的 timer 另外在 image 裡 mask 掉。
+
+kind 的節點同樣是 systemd 當 PID 1，但用自己的 entrypoint 腳本做這些準備；這裡交給 podman，image 只剩 `tk8s-node-init.service` 做 podman 不做的兩件事：根掛載設成 rshared、給節點一個自己的 `product_uuid`。
+
 ### 自己 build
 
 ```bash
