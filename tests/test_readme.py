@@ -36,3 +36,11 @@ def test_readme_phase_tree_is_list_phases() -> None:
     start = README.index(marker) + len(marker)
     block = README[start : README.index("```", start)]
     assert block.rstrip("\n") == "\n".join(tree(PHASES))
+
+
+def test_readme_links_every_doc_and_the_docs_exist() -> None:
+    root = Path(__file__).resolve().parents[1]
+    linked = set(re.findall(r"\]\((docs/[a-z-]+\.md)\)", README))
+    assert linked == {"docs/architecture.md", "docs/node-image.md", "docs/development.md"}
+    for rel in linked:
+        assert (root / rel).is_file(), rel
