@@ -11,15 +11,18 @@ SCRIPT = (HOME / "scripts" / "vendor-manifests.sh").read_text()
 V = versions.load(HOME / "versions.yaml")
 
 
+LOCAL_PATH = MANIFESTS / f"local-path-storage.{V.local_path_provisioner.lstrip('v')}.yaml"
+
+
 def test_every_vendored_file_matches_versions_yaml() -> None:
     assert (MANIFESTS / f"gateway-api.{V.gateway_api.lstrip('v')}.yaml").is_file()
     assert (MANIFESTS / f"metrics-server.{V.metrics_server.lstrip('v')}.yaml").is_file()
-    assert (MANIFESTS / f"local-path-storage.{V.local_path_provisioner.lstrip('v')}.yaml").is_file()
+    assert LOCAL_PATH.is_file()
     assert (MANIFESTS / f"cilium-{V.cilium}" / "Chart.yaml").is_file()
 
 
 def test_local_path_keeps_the_three_platform_edits() -> None:
-    text = (MANIFESTS / f"local-path-storage.{V.local_path_provisioner.lstrip('v')}.yaml").read_text()
+    text = LOCAL_PATH.read_text()
     assert "volumeBindingMode: Immediate" in text
     assert '"sharedFileSystemPath": "/opt/taroko/storage"' in text
     assert f"image: {V.verify_busybox}" in text
