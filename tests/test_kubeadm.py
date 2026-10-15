@@ -340,3 +340,19 @@ def test_certificate_key_fresh_ignores_the_stored_key(ctx: Context, host: FakeHo
     assert kubeadm.certificate_key(ctx) == "stale"
     assert kubeadm.certificate_key(ctx, fresh=True) == "newkey"
     assert host.files[ctx.state_dir / ".certificate-key"] == "newkey\n"
+
+
+def test_audit_policy_names_only_real_resources(ctx: Context) -> None:
+    """A resource name the API does not have never matches a request; the apiserver loads the
+    policy without complaint, so only a test notices."""
+    import yaml
+
+    policy = yaml.safe_load((ctx.paths.home / "manifests" / "audit-policy.yaml").read_text())
+    known = {
+        "": {"pods", "services", "secrets", "configmaps"},
+        "apps": {"daemonsets", "deployments", "replicasets", "statefulsets"},
+        "batch": {"jobs", "cronjobs"},
+    }
+    for rule in policy["rules"]:
+        for entry in rule["resources"]:
+            assert set(entry["resources"]) <= known[entry["group"]], entry
