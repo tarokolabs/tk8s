@@ -5,7 +5,7 @@ import argparse
 import os
 from pathlib import Path
 
-from . import delete, images, lifecycle, model, node, node_delete, verify, versions
+from . import delete, images, lifecycle, model, verify, versions
 from .args import (
     UsageError,
     normalize_memory,
@@ -18,6 +18,9 @@ from .args import (
 from .create import DRY_RUN_PHASES, PHASES
 from .create.plan import load_existing, resolve, used_indices
 from .host import DryRunHost, Host
+from .node import add as node_add
+from .node import common as node_common
+from .node import delete as node_delete
 from .paths import Paths
 from .phases import Context, Options, Runner, tk8s_version, tree
 
@@ -193,7 +196,7 @@ def cmd_add_node(a: argparse.Namespace) -> int:
     ctx = make_context()
     c = running_cluster(ctx, a.cluster)
     ctx.request = model.NodeRequest(role=a.role, cpu=a.cpu, memory=memory, join=not a.no_join)
-    Runner([node.add_phase(join=not a.no_join)], record=False).run(ctx)
+    Runner([node_add.add_phase(join=not a.no_join)], record=False).run(ctx)
     print()
     if a.no_join:
         print(f"{ctx.node} left unjoined; join with: tkctl join node {c.name} {ctx.node}")
@@ -208,10 +211,10 @@ def cmd_join_node(a: argparse.Namespace) -> int:
     validate_node_name(a.node)
     ctx = make_context()
     c = running_cluster(ctx, a.cluster)
-    if node.find(c, a.node) is None:
+    if node_common.find(c, a.node) is None:
         raise lifecycle.ClusterError(f"node {a.node} not found in cluster {c.name}")
     ctx.node = a.node
-    Runner([node.JOIN_PHASE], record=False).run(ctx)
+    Runner([node_add.JOIN_PHASE], record=False).run(ctx)
     print()
     print(f"node {a.node} joined cluster {c.name}")
     return 0
@@ -227,7 +230,8 @@ def cmd_delete_node(a: argparse.Namespace) -> int:
     ctx = make_context(assume_yes=a.yes or os.environ.get("TK_ASSUME_YES") == "1")
     c = running_cluster(ctx, a.cluster)
     ctx.node = a.node
-    node.deletable(c, a.node)  # entry is the last phase: an interrupted delete still finds it
+    # entry is the last phase: an interrupted delete still finds the node
+    node_common.deletable(c, a.node)
     node_delete.confirm_delete(ctx)
     Runner([node_delete.PHASE], only=a.phase, record=False).run(ctx)
     if a.phase:
