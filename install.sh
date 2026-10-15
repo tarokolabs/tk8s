@@ -71,13 +71,15 @@ main() {
     git -C "$TK_INSTALL_DIR" checkout --quiet "$TK_VERSION"
     if [ "$TK_VERSION" = main ]; then git -C "$TK_INSTALL_DIR" pull --quiet --ff-only origin main; fi
   else
-    sudo install -d -o "$(id -u)" -g "$(id -g)" "$TK_INSTALL_DIR"
+    sudo install -d -o "$(id -u)" -g "$(id -g)" "$(dirname "$TK_INSTALL_DIR")" "$TK_INSTALL_DIR"
     git clone --quiet --branch "$TK_VERSION" "$TK_REPO" "$TK_INSTALL_DIR"
   fi
 
   # 4. Python 3.14 and the dependencies exactly as uv.lock pins them, in the checkout's .venv
-  #    (uv fetches its own CPython once, under the user's ~/.local/share/uv); nothing runs as root
-  "$TK_BIN_DIR/uv" sync --locked --no-dev --project "$TK_INSTALL_DIR" --quiet
+  #    (uv fetches its own CPython once, next to the checkout under /opt/taroko/python, so
+  #    everything tk8s put on the host lives under /opt/taroko); nothing runs as root
+  UV_PYTHON_INSTALL_DIR="$(dirname "$TK_INSTALL_DIR")/python" \
+    "$TK_BIN_DIR/uv" sync --locked --no-dev --project "$TK_INSTALL_DIR" --quiet
   sudo ln -sfn "$TK_INSTALL_DIR/.venv/bin/tkctl" "$TK_BIN_DIR/tkctl"
   say "tk8s $TK_VERSION at $TK_INSTALL_DIR ($(git -C "$TK_INSTALL_DIR" rev-parse --short HEAD)); tkctl linked into $TK_BIN_DIR"
   "$TK_BIN_DIR/tkctl" version

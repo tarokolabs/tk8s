@@ -48,13 +48,22 @@ def state_of(ctx: Context, c: model.Cluster) -> str:
 
 
 def list_clusters(ctx: Context) -> None:
-    files = sorted(ctx.paths.clusters_dir.glob("*/cluster.yaml"))
-    if not files:
+    dirs = sorted(d for d in ctx.paths.clusters_dir.glob("*") if d.is_dir())
+    if not dirs:
         ctx.say("no clusters")
         return
     ctx.say(f"{'NAME':<12} {'NODES':<7} {'K8S':<8} {'DATAPATH':<9} {'STATE':<9} SUBNET")
-    for path in files:
-        name = path.parent.name
+    for d in dirs:
+        name = d.name
+        path = d / "cluster.yaml"
+        if not path.exists():
+            # a create interrupted before plan: the directory is there, nothing else is, and a
+            # second create of the name would fail on a clash the student cannot see
+            ctx.say(
+                f"{name:<12} {'-':<7} {'-':<8} {'-':<9} {'Incomplete':<9} "
+                f"no cluster.yaml (tkctl delete cluster {name})"
+            )
+            continue
         try:
             c = model.load(path, create_complete_marker=(path.parent / ".create-complete").exists())
         except model.ClusterFileError as err:
