@@ -4,9 +4,12 @@ from pathlib import Path
 import pytest
 
 from tests.fixtures import HOME, ready_host
-from tk8s import lifecycle, model, node, node_delete, versions
+from tk8s import lifecycle, model, versions
 from tk8s.delete import node_volumes
 from tk8s.host import FakeHost, Result
+from tk8s.node import add as node_add
+from tk8s.node import common as node_common
+from tk8s.node import delete as node_delete
 from tk8s.paths import Paths
 from tk8s.phases import Context, Options, Runner
 
@@ -19,28 +22,28 @@ def worker(n: int, ip: str, join: bool = True) -> model.Node:
 
 def test_next_name_skips_past_the_highest_suffix(ctx: Context) -> None:
     c = ctx.require_cluster()  # demo-control-plane-1, demo-worker-1, demo-worker-2
-    assert node.next_name(c, "worker") == "demo-worker-3"
-    assert node.next_name(c, "control-plane") == "demo-control-plane-2"
-    c = node.without_node(node.with_node(c, worker(3, "172.22.0.4")), "demo-worker-2")
-    assert node.next_name(c, "worker") == "demo-worker-4"  # not by count: 2 is not reused
+    assert node_common.next_name(c, "worker") == "demo-worker-3"
+    assert node_common.next_name(c, "control-plane") == "demo-control-plane-2"
+    c = node_common.without_node(node_common.with_node(c, worker(3, "172.22.0.4")), "demo-worker-2")
+    assert node_common.next_name(c, "worker") == "demo-worker-4"  # not by count: 2 is not reused
 
 
 def test_next_ip_follows_the_highest_address_and_skips_the_lb(ctx: Context) -> None:
     c = ctx.require_cluster()
-    assert node.next_ip(c) == IPv4Address("172.22.0.4")
-    c = node.with_node(c, worker(3, "172.22.0.99"))
-    assert node.next_ip(c) == IPv4Address("172.22.0.101")
-    c = node.with_node(c, worker(4, "172.22.0.199"))
+    assert node_common.next_ip(c) == IPv4Address("172.22.0.4")
+    c = node_common.with_node(c, worker(3, "172.22.0.99"))
+    assert node_common.next_ip(c) == IPv4Address("172.22.0.101")
+    c = node_common.with_node(c, worker(4, "172.22.0.199"))
     with pytest.raises(
         lifecycle.ClusterError,
         match=r"no free node address left in 172.22.0.0/24 \(.200-.219 is the LB pool\)",
     ):
-        node.next_ip(c)
+        node_common.next_ip(c)
 
 
 def test_plan_add_inherits_the_size_of_the_first_node_of_the_role(ctx: Context) -> None:
     c = ctx.require_cluster()
-    n = node.plan_add(c, model.NodeRequest(role="worker"))
+    n = node_common.plan_add(c, model.NodeRequest(role="worker"))
     assert (n.name, str(n.ip), n.cpu, n.memory, n.join) == (
         "demo-worker-3",
         "172.22.0.4",
@@ -48,11 +51,13 @@ def test_plan_add_inherits_the_size_of_the_first_node_of_the_role(ctx: Context) 
         "4g",
         True,
     )
-    n = node.plan_add(c, model.NodeRequest(role="control-plane", cpu=4, memory="8g", join=False))
+    req = model.NodeRequest(role="control-plane", cpu=4, memory="8g", join=False)
+    n = node_common.plan_add(c, req)
     assert (n.name, n.cpu, n.memory, n.join) == ("demo-control-plane-2", 4, "8g", False)
     spec = c.spec.model_copy(update={"nodes": [c.first_control_plane]})
     only_cp = c.model_copy(update={"spec": spec})
-    assert node.plan_add(only_cp, model.NodeRequest(role="worker")).cpu == c.first_control_plane.cpu
+    added = node_common.plan_add(only_cp, model.NodeRequest(role="worker"))
+    assert added.cpu == c.first_control_plane.cpu
 
 
 def test_without_node_refuses_the_first_control_plane_and_unknown_nodes(ctx: Context) -> None:
@@ -62,18 +67,18 @@ def test_without_node_refuses_the_first_control_plane_and_unknown_nodes(ctx: Con
         match="the first control plane demo-control-plane-1 cannot be deleted; "
         "delete the cluster instead",
     ):
-        node.without_node(c, "demo-control-plane-1")
+        node_common.without_node(c, "demo-control-plane-1")
     with pytest.raises(lifecycle.ClusterError, match="node demo-nope not found in cluster demo"):
-        node.without_node(c, "demo-nope")
-    c2 = node.without_node(c, "demo-worker-2")
+        node_common.without_node(c, "demo-nope")
+    c2 = node_common.without_node(c, "demo-worker-2")
     assert [n.name for n in c2.spec.nodes] == ["demo-control-plane-1", "demo-worker-1"]
     assert c2.spec.network == c.spec.network and c2.status == c.status
 
 
 def test_marked_joined_flips_one_node(ctx: Context) -> None:
-    c = node.with_node(ctx.require_cluster(), worker(3, "172.22.0.4", join=False))
-    c2 = node.marked_joined(c, "demo-worker-3")
-    found = node.find(c2, "demo-worker-3")
+    c = node_common.with_node(ctx.require_cluster(), worker(3, "172.22.0.4", join=False))
+    c2 = node_common.marked_joined(c, "demo-worker-3")
+    found = node_common.find(c2, "demo-worker-3")
     assert found is not None and found.join is True
     assert [n.join for n in c2.spec.nodes[:3]] == [True, True, True]
 
@@ -126,7 +131,7 @@ def test_add_worker_runs_plan_units_start_addons_join_in_order(tmp_path: Path) -
     ctx, host = node_ctx(tmp_path)
     new_node_answers(host, "demo-worker-3", ready_after=1)
     ctx.request = model.NodeRequest(role="worker")
-    Runner([node.add_phase(join=True)], record=False).run(ctx)
+    Runner([node_add.add_phase(join=True)], record=False).run(ctx)
     assert phases_of(host) == [
         "add/plan",
         "add/images",
@@ -166,7 +171,7 @@ def test_add_control_plane_uploads_a_fresh_certificate_key(tmp_path: Path) -> No
         ("podman", "exec", "demo-control-plane-1", "kubeadm", "init", "phase", "upload-certs")
     ] = Result(0, "[upload-certs] Using certificate key:\nfeedfacefeedface\n", "")
     ctx.request = model.NodeRequest(role="control-plane", cpu=4)
-    Runner([node.add_phase(join=True)], record=False).run(ctx)
+    Runner([node_add.add_phase(join=True)], record=False).run(ctx)
     join = next(
         x for x in argvs(host) if x[:5] == ["podman", "exec", "demo-control-plane-2", "bash", "-c"]
     )
@@ -184,7 +189,7 @@ def test_add_no_join_stops_after_the_addons(tmp_path: Path) -> None:
     ctx, host = node_ctx(tmp_path)
     new_node_answers(host, "demo-worker-3", ready_after=0)
     ctx.request = model.NodeRequest(role="worker", join=False)
-    Runner([node.add_phase(join=False)], record=False).run(ctx)
+    Runner([node_add.add_phase(join=False)], record=False).run(ctx)
     assert phases_of(host)[-1] == "add/gvisor"
     saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
     assert saved.spec.nodes[-1].join is False
@@ -193,11 +198,12 @@ def test_add_no_join_stops_after_the_addons(tmp_path: Path) -> None:
 
 def test_join_node_finishes_an_interrupted_add(tmp_path: Path) -> None:
     ctx, host = node_ctx(tmp_path)
-    ctx.cluster = node.with_node(ctx.require_cluster(), worker(3, "172.22.0.4"))  # never joined
+    # recorded in cluster.yaml and started, never joined
+    ctx.cluster = node_common.with_node(ctx.require_cluster(), worker(3, "172.22.0.4"))
     host.active.add("demo-worker-3.service")
     new_node_answers(host, "demo-worker-3", ready_after=2)
     ctx.node = "demo-worker-3"
-    Runner([node.JOIN_PHASE], record=False).run(ctx)
+    Runner([node_add.JOIN_PHASE], record=False).run(ctx)
     assert phases_of(host)[-3:] == ["join/kubeadm", "join/ready", "join/record"]
     assert "[join/start] already done" in host.lines  # the node was running
     assert "[join/record] already done" in host.lines  # join: true was the plan all along
@@ -209,10 +215,10 @@ def test_join_node_finishes_an_add_interrupted_before_the_unit_existed(tmp_path:
     """plan wrote the entry, then the add died: join node renders the unit, starts the node,
     gives it the addons and joins it. Rerunning add would allocate a new node instead."""
     ctx, host = node_ctx(tmp_path)
-    ctx.cluster = node.with_node(ctx.require_cluster(), worker(3, "172.22.0.4"))
+    ctx.cluster = node_common.with_node(ctx.require_cluster(), worker(3, "172.22.0.4"))
     new_node_answers(host, "demo-worker-3", ready_after=1)
     ctx.node = "demo-worker-3"
-    Runner([node.JOIN_PHASE], record=False).run(ctx)
+    Runner([node_add.JOIN_PHASE], record=False).run(ctx)
     assert phases_of(host) == [
         "join/images",
         "join/units",
@@ -337,7 +343,7 @@ def test_delete_control_plane_waits_for_the_lb_before_deleting_the_node(tmp_path
     """kubeadm reset takes the apiserver on that node down; the LB keeps routing to it for a few
     seconds, and a kubectl delete node in that window dies with EOF."""
     ctx, host = node_ctx(tmp_path)
-    ctx.cluster = node.with_node(
+    ctx.cluster = node_common.with_node(
         ctx.require_cluster(),
         model.Node(
             role="control-plane",
@@ -394,7 +400,7 @@ def test_lb_from_the_previous_release_is_restarted_not_reloaded(tmp_path: Path) 
     host.responses[("podman", "inspect", "demo-lb")] = Result(
         0, "/opt/taroko/clusters/demo/lb/haproxy.cfg -> /usr/local/etc/haproxy/haproxy.cfg\n", ""
     )
-    node.reload_lb(ctx)
+    node_common.reload_lb(ctx)
     a = argvs(host)
     assert ["systemctl", "restart", "demo-lb.service"] in a
     assert ["podman", "kill", "--signal", "USR2", "demo-lb"] not in a
@@ -402,7 +408,7 @@ def test_lb_from_the_previous_release_is_restarted_not_reloaded(tmp_path: Path) 
     host.responses[("podman", "inspect", "demo-lb")] = Result(
         0, "/opt/taroko/clusters/demo/lb -> /usr/local/etc/haproxy\n", ""
     )
-    node.reload_lb(ctx)
+    node_common.reload_lb(ctx)
     a = argvs(host)
     assert ["podman", "kill", "--signal", "USR2", "demo-lb"] in a
     assert ["systemctl", "restart", "demo-lb.service"] not in a
