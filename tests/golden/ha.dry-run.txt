@@ -111,7 +111,7 @@ PartOf=ha.target
 
 [Container]
 ContainerName=ha-lb
-Image=docker.io/library/haproxy:3.3.16-trixie
+Image=docker.io/library/haproxy:3.3.17-trixie
 Network=ha.network
 IP=172.22.0.100
 # The directory, not the file: haproxy.cfg is replaced by rename when a control plane is added or

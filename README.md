@@ -23,7 +23,7 @@
 curl -fsSL https://raw.githubusercontent.com/tarokolabs/tk8s/main/install.sh | sh
 ```
 
-指定版本：`curl -fsSL https://raw.githubusercontent.com/tarokolabs/tk8s/v2026.10.8/install.sh | TK_VERSION=v2026.10.8 sh`。
+指定版本：`curl -fsSL https://raw.githubusercontent.com/tarokolabs/tk8s/v2026.10.9/install.sh | TK_VERSION=v2026.10.9 sh`。
 
 `install.sh` 可重複執行：檢查前置條件，下載 `uv` 與 `kubectl` 到 `/usr/local/bin`，clone 到 `/opt/taroko/tk8s`，把 Python 3.14 與相依套件安裝到 `/opt/taroko/tk8s/.venv/`，把 `tkctl` 連結到 `/usr/local/bin`。不需要 source 任何 profile。
 

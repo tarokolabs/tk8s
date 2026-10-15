@@ -97,7 +97,7 @@ PartOf=tk8s.target
 
 [Container]
 ContainerName=tk8s-lb
-Image=docker.io/library/haproxy:3.3.16-trixie
+Image=docker.io/library/haproxy:3.3.17-trixie
 Network=tk8s.network
 IP=172.22.0.100
 # The directory, not the file: haproxy.cfg is replaced by rename when a control plane is added or
