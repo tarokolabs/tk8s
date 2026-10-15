@@ -153,26 +153,6 @@ def test_datapath_resolved_is_written_once(ctx: Context, host: FakeHost) -> None
     assert host.files[ctx.state_dir / "cluster.yaml"].count("datapath_resolved") == 1
 
 
-def test_canal_path(ctx: Context, host: FakeHost) -> None:
-    c = ctx.require_cluster()
-    ctx.cluster = c.model_copy(update={"spec": c.spec.model_copy(update={"cni": "canal"})})
-    healthy(host, ctx)
-    host.responses[("kubectl", "get", "configmap", "kube-proxy")] = Result(
-        0, "maxPerCore: null\n", ""
-    )
-    cni.install_run(ctx)
-    a = [c.argv for c in host.calls]
-    url = (
-        f"https://raw.githubusercontent.com/projectcalico/calico/{ctx.versions.calico}/"
-        "manifests/canal.yaml"
-    )
-    assert ["kubectl", "apply", "-f", url] in a
-    assert ["kubectl", "-n", "kube-system", "rollout", "status", "ds/canal", "--timeout=5m"] in a
-    proxy = next(c for c in host.calls if c.argv == ["kubectl", "apply", "-f", "-"])
-    assert proxy.input == "maxPerCore: 0\n"
-    assert not installs(host) and "  canal ok (no Gateway API on this path)" in host.lines
-
-
 def test_nodes_ready_is_not_done_when_kubectl_fails(ctx: Context, host: FakeHost) -> None:
     healthy(host, ctx)
     host.responses[("kubectl", "get", "nodes", "--no-headers")] = Result(1, "", "refused")

@@ -1,5 +1,5 @@
-"""cni: cilium (default: kube-proxy replacement, LB-IPAM with L2 announcements, the Gateway API
-controller) or canal (no Gateway API); then wait for every node to be Ready.
+"""cni: cilium (kube-proxy replacement, LB-IPAM with L2 announcements, the Gateway API
+controller); then wait for every node to be Ready.
 
 The Gateway API CRDs, the cilium chart and the cilium CLI are pinned in versions.yaml; the CRDs
 and the chart are vendored under manifests/, so nothing here fetches from helm.cilium.io."""
@@ -83,11 +83,9 @@ def _kubectl(ctx: Context, *args: str, input: str | None = None, check: bool = T
 def install_done(ctx: Context) -> bool:
     """cilium counts as installed only once its LB-IPAM pool exists: a first attempt that timed out
     waiting for the DaemonSet leaves the DaemonSet behind but never reached the pool."""
-    if ctx.require_cluster().spec.cni == "cilium":
-        ds = _kubectl(ctx, "-n", "kube-system", "get", "ds", "cilium", check=False) == 0
-        pool = _kubectl(ctx, "get", "ciliumloadbalancerippool", "default-pool", check=False) == 0
-        return ds and pool
-    return _kubectl(ctx, "-n", "kube-system", "get", "ds", "canal", check=False) == 0
+    ds = _kubectl(ctx, "-n", "kube-system", "get", "ds", "cilium", check=False) == 0
+    pool = _kubectl(ctx, "get", "ciliumloadbalancerippool", "default-pool", check=False) == 0
+    return ds and pool
 
 
 def install_cilium(ctx: Context) -> None:
@@ -162,25 +160,8 @@ def install_cilium(ctx: Context) -> None:
     record_datapath(ctx, datapath)
 
 
-def install_canal(ctx: Context) -> None:
-    v = ctx.versions
-    cm = ctx.host.run(
-        ["kubectl", "get", "configmap", "kube-proxy", "-n", "kube-system", "-o", "yaml"],
-        env=kubectl_env(ctx),
-        capture=True,
-    )
-    _kubectl(ctx, "apply", "-f", "-", input=cm.stdout.replace("maxPerCore: null", "maxPerCore: 0"))
-    url = f"https://raw.githubusercontent.com/projectcalico/calico/{v.calico}/manifests/canal.yaml"
-    _kubectl(ctx, "apply", "-f", url)
-    _kubectl(ctx, "-n", "kube-system", "rollout", "status", "ds/canal", "--timeout=5m")
-    ctx.say("  canal ok (no Gateway API on this path)")
-
-
 def install_run(ctx: Context) -> None:
-    if ctx.require_cluster().spec.cni == "cilium":
-        install_cilium(ctx)
-    else:
-        install_canal(ctx)
+    install_cilium(ctx)
 
 
 INSTALL = Phase(

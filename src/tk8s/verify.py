@@ -130,8 +130,6 @@ def check_kube_system(r: Report) -> None:
 
 def check_cilium(r: Report) -> None:
     c = r.ctx.require_cluster()
-    if c.spec.cni != "cilium":
-        return
     have_cli = r.ctx.host.run(["cilium", "version", "--client"], capture=True, check=False)
     if have_cli.returncode != 0:
         r.skip("cilium status", "cilium CLI not on the host")
@@ -295,17 +293,7 @@ def check_apiserver_lb(r: Report) -> None:
         )
 
 
-def _gateway_ready(r: Report) -> bool:
-    c = r.ctx.require_cluster()
-    if c.spec.cni != "cilium":
-        r.skip("Gateway API", f"cni {c.spec.cni} (only the cilium path provides it)")
-        return False
-    return True
-
-
 def check_gatewayclass(r: Report) -> None:
-    if not _gateway_ready(r):
-        return
     rc, _ = r.kubectl("wait", "gatewayclass", "cilium", "--for=condition=Accepted", "--timeout=60s")
     if rc == 0:
         r.ok("GatewayClass cilium Accepted")
@@ -315,8 +303,6 @@ def check_gatewayclass(r: Report) -> None:
 
 def check_gateway(r: Report) -> None:
     c = r.ctx.require_cluster()
-    if c.spec.cni != "cilium":
-        return
     v = r.ctx.versions
     r.kubectl(
         "apply",
@@ -348,7 +334,7 @@ def check_gateway(r: Report) -> None:
 
 
 def check_httproute(r: Report) -> None:
-    if r.ctx.require_cluster().spec.cni != "cilium" or not r.gateway_ip:
+    if not r.gateway_ip:
         return
     c = r.ctx.require_cluster()
     host = ""
@@ -377,7 +363,7 @@ def check_httproute(r: Report) -> None:
 
 def check_xff(r: Report) -> None:
     c = r.ctx.require_cluster()
-    if c.spec.cni != "cilium" or not r.gateway_ip:
+    if not r.gateway_ip:
         return
     xff = r.ctx.host.run(
         [
@@ -400,7 +386,7 @@ def check_xff(r: Report) -> None:
 
 
 def check_tcproute(r: Report) -> None:
-    if r.ctx.require_cluster().spec.cni != "cilium" or not r.gateway_ip:
+    if not r.gateway_ip:
         return
     tcp = r.ctx.host.run(
         ["curl", "-s", "-m", "8", f"http://{r.gateway_ip}:9000/hostname"], capture=True, check=False
@@ -471,7 +457,7 @@ def run(ctx: Context, only: str | None = None) -> int:
     if only is not None and only not in {n for n, _, _ in CHECKS}:
         raise PhaseFailed(f"unknown phase {only!r}; phases: {', '.join(n for n, _, _ in CHECKS)}")
     r = Report(ctx)
-    ctx.say(f"verify {c.name} (cni {c.spec.cni}, {len(c.spec.nodes)} nodes, timeout {r.timeout}s)")
+    ctx.say(f"verify {c.name} ({len(c.spec.nodes)} nodes, timeout {r.timeout}s)")
     r.kubectl("delete", "ns", NS, "--ignore-not-found", "--wait=true", "--timeout=60s")
     try:
         if r.kubectl("create", "ns", NS)[0] != 0:

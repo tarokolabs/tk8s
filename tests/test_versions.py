@@ -11,7 +11,6 @@ def test_real_versions_yaml_loads_and_pins_everything() -> None:
     for k in (
         "cni_plugins",
         "cilium_cli",
-        "calico",
         "metrics_server",
         "local_path_provisioner",
         "gvisor",

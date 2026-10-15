@@ -49,6 +49,7 @@ tkctl create cluster ha --control-planes 3 --defer-join # 額外的 control plan
 tkctl create cluster sandbox --gvisor                   # 多一個 gvisor 的 RuntimeClass
 tkctl create cluster old --k8s 1.36.5                   # 次新版
 tkctl create cluster big --cpu 4 --memory 8G
+tkctl create cluster bare --skip-phases cni,addons    # 只做到 kubeadm，CNI 自己裝（叢集停在 Creating）
 ```
 
 ### 執行輸出
