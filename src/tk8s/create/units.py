@@ -1,5 +1,5 @@
 """units: the Quadlet units, the cluster target, the host routes and the router config, rendered
-from cluster.yaml; units go under /etc (root), the router's config.boot into the state dir (root
+from cluster.yaml; units go under /etc (root), the router's tkctl.boot into the state dir (root
 too: VyOS owns that directory), the rest as the user."""
 
 from pathlib import Path
@@ -26,13 +26,16 @@ def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str
         gateway=net.gateway,
         router_ip=net.router,
     )
-    files[state / "router" / "config.boot"] = template(
+    files[state / "router" / "tkctl.boot"] = template(
         p.home,
-        "router/config.boot",
+        "router/tkctl.boot",
         cluster=c.name,
         router_ip=net.router,
         gateway=net.gateway,
         servers=router.servers(c),
+    )
+    files[state / "router" / "scripts" / "vyos-preconfig-bootup.script"] = template(
+        p.home, "router/vyos-preconfig-bootup.script", cluster=c.name
     )
     files[state / "router" / "scripts" / "vyos-postconfig-bootup.script"] = template(
         p.home, "router/vyos-postconfig-bootup.script", cluster=c.name, router_ip=net.router

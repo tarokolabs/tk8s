@@ -9,7 +9,8 @@ def test_render_lists_the_files_in_write_order(ctx: Context) -> None:
     paths = list(units.render(ctx))
     assert [p.name for p in paths] == [
         "demo.network",
-        "config.boot",
+        "tkctl.boot",
+        "vyos-preconfig-bootup.script",
         "vyos-postconfig-bootup.script",
         "demo-router.container",
         "demo-control-plane-1.container",
@@ -18,8 +19,9 @@ def test_render_lists_the_files_in_write_order(ctx: Context) -> None:
         "demo.target",
         "demo-routes.service",
     ]
-    assert paths[1] == ctx.state_dir / "router" / "config.boot"
-    assert paths[2] == ctx.state_dir / "router" / "scripts" / "vyos-postconfig-bootup.script"
+    assert paths[1] == ctx.state_dir / "router" / "tkctl.boot"
+    assert paths[2] == ctx.state_dir / "router" / "scripts" / "vyos-preconfig-bootup.script"
+    assert paths[3] == ctx.state_dir / "router" / "scripts" / "vyos-postconfig-bootup.script"
 
 
 def test_control_plane_has_no_after_and_workers_wait_for_it(ctx: Context) -> None:
@@ -31,7 +33,7 @@ def test_control_plane_has_no_after_and_workers_wait_for_it(ctx: Context) -> Non
 
 
 def test_config_boot_lists_one_server_per_control_plane_with_a_tcp_check(ctx: Context) -> None:
-    cfg = units.render(ctx)[ctx.state_dir / "router" / "config.boot"]
+    cfg = units.render(ctx)[ctx.state_dir / "router" / "tkctl.boot"]
     assert cfg.count("            server demo-control-plane-") == 1
     assert (
         "            server demo-control-plane-1 {\n"
@@ -50,7 +52,7 @@ def test_router_container_hostname_matches_the_vyos_host_name(ctx: Context) -> N
     """VyOS runs sudo at every commit; a hostname it cannot resolve stalls the boot for minutes."""
     files = units.render(ctx)
     unit = files[ctx.paths.unit_dir / "demo" / "demo-router.container"]
-    cfg = files[ctx.state_dir / "router" / "config.boot"]
+    cfg = files[ctx.state_dir / "router" / "tkctl.boot"]
     assert "HostName=demo-router" in unit and 'host-name "demo-router"' in cfg
     assert "ContainerName=demo-router" in unit and "IP=172.22.0.253" in unit
     assert f"Image=ghcr.io/tarokolabs/tk8s/router:{ctx.versions.vyos}" in unit
@@ -64,6 +66,20 @@ def test_network_sends_the_nodes_to_the_router_not_the_host(ctx: Context) -> Non
     assert "Gateway=172.22.0.254" in net
     assert "Options=no_default_route=1" in net
     assert "PodmanArgs=--route 0.0.0.0/0,172.22.0.253" in net
+
+
+def test_preconfig_script_installs_tkctl_boot_with_vyos_own_version_footer(ctx: Context) -> None:
+    """A config.boot without the version footer is migrated by VyOS at boot: it adds blocks (a
+    conntrack helper list whose modprobe fails in a container) and rewrites the file. The
+    footer is build-specific, so VyOS writes it itself, right before loading."""
+    script = units.render(ctx)[
+        ctx.state_dir / "router" / "scripts" / "vyos-preconfig-bootup.script"
+    ]
+    assert script.startswith("#!/bin/sh\n")
+    assert "cp /opt/vyatta/etc/config/tkctl.boot /opt/vyatta/etc/config/config.boot" in script
+    assert (
+        "/usr/libexec/vyos/system-versions-foot.py >> /opt/vyatta/etc/config/config.boot" in script
+    )
 
 
 def test_bootup_script_drops_the_route_to_itself(ctx: Context) -> None:
@@ -93,9 +109,10 @@ def test_run_writes_etc_and_the_router_dir_with_sudo_the_rest_as_the_user(
     units.run(ctx)
     writes = {c.argv[1]: c for c in host.calls if c.argv[0] == "write"}
     assert writes[str(ctx.paths.unit_dir / "demo" / "demo.network")].sudo
-    assert writes[str(ctx.state_dir / "router" / "config.boot")].sudo  # VyOS owns that directory
-    script = writes[str(ctx.state_dir / "router" / "scripts" / "vyos-postconfig-bootup.script")]
-    assert script.sudo and "mode=755" in script.argv[2]
+    assert writes[str(ctx.state_dir / "router" / "tkctl.boot")].sudo  # VyOS owns that directory
+    for name in ("vyos-preconfig-bootup.script", "vyos-postconfig-bootup.script"):
+        script = writes[str(ctx.state_dir / "router" / "scripts" / name)]
+        assert script.sudo and "mode=755" in script.argv[2]
     assert writes[str(ctx.paths.systemd_dir / "demo.target")].sudo
     assert units.done(ctx)
 

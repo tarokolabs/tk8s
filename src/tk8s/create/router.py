@@ -1,4 +1,4 @@
-"""router: the VyOS container of a cluster: its image, the server blocks of its config.boot,
+"""router: the VyOS container of a cluster: its image, the server blocks of its tkctl.boot,
 and how tkctl waits for it, reads its load balancer status and reloads its configuration."""
 
 import time
@@ -87,6 +87,8 @@ def wait(ctx: Context) -> None:
 
 
 RELOAD = (
+    "cp /opt/vyatta/etc/config/tkctl.boot /opt/vyatta/etc/config/config.boot\n"
+    "/usr/libexec/vyos/system-versions-foot.py >> /opt/vyatta/etc/config/config.boot\n"
     "source /opt/vyatta/etc/functions/script-template\n"
     "configure\n"
     "load /opt/vyatta/etc/config/config.boot\n"
@@ -96,9 +98,10 @@ RELOAD = (
 
 
 def reload(ctx: Context) -> None:
-    """config.boot was re-rendered (a control plane came or went); VyOS loads it and commits the
-    difference without dropping connections. The boot-time commit holds a lock for a few seconds
-    after start: retry through it."""
+    """tkctl.boot was re-rendered (a control plane came or went); it becomes config.boot with
+    VyOS's version footer (so nothing is migrated), then VyOS loads it and commits the difference
+    without dropping connections. The boot-time commit holds a lock for a few seconds after
+    start: retry through it."""
     for attempt in range(1, 4):
         r = ctx.host.run(
             ["podman", "exec", "-i", name(ctx), "/bin/vbash", "-s"],

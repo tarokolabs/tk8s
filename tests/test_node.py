@@ -202,7 +202,7 @@ def test_add_control_plane_uploads_a_fresh_certificate_key(tmp_path: Path) -> No
     assert any(x[:3] == ["kubectl", "taint", "node"] for x in argvs(host))
     assert (
         "            server demo-control-plane-2 {"
-        in host.files[ctx.state_dir / "router" / "config.boot"]
+        in host.files[ctx.state_dir / "router" / "tkctl.boot"]
     )
 
 

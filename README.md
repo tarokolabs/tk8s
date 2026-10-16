@@ -226,7 +226,7 @@ tkctl version
 ```
 /opt/taroko/clusters/<名稱>/     # cluster.yaml、kubeconfig、storage/（PVC 資料）、logs/
 /opt/taroko/images/<K8s 版本>/   # 共用 image store
-/opt/taroko/clusters/<名稱>/router/  # VyOS 的 config.boot，依 cluster.yaml 產生
+/opt/taroko/clusters/<名稱>/router/  # VyOS 的設定（tkctl.boot），依 cluster.yaml 產生
 /opt/taroko/cni/                 # CNI plugins
 /etc/containers/systemd/<名稱>/  # 節點與 router 的 Quadlet unit；systemctl status <名稱>.target
 ```
