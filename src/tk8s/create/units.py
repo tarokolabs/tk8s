@@ -1,11 +1,13 @@
-"""units: the Quadlet units, the cluster target, the host routes and the LB config, rendered from
-cluster.yaml; units go under /etc (root), haproxy.cfg into the state dir (the user)."""
+"""units: the Quadlet units, the cluster target, the host routes and the router config, rendered
+from cluster.yaml; units go under /etc (root), the router's config.boot into the state dir (root
+too: VyOS owns that directory), the rest as the user."""
 
 from pathlib import Path
 
 from .. import model
 from ..phases import Context, Phase
 from ..render import template
+from . import router
 
 
 def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str]:
@@ -17,21 +19,30 @@ def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str
     net, cp = c.spec.network, c.first_control_plane
     files: dict[Path, str] = {}
     files[unit_dir / f"{c.name}.network"] = template(
-        p.home, "cluster.network", cluster=c.name, nodes=net.nodes, gateway=net.gateway
-    )
-    files[state / "lb" / "haproxy.cfg"] = template(
         p.home,
-        "haproxy.cfg",
+        "cluster.network",
         cluster=c.name,
-        lb_ip=net.lb,
-        servers="\n".join(f"    server {n.name} {n.ip}:6443" for n in c.control_planes),
+        nodes=net.nodes,
+        gateway=net.gateway,
+        router_ip=net.router,
     )
-    files[unit_dir / f"{c.name}-lb.container"] = template(
+    files[state / "router" / "config.boot"] = template(
         p.home,
-        "lb.container",
+        "router/config.boot",
         cluster=c.name,
-        lb_ip=net.lb,
-        haproxy_image=v.haproxy,
+        router_ip=net.router,
+        gateway=net.gateway,
+        servers=router.servers(c),
+    )
+    files[state / "router" / "scripts" / "vyos-postconfig-bootup.script"] = template(
+        p.home, "router/vyos-postconfig-bootup.script", cluster=c.name, router_ip=net.router
+    )
+    files[unit_dir / f"{c.name}-router.container"] = template(
+        p.home,
+        "router.container",
+        cluster=c.name,
+        router_ip=net.router,
+        router_image=router.image(v),
         state_dir=state,
     )
     for n in c.spec.nodes:
@@ -45,7 +56,7 @@ def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str
             after="" if n is cp else f"\nAfter={cp.name}.service",
             image=c.node_image,
             domain=c.domain,
-            lb_ip=net.lb,
+            router_ip=net.router,
             cni_dir=p.cni_dir,
             images_dir=p.images_dir,
             k8s=c.spec.kubernetes,
@@ -55,7 +66,7 @@ def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str
             memory=n.memory,
         )
     wants = [
-        f"{c.name}-lb.service",
+        f"{c.name}-router.service",
         *(f"{n.name}.service" for n in c.spec.nodes),
         f"{c.name}-routes.service",
     ]
@@ -74,23 +85,26 @@ def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str
     return files
 
 
-def _under_etc(ctx: Context, path: Path) -> bool:
-    return not path.is_relative_to(ctx.paths.data_dir)
+def needs_sudo(ctx: Context, path: Path) -> bool:
+    """Units live under /etc; the router directory is written by VyOS (root in the container)."""
+    router_dir = ctx.paths.state_dir(ctx.cluster_name) / "router"
+    return not path.is_relative_to(ctx.paths.data_dir) or path.is_relative_to(router_dir)
 
 
 def done(ctx: Context, cluster: model.Cluster | None = None) -> bool:
     """Every file is on the host with exactly this content (a changed cluster.yaml re-renders)."""
     return all(
-        ctx.host.read(path, sudo=_under_etc(ctx, path)) == content
+        ctx.host.read(path, sudo=needs_sudo(ctx, path)) == content
         for path, content in render(ctx, cluster).items()
     )
 
 
 def run(ctx: Context, cluster: model.Cluster | None = None) -> None:
     for path, content in render(ctx, cluster).items():
-        ctx.host.write(path, content, sudo=_under_etc(ctx, path))
+        mode = 0o755 if path.suffix == ".script" else 0o644
+        ctx.host.write(path, content, sudo=needs_sudo(ctx, path), mode=mode)
 
 
 PHASE = Phase(
-    "units", "write the Quadlet units, the target, the routes and the LB config", done, run
+    "units", "write the Quadlet units, the target, the routes and the router config", done, run
 )
