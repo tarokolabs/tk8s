@@ -83,6 +83,14 @@ tkctl 渲染的是 `tkctl.boot`；VyOS 開機前的 `vyos-preconfig-bootup.scrip
 
 跟 VIP 的差別：沒有 ARP、沒有 lease、沒有 static pod；單 control plane 的叢集也走同一條路，所以 `verify` 的 `[router]` 每個叢集都會檢查。pod 內不需要也無法解析 `api.<名稱>.k8s`（叢集內的 CoreDNS 擁有這個網域）：pod 走 `kubernetes` Service 的 ClusterIP。
 
+### bgp 模式（`--ha bgp`）
+
+同一個 VyOS 容器，換一份 `tkctl.boot`：沒有 haproxy，`protocols bgp`（AS 65000，每台 control plane 一個 eBGP neighbor，AS 65001，`maximum-paths ebgp 8`）加 `protocols bfd`（300 ms × 3）。`api.<名稱>.k8s` 解析到 VIP `172.23.N.1`，刻意放在另一個 /16：在節點網段裡的位址節點會直接 ARP，就看不到路由。主機的 `<名稱>-routes.service` 多一條 `VIP/32 via .253`，kubeconfig 直接寫 VIP。
+
+每台 control plane 裡跑 node image 內建的 FRR（`kubeadm/frr` 寫 `/etc/frr/frr.conf`、`/etc/tk8s/vip`，啟用 `frr.service` 與 `tk8s-apiserver-health.timer`）。timer 每 2 秒打本機 `/readyz`：ok 就把 VIP 放到 `lo`，否則拿掉；FRR 的 `redistribute connected route-map vip-only` 加 `neighbor … route-map vip-only out` 只宣告那個 /32，所以宣告與撤回就是 `ip addr show lo` 的一個位址。router 對所有宣告中的 control plane 做 ECMP（`show ip route 172.23.N.1`），每台 control plane 連 VIP 連到的是自己（lo 的本機路由優先，anycast 的正常行為）。
+
+兩種故障、兩種收斂：apiserver 掛但節點活著，timer 最多 2 秒撤回；整台 control plane 無聲消失，BFD 約 1 秒判定鄰居死亡（只靠 BGP timers 3/9 要 9 秒）；`podman stop` 這種優雅停止 FRR 送 cease，0.3 秒撤回。憑證 SAN 同時含 `.253` 與 VIP。`verify` 的 `[router]` 在這個模式檢查每台已加入的 control plane Established、ECMP 的 next hop 數等於 control plane 數、BFD 全 up。
+
 ## 主機的 sysctl
 
 前置檢查會把主機的 `net.bridge.bridge-nf-call-iptables` 設為 0 並寫入 `/etc/sysctl.d/90-tk8s.conf`：節點之間的橋接流量不經主機 iptables，否則裝了 Docker 的主機（FORWARD 預設 DROP）會擋掉 pod 到其他節點的流量。`net.ipv4.ip_forward` 必須是 1：節點的網路命名空間建立時複製主機的這個值，未啟用時 kubeadm 的 preflight 會在節點裡失敗。

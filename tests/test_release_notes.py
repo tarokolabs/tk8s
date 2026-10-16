@@ -29,6 +29,7 @@ def test_release_notes_from_versions_and_digests(tmp_path: Path) -> None:
     assert "TK_VERSION=v2026.11.0 sh" in out
     assert f"| `ghcr.io/tarokolabs/tk8s/node:v{d}` | `sha256:aaa` |" in out
     assert f"| `ghcr.io/tarokolabs/tk8s/router:{v.vyos}` | `sha256:ccc` |" in out
+    assert "--ha bgp" in out and "proxy" in out and "BFD" in out  # both router modes described
     for s in (
         f"cilium {v.cilium}",
         f"Gateway API {v.gateway_api}",
