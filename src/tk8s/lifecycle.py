@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import model
-from .create import PHASES
+from .create import PHASES, router
 from .create.kubeadm import kubectl_env
 from .phases import Context
 
@@ -95,7 +95,7 @@ def describe(ctx: Context, c: model.Cluster, output: str | None) -> None:
     )
     ctx.say(
         f"Network:     nodes {net.nodes} (gateway {net.gateway})  pods {net.pods}  "
-        f"services {net.services}  lb-ipam {net.lb_range}  lb {net.lb}"
+        f"services {net.services}  lb-ipam {net.lb_range}  router {net.router}"
     )
     ctx.say("Nodes:")
     ctx.say(f"  {'NAME':<24} {'ROLE':<14} {'IP':<14} {'RESOURCES':<14} JOIN")
@@ -105,10 +105,11 @@ def describe(ctx: Context, c: model.Cluster, output: str | None) -> None:
         ctx.say(f"  {n.name:<24} {n.role:<14} {n.ip!s:<14} {size:<14} {join}")
     describe_status(ctx, c)
     describe_addons(ctx, c, state)
+    describe_router(ctx, c, state)
     ctx.say("Access:")
     ctx.say(
-        f"  apiserver:  https://{net.lb}:6443 (HAProxy in {c.name}-lb; every node and this host "
-        "go through it)"
+        f"  apiserver:  https://{net.router}:6443 (VyOS haproxy in {c.name}-router; every node "
+        "and this host go through it)"
     )
     ctx.say(
         f"  from this host:       LoadBalancer IPs ({net.lb_range}) and ClusterIPs "
@@ -125,6 +126,19 @@ def describe(ctx: Context, c: model.Cluster, output: str | None) -> None:
         f"  units:      {ctx.paths.unit_dir}/{c.name}/   "
         f"target: {ctx.paths.systemd_dir}/{c.name}.target"
     )
+
+
+def describe_router(ctx: Context, c: model.Cluster, state: str) -> None:
+    net = c.spec.network
+    ctx.say("Router:")
+    ctx.say(f"  mode:     {net.ha} (VyOS load-balancing haproxy, TCP check on every control plane)")
+    ctx.say(f"  address:  {net.router} (api.{c.domain} resolves to it on every node)")
+    ctx.say(f"  shell:    sudo podman exec -it {c.name}-router vbash")
+    if state != "Running":
+        ctx.say("  backends: unavailable (cluster is not running)")
+        return
+    rows = router.backends(ctx)
+    ctx.say("  backends: " + (", ".join(f"{n} {s}" for n, s in rows) or "none listed"))
 
 
 def describe_status(ctx: Context, c: model.Cluster) -> None:

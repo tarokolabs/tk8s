@@ -1,5 +1,6 @@
 import pytest
 
+from tests.fixtures import OP, SHOW_HAPROXY
 from tk8s import model, verify
 from tk8s.host import FakeHost, Result
 from tk8s.phases import Context
@@ -7,10 +8,6 @@ from tk8s.phases import Context
 NODES = (
     "demo-control-plane-1 Ready control-plane 1m v1.37.1\ndemo-worker-1 Ready <none> 1m v1.37.1\n"
     "demo-worker-2 Ready <none> 1m v1.37.1\n"
-)
-STATS = (
-    "control-planes,demo-control-plane-1,0,0,0,0,,0,0,0,,0,,0,0,0,0,UP,1\n"
-    "control-planes,BACKEND,0,0,0,0,200,0,0,0,0,0,,0,0,0,0,UP,1\n"
 )
 
 
@@ -53,7 +50,12 @@ def healthy(ctx: Context, host: FakeHost) -> None:
     host.responses[("kubectl", "get", "runtimeclass", "crun")] = Result(0, "crun", "")
     host.responses[("kubectl", "get", "runtimeclass", "gvisor")] = Result(1, "", "")
     host.responses[("kubectl", "logs", "-n", "tk-verify", "rc-crun")] = Result(0, "6.12.0\n", "")
-    host.responses[("podman", "exec", "demo-lb")] = Result(0, STATS, "")
+    host.responses[("podman", "exec", "demo-router", "cat", "/tmp/vyos-config-status")] = Result(
+        0, "0\n", ""
+    )
+    host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(
+        0, SHOW_HAPROXY, ""
+    )
     host.responses[("curl", "-sk", "--max-time", "5")] = Result(0, "ok", "")
     host.responses[("kubectl", "get", "gateway", "-n", "tk-verify", "gw", "-o")] = Result(
         0, "172.22.0.200", ""
@@ -86,7 +88,7 @@ def test_all_healthy_is_15_pass_1_skip(ctx: Context, host: FakeHost) -> None:
         f"PASS  PV data on host ({ctx.state_dir}/storage)",
         "PASS  RuntimeClass crun (kernel 6.12.0)",
         "SKIP  RuntimeClass gvisor — not enabled (create the cluster with --gvisor)",
-        "PASS  apiserver LB 172.22.0.100 healthy (1/1 control planes UP)",
+        "PASS  apiserver router 172.22.0.253 healthy (1/1 control planes UP)",
         "PASS  GatewayClass cilium Accepted",
         "PASS  Gateway programmed (172.22.0.200)",
         "PASS  HTTPRoute reachable from host (backend echo-abc)",
@@ -134,28 +136,28 @@ def test_kubelet_noise_is_reported_with_the_cgroup(ctx: Context, host: FakeHost)
     )
 
 
-def test_lb_rising_counts_as_up_and_down_fails(ctx: Context, host: FakeHost) -> None:
+def test_router_rising_counts_as_up_and_down_fails(ctx: Context, host: FakeHost) -> None:
     healthy(ctx, host)
-    rising = STATS.replace(",UP,1\ncontrol-planes,BACKEND", ",UP 1/2,1\ncontrol-planes,BACKEND")
-    host.responses[("podman", "exec", "demo-lb")] = Result(0, rising, "")
+    rising = SHOW_HAPROXY.replace("  UP         0 ms", "  UP 1/2     0 ms")
+    host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(0, rising, "")
     verify.run(ctx)
-    assert "PASS  apiserver LB 172.22.0.100 healthy (1/1 control planes UP)" in host.lines
+    assert "PASS  apiserver router 172.22.0.253 healthy (1/1 control planes UP)" in host.lines
     host.lines.clear()
-    down = STATS.replace(",UP,1\ncontrol-planes,BACKEND", ",DOWN,1\ncontrol-planes,BACKEND")
-    host.responses[("podman", "exec", "demo-lb")] = Result(0, down, "")
+    down = SHOW_HAPROXY.replace("  UP         0 ms", "  DOWN       0 ms")
+    host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(0, down, "")
     host.responses[("curl", "-sk", "--max-time", "5")] = Result(0, "", "")
     verify.run(ctx)
     assert (
-        "FAIL  apiserver LB 172.22.0.100 — readyz='', 0 of 1 control planes UP "
-        "(podman logs demo-lb)"
+        "FAIL  apiserver router 172.22.0.253 — readyz='', 0 of 1 control planes UP "
+        f"(podman exec demo-router {OP} show haproxy)"
     ) in host.lines
 
 
 def test_only_runs_one_check(ctx: Context, host: FakeHost) -> None:
     healthy(ctx, host)
-    assert verify.run(ctx, only="apiserver-lb") == 0
+    assert verify.run(ctx, only="router") == 0
     assert lines(host, "PASS  ") == [
-        "PASS  apiserver LB 172.22.0.100 healthy (1/1 control planes UP)"
+        "PASS  apiserver router 172.22.0.253 healthy (1/1 control planes UP)"
     ]
 
 
