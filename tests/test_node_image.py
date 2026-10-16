@@ -102,11 +102,12 @@ def test_health_announces_after_three_good_probes_and_withdraws_after_two_bad(
     h = Health(tmp_path)
     assert [h.tick("ok"), h.tick("ok")] == [0, 0] and not h.announced
     assert h.tick("ok") == 0 and h.announced
+    assert "announcing 172.23.0.1" in h.stderr  # the journal shows every transition
     # one slow answer, then a good one: the VIP stays (no ECMP rehash for a hiccup)
-    assert h.tick("slow") == 0 and h.announced
-    assert h.tick("ok") == 0 and h.announced
+    assert h.tick("slow") == 0 and h.announced and "failed once" in h.stderr
+    assert h.tick("ok") == 0 and h.announced and h.stderr == ""
     assert h.tick("refused") == 0 and h.announced
-    assert h.tick("refused") == 0 and not h.announced
+    assert h.tick("refused") == 0 and not h.announced and "withdrawing 172.23.0.1" in h.stderr
     # back up: three good answers in a row, a failure in between starts over
     assert [h.tick("ok"), h.tick("ok"), h.tick("500")] == [0, 0, 0] and not h.announced
     assert [h.tick("ok"), h.tick("ok")] == [0, 0] and not h.announced

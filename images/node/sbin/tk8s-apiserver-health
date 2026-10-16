@@ -8,7 +8,9 @@
 # slow or refused answer leaves the VIP where it is (every change rehashes the router's ECMP and
 # can reset connections). A probe is good only when curl succeeded and the body is exactly "ok".
 # The streak lives in /run (positive = good probes, negative = bad, capped at the thresholds) and
-# starts over at boot. A failed ip command exits 1 so systemd journals it; the next tick retries.
+# starts over at boot. Every transition (a first failed probe, a withdrawal, an announcement)
+# goes to stderr, so `journalctl -u tk8s-apiserver-health` shows how often probes fail; a
+# failed ip command exits 1 so systemd journals it, and the next tick retries.
 # /etc/tk8s/vip is written by tkctl (kubeadm/frr); a node without it has nothing to do.
 vip_file=${TK8S_VIP_FILE:-/etc/tk8s/vip}
 streak_file=${TK8S_STREAK_FILE:-/run/tk8s-apiserver-health.streak}
@@ -21,12 +23,15 @@ if body=$(curl -ks --max-time 0.75 https://127.0.0.1:6443/readyz 2>/dev/null) &&
 else
     [ "$streak" -lt 0 ] 2>/dev/null || streak=0
     [ "$streak" -le -2 ] || streak=$((streak - 1))
+    [ "$streak" -ne -1 ] || echo "readyz probe failed once, the VIP stays until a second failure" >&2
 fi
 echo "$streak" > "$streak_file"
 on_lo() { ip -4 addr show dev lo | grep -q " $vip/32 "; }
 if [ "$streak" -ge 3 ] && ! on_lo; then
+    echo "announcing $vip: three good probes in a row" >&2
     ip addr add "$vip/32" dev lo || exit 1
 elif [ "$streak" -le -2 ] && on_lo; then
+    echo "withdrawing $vip: two failed probes in a row" >&2
     ip addr del "$vip/32" dev lo || exit 1
 fi
 exit 0
