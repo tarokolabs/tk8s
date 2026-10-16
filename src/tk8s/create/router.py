@@ -84,3 +84,34 @@ def wait(ctx: Context) -> None:
                 f"(podman exec {name(ctx)} {OP} show haproxy)"
             )
         time.sleep(ctx.options.poll)
+
+
+RELOAD = (
+    "source /opt/vyatta/etc/functions/script-template\n"
+    "configure\n"
+    "load /opt/vyatta/etc/config/config.boot\n"
+    "commit\n"
+    "exit\n"
+)
+
+
+def reload(ctx: Context) -> None:
+    """config.boot was re-rendered (a control plane came or went); VyOS loads it and commits the
+    difference without dropping connections. The boot-time commit holds a lock for a few seconds
+    after start: retry through it."""
+    for attempt in range(1, 4):
+        r = ctx.host.run(
+            ["podman", "exec", "-i", name(ctx), "/bin/vbash", "-s"],
+            sudo=True,
+            input=RELOAD,
+            capture=True,
+            check=False,
+        )
+        out = r.stdout + r.stderr
+        if r.returncode != 0:
+            raise PhaseFailed(f"{name(ctx)} did not accept config.boot: {out.strip()[-300:]}")
+        if "temporarily locked" not in out:
+            return
+        if attempt == 3:
+            raise PhaseFailed(f"{name(ctx)} kept the configuration locked through three attempts")
+        time.sleep(ctx.options.poll)

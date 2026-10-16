@@ -28,11 +28,11 @@ def test_next_name_skips_past_the_highest_suffix(ctx: Context) -> None:
     assert node_common.next_name(c, "worker") == "demo-worker-4"  # not by count: 2 is not reused
 
 
-def test_next_ip_follows_the_highest_address_and_skips_the_lb(ctx: Context) -> None:
+def test_next_ip_follows_the_highest_address(ctx: Context) -> None:
     c = ctx.require_cluster()
     assert node_common.next_ip(c) == IPv4Address("172.22.0.4")
     c = node_common.with_node(c, worker(3, "172.22.0.99"))
-    assert node_common.next_ip(c) == IPv4Address("172.22.0.101")
+    assert node_common.next_ip(c) == IPv4Address("172.22.0.100")  # .100 is a node address now
     c = node_common.with_node(c, worker(4, "172.22.0.199"))
     with pytest.raises(
         lifecycle.ClusterError,
@@ -175,7 +175,7 @@ def test_add_worker_runs_plan_units_start_addons_join_in_order(tmp_path: Path) -
     )
     assert "demo-worker-3.service" in host.files[ctx.paths.systemd_dir / "demo.target"]
     a = argvs(host)
-    reload_ = a.index(["podman", "kill", "--signal", "USR2", "demo-lb"])
+    reload_ = a.index(["podman", "exec", "-i", "demo-router", "/bin/vbash", "-s"])
     start = a.index(["systemctl", "start", "demo-worker-3.service"])
     assert a.index(["systemctl", "daemon-reload"]) < reload_ < start
     joins = [x for x in a if x[:5] == ["podman", "exec", "demo-worker-3", "bash", "-c"]]
@@ -201,8 +201,8 @@ def test_add_control_plane_uploads_a_fresh_certificate_key(tmp_path: Path) -> No
     assert host.files[ctx.state_dir / ".certificate-key"] == "feedfacefeedface\n"
     assert any(x[:3] == ["kubectl", "taint", "node"] for x in argvs(host))
     assert (
-        "server demo-control-plane-2 172.22.0.4:6443"
-        in host.files[ctx.state_dir / "lb" / "haproxy.cfg"]
+        "            server demo-control-plane-2 {"
+        in host.files[ctx.state_dir / "router" / "config.boot"]
     )
 
 
@@ -289,7 +289,7 @@ def test_delete_node_drains_stops_removes_and_rerenders(tmp_path: Path) -> None:
     unit = ctx.paths.unit_dir / "demo" / "demo-worker-2.container"
     assert ["rm", "-f", str(unit)] in a and unit not in host.files
     assert "demo-worker-2.service" not in host.files[ctx.paths.systemd_dir / "demo.target"]
-    assert a.index(["podman", "kill", "--signal", "USR2", "demo-lb"]) > a.index(
+    assert a.index(["podman", "exec", "-i", "demo-router", "/bin/vbash", "-s"]) > a.index(
         ["rm", "-f", str(unit)]
     )
     kept = ("demo-control-plane-1", "demo-worker-1")
@@ -360,7 +360,7 @@ def test_confirm_delete_node(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert host.lines == []
 
 
-def test_delete_control_plane_waits_for_the_lb_before_deleting_the_node(tmp_path: Path) -> None:
+def test_delete_control_plane_waits_for_the_router_before_deleting_the_node(tmp_path: Path) -> None:
     """kubeadm reset takes the apiserver on that node down; the LB keeps routing to it for a few
     seconds, and a kubectl delete node in that window dies with EOF."""
     ctx, host = node_ctx(tmp_path)
@@ -411,25 +411,3 @@ def test_delete_node_refuses_to_guess_when_the_apiserver_is_unreachable(tmp_path
     assert not any(
         x[:2] == ["podman", "rm"] or x[:3] == ["podman", "volume", "rm"] for x in argvs(host)
     )
-
-
-def test_lb_from_the_previous_release_is_restarted_not_reloaded(tmp_path: Path) -> None:
-    """A v2026.10.x LB bind-mounted the single haproxy.cfg file; its container keeps the inode
-    the config was replaced under, so SIGUSR2 reloads stale backends. Restart it once; the unit
-    on disk already has the directory mount."""
-    ctx, host = node_ctx(tmp_path)
-    host.responses[("podman", "inspect", "demo-lb")] = Result(
-        0, "/opt/taroko/clusters/demo/lb/haproxy.cfg -> /usr/local/etc/haproxy/haproxy.cfg\n", ""
-    )
-    node_common.reload_lb(ctx)
-    a = argvs(host)
-    assert ["systemctl", "restart", "demo-lb.service"] in a
-    assert ["podman", "kill", "--signal", "USR2", "demo-lb"] not in a
-    host.calls.clear()
-    host.responses[("podman", "inspect", "demo-lb")] = Result(
-        0, "/opt/taroko/clusters/demo/lb -> /usr/local/etc/haproxy\n", ""
-    )
-    node_common.reload_lb(ctx)
-    a = argvs(host)
-    assert ["podman", "kill", "--signal", "USR2", "demo-lb"] in a
-    assert ["systemctl", "restart", "demo-lb.service"] not in a

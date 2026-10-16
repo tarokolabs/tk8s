@@ -38,9 +38,11 @@ def node_names(ctx: Context) -> list[str]:
     volumes are removed before units takes that directory away)."""
     if ctx.cluster is not None:
         return [n.name for n in ctx.cluster.spec.nodes]
-    lb = f"{ctx.cluster_name}-lb.container"
+    router = f"{ctx.cluster_name}-router.container"
     entries = ctx.host.listdir(ctx.paths.unit_dir / ctx.cluster_name)
-    return [e.removesuffix(".container") for e in entries if e.endswith(".container") and e != lb]
+    return [
+        e.removesuffix(".container") for e in entries if e.endswith(".container") and e != router
+    ]
 
 
 def node_volumes(node: str) -> list[str]:
@@ -132,7 +134,7 @@ UNITS = Phase(
 
 
 def containers(ctx: Context) -> list[str]:
-    return [*node_names(ctx), f"{ctx.cluster_name}-lb"]
+    return [*node_names(ctx), f"{ctx.cluster_name}-router"]
 
 
 def containers_done(ctx: Context) -> bool:
@@ -144,7 +146,7 @@ def containers_run(ctx: Context) -> None:
 
 
 CONTAINERS = Phase(
-    "containers", "remove the node and LB containers", containers_done, containers_run
+    "containers", "remove the node and router containers", containers_done, containers_run
 )
 
 

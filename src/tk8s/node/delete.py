@@ -3,7 +3,7 @@ without it, take it out of cluster.yaml. Like delete cluster, every phase's done
 part is already gone", so a delete that stopped halfway is finished by running it again."""
 
 from .. import model
-from ..create import kubeadm, units
+from ..create import kubeadm, router, units
 from ..create.kubeadm import kubectl_env
 from ..delete import (
     container_exists,
@@ -14,7 +14,7 @@ from ..delete import (
 )
 from ..lifecycle import ClusterError, save_cluster
 from ..phases import Context, Phase
-from .common import find, reload_lb, require_node, unit_file, without_node
+from .common import find, require_node, unit_file, without_node
 
 
 def confirm_delete(ctx: Context) -> None:
@@ -129,7 +129,7 @@ def units_run(ctx: Context) -> None:
     ctx.host.run(
         ["systemctl", "reset-failed", f"{n}.service"], sudo=True, capture=True, check=False
     )
-    reload_lb(ctx)
+    router.reload(ctx)
 
 
 UNITS = Phase(
