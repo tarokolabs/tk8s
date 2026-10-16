@@ -10,7 +10,7 @@ from pathlib import Path
 from .. import model
 from ..phases import Context, Phase, PhaseFailed
 from ..render import template
-from . import router
+from . import frr, router
 
 KEY_RE = re.compile(r"--certificate-key ([0-9a-f]+)")
 
@@ -326,5 +326,5 @@ PHASE = Phase(
     "initialise the first control plane and join the others",
     None,
     lambda ctx: None,
-    children=(RENDER, INIT, KUBECONFIG, JOIN),
+    children=(RENDER, frr.PHASE, INIT, KUBECONFIG, JOIN),
 )

@@ -320,6 +320,7 @@ def test_create_runs_every_phase_and_marks_the_cluster_ready(
         "nodes/cni-plugins",
         "nodes/up",
         "kubeadm/render",
+        "kubeadm/frr",
         "kubeadm/init",
         "kubeadm/kubeconfig",
         "kubeadm/join",

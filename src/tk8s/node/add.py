@@ -4,7 +4,7 @@ with the cluster. join node runs the same tail to finish a node that an add left
 
 import time
 
-from ..create import addons, kubeadm, nodes, router, units
+from ..create import addons, frr, kubeadm, nodes, router, units
 from ..create import images as create_images
 from ..lifecycle import save_cluster
 from ..phases import Context, Phase, PhaseFailed
@@ -124,6 +124,7 @@ PROVISION: tuple[Phase, ...] = (
     create_images.PHASE,
     units.PHASE,
     START,
+    frr.PHASE,
     addons.RUNTIMECLASS,
     addons.GVISOR,
 )

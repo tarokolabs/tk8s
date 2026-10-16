@@ -85,6 +85,7 @@ nodes              start the nodes
   up                 start the cluster target and wait for every node and the router
 kubeadm            initialise the first control plane and join the others
   render             write the kubeadm init configuration into the state dir
+  frr                bgp mode: FRR and the VIP health timer on every control plane
   init               kubeadm init on the first control plane
   kubeconfig         hand the host a kubeconfig that points at the router
   join               join the other control planes and the workers
