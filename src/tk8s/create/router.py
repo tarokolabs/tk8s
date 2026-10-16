@@ -88,7 +88,7 @@ def wait(ctx: Context) -> None:
 
 RELOAD = (
     "cp /opt/vyatta/etc/config/tkctl.boot /opt/vyatta/etc/config/config.boot\n"
-    "/usr/libexec/vyos/system-versions-foot.py >> /opt/vyatta/etc/config/config.boot\n"
+    "grep '^// ' /opt/vyatta/etc/config.boot.default >> /opt/vyatta/etc/config/config.boot\n"
     "source /opt/vyatta/etc/functions/script-template\n"
     "configure\n"
     "load /opt/vyatta/etc/config/config.boot\n"

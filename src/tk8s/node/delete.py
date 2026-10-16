@@ -65,7 +65,7 @@ def drain_run(ctx: Context) -> None:
     ctx.host.run(
         ["podman", "exec", n, "kubeadm", "reset", "-f"], sudo=True, capture=True, check=False
     )
-    # A control plane's apiserver just went away; the LB keeps routing to it for a few seconds.
+    # A control plane's apiserver just went away; the router keeps routing to it for seconds.
     kubeadm.wait_router_ready(ctx)
     ctx.host.run(["kubectl", "delete", "node", n], env=kubectl_env(ctx), capture=True)
 
@@ -121,7 +121,7 @@ def units_done(ctx: Context) -> bool:
 
 def units_run(ctx: Context) -> None:
     """The target and config.boot are rendered without the node first, then its unit goes, then
-    systemd and the LB learn about it."""
+    systemd and the router learn about it."""
     n = require_node(ctx)
     units.run(ctx, trimmed(ctx))
     ctx.host.run(["rm", "-f", str(unit_file(ctx))], sudo=True)
@@ -134,7 +134,7 @@ def units_run(ctx: Context) -> None:
 
 UNITS = Phase(
     "units",
-    "drop the node's unit, re-render the target and the LB config, reload the LB",
+    "drop the node's unit, re-render the target and the router config, reload the router",
     units_done,
     units_run,
 )
