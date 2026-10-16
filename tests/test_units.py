@@ -96,6 +96,12 @@ def test_bootup_script_drops_the_route_to_itself(ctx: Context) -> None:
         '-p "ExecStop=/usr/sbin/ip route replace default via 172.22.0.253 metric 100 proto static" '
         "/bin/true"
     ) in script
+    # the host bridge is on the nodes' link: without this the router answers every forwarded
+    # packet with an ICMP redirect to the host, which ping counts as errors
+    assert (
+        "sysctl -qw net.ipv4.conf.all.send_redirects=0 net.ipv4.conf.eth0.send_redirects=0"
+        in script
+    )
 
 
 def test_nodes_resolve_the_api_name_to_the_router(ctx: Context) -> None:
