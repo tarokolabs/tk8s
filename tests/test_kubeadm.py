@@ -103,7 +103,8 @@ def test_init_fails_when_the_router_never_reports_healthy(ctx: Context, host: Fa
     host.responses[("curl",)] = Result(0, "", "")
     with pytest.raises(
         PhaseFailed,
-        match=r"the apiserver router at 172\.22\.0\.253 has no healthy control plane after 60 s",
+        match=r"the apiserver at 172\.22\.0\.253 \(via demo-router\) answered no readyz within "
+        r"60 s \(podman exec demo-router /opt/vyatta/bin/vyatta-op-cmd-wrapper show haproxy\)",
     ):
         kubeadm.init_run(ctx)  # init is "done" (admin.conf exists) but still waits for the router
 
@@ -288,7 +289,7 @@ def test_kubeconfig_waits_for_the_apiserver_through_the_router(
     assert len(curls) == 3 and ctx.state_dir / "kubeconfig" in host.files
     host.calls.clear()
     host.responses[("curl",)] = Result(0, "", "")
-    with pytest.raises(PhaseFailed, match="has no healthy control plane after 60 s"):
+    with pytest.raises(PhaseFailed, match="answered no readyz within 60 s"):
         kubeadm.kubeconfig_run(ctx)
 
 
@@ -364,3 +365,40 @@ def test_init_config_sans_name_the_router_and_every_control_plane(ctx: Context) 
     text = kubeadm.render_init(ctx)
     assert "    - api.demo.k8s\n    - 172.22.0.253\n    - 172.22.0.1\n" in text
     assert ".100" not in text
+
+
+def test_bgp_init_config_puts_the_vip_in_the_sans_after_the_router(bgp_ctx: Context) -> None:
+    text = kubeadm.render_init(bgp_ctx)
+    assert (
+        "  certSANs:\n    - api.demo.k8s\n    - 172.22.0.253\n    - 172.23.0.1\n"
+        "    - 172.22.0.1\n    - 172.22.0.2\n    - 172.22.0.3\n  extraArgs:"
+    ) in text
+    assert 'controlPlaneEndpoint: "api.demo.k8s:6443"' in text
+
+
+def test_bgp_kubeconfig_points_the_host_at_the_vip(bgp_ctx: Context, host: FakeHost) -> None:
+    host.responses[
+        ("podman", "exec", "demo-control-plane-1", "cat", "/etc/kubernetes/admin.conf")
+    ] = Result(0, "server: https://api.demo.k8s:6443\n", "")
+    host.responses[("curl", "-sk", "--max-time", "3", "https://172.23.0.1:6443/readyz")] = Result(
+        0, "ok", ""
+    )
+    kubeadm.kubeconfig_run(bgp_ctx)
+    assert host.files[bgp_ctx.state_dir / "kubeconfig"] == "server: https://172.23.0.1:6443\n"
+    assert ["curl", "-sk", "--max-time", "3", "https://172.23.0.1:6443/readyz"] in [
+        c.argv for c in host.calls
+    ]
+
+
+def test_bgp_wait_router_ready_names_the_bgp_command_on_timeout(
+    bgp_ctx: Context, host: FakeHost
+) -> None:
+    host.responses[("curl", "-sk", "--max-time", "3", "https://172.23.0.1:6443/readyz")] = Result(
+        7, "", ""
+    )
+    with pytest.raises(
+        PhaseFailed,
+        match=r"the apiserver at 172\.23\.0\.1 \(via demo-router\) answered no readyz within 60 s "
+        r"\(podman exec demo-router vtysh -c 'show bgp summary'\)",
+    ):
+        kubeadm.wait_router_ready(bgp_ctx)
