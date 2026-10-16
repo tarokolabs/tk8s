@@ -3,7 +3,8 @@
 # nightly build number and the ISO's sha256 in versions.yaml; the same pair always builds the same
 # image. Runs privileged with systemd as PID 1 (podman's systemd mode), stops with SIGRTMIN+3.
 # unsquashfs cannot create the /dev nodes inside a build container (no mknod); they do not
-# matter, podman mounts /dev, so errors are ignored and /sbin/init is what proves the extract.
+# matter, podman mounts /dev, so errors are ignored and the systemd binary is what proves the extract (/sbin/init is an
+# absolute symlink that resolves against the build container, not the rootfs).
 ARG VYOS=0000.00.00-0000
 ARG SHA256=0
 
@@ -16,7 +17,7 @@ RUN curl -fsSL -o /vyos.iso "https://github.com/vyos/vyos-nightly-build/releases
     && echo "${SHA256}  /vyos.iso" | sha256sum -c - \
     && bsdtar -C / -xf /vyos.iso live/filesystem.squashfs \
     && unsquashfs -q -n -ignore-errors -no-exit-code -d /rootfs /live/filesystem.squashfs \
-    && test -x /rootfs/sbin/init \
+    && test -x /rootfs/usr/lib/systemd/systemd \
     && rm -f /vyos.iso /live/filesystem.squashfs
 
 FROM scratch
