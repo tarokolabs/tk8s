@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from . import model
+from .create import router
 from .datatree import data_dirs
 from .host import HostError
 from .paths import Paths
@@ -134,6 +135,40 @@ def ensure_node_image(ctx: Context, k8s: str) -> None:
     )
 
 
+def ensure_router_image(ctx: Context) -> None:
+    """The router image, pulled by tag or built from images/router/ when the tag is not published
+    (a release that has not pushed yet, or a build number bumped locally). Refresh re-pulls."""
+    image = router.image(ctx.versions)
+    present = (
+        ctx.host.run(["podman", "image", "exists", image], sudo=True, check=False).returncode == 0
+    )
+    if present and not ctx.options.refresh:
+        return
+    if ctx.options.offline:
+        raise ImagesError(
+            f"router image {image} is not present and TK_OFFLINE=1 forbids pulling or building it"
+        )
+    if ctx.host.run(["podman", "pull", image], sudo=True, check=False).returncode == 0:
+        ctx.say(f"  {image} {'refreshed' if present else 'pulled'}")
+        return
+    ctx.say(f"  {image} is not published; building locally (downloads the VyOS ISO, a few minutes)")
+    ctx.host.run(
+        [
+            "podman",
+            "build",
+            "--build-arg",
+            f"VYOS={ctx.versions.vyos}",
+            "--build-arg",
+            f"SHA256={ctx.versions.vyos_sha256}",
+            "--force-rm",
+            "-t",
+            image,
+            str(ctx.paths.home / "images" / "router"),
+        ],
+        sudo=True,
+    )
+
+
 # ---- what a version needs
 
 
@@ -192,13 +227,14 @@ def wanted(ctx: Context, k8s: str) -> list[str]:
         home / "manifests" / f"local-path-storage.{v.local_path_provisioner.lstrip('v')}.yaml",
     ]
     from_files = [img for m in manifests for img in _IMAGE_LINE.findall(m.read_text())]
-    pins = [v.verify_busybox, v.verify_alpine, v.verify_agnhost, v.haproxy]
+    pins = [v.verify_busybox, v.verify_alpine, v.verify_agnhost]
     return sorted(set(kube.stdout.split()) | set(cilium_images) | set(from_files) | set(pins))
 
 
 def status(ctx: Context, k8s: str) -> list[tuple[str, str]]:
     """("present" | "missing", image) for every wanted image, in list order."""
     ensure_node_image(ctx, k8s)
+    ensure_router_image(ctx)
     ensure_cilium_cli(ctx)
     env = _store_env(ctx.paths, k8s)
     have_store = ctx.host.exists(conf_path(ctx.paths, k8s)) and ctx.host.exists(
@@ -291,21 +327,3 @@ def prune(ctx: Context, k8s: str) -> None:
         ctx.host.run(["rm", "-rf", str(where)], sudo=True)
         conf.unlink(missing_ok=True)
     ctx.say(f"  image store {k8s} deleted")
-
-
-def copy_to_host(ctx: Context, k8s: str, image: str) -> None:
-    """The LB container runs from the host's own store: copy the image out of the shared store."""
-    if ctx.host.run(["podman", "image", "exists", image], sudo=True, check=False).returncode == 0:
-        return
-    env = _store_env(ctx.paths, k8s)
-    in_store = ctx.host.run(
-        ["podman", "image", "exists", image], sudo=True, env=env, check=False
-    ).returncode
-    if in_store != 0:
-        raise ImagesError(
-            f"images: {image} is not in the shared store {store_dir(ctx.paths, k8s)}; "
-            f"run tkctl pull images --k8s {k8s}"
-        )
-    tar = ctx.host.run_bytes(["podman", "save", image], sudo=True, env=env)
-    ctx.host.run_bytes(["podman", "load"], sudo=True, input=tar)
-    ctx.say(f"  {image} copied into the host store")

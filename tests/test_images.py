@@ -46,12 +46,12 @@ def store_pulls(host: FakeHost) -> list[str]:
 def test_wanted_is_derived_sorted_and_unique(ctx: Context, host: FakeHost) -> None:
     sources(host)
     w = images.wanted(ctx, K8S)
-    assert w == sorted(set(w)) and len(w) == 16
+    assert w == sorted(set(w)) and len(w) == 15
     assert f"registry.k8s.io/kube-apiserver:v{K8S}" in w
     assert "quay.io/cilium/cilium:v1.20.2@sha256:aaaa" in w
     assert "registry.k8s.io/metrics-server/metrics-server:v0.9.0" in w
     assert "docker.io/rancher/local-path-provisioner:v0.0.37" in w
-    assert ctx.versions.haproxy in w and ctx.versions.verify_alpine in w
+    assert "haproxy" not in " ".join(w) and ctx.versions.verify_alpine in w
     kube = next(c for c in host.calls if c.argv[:2] == ["podman", "run"])
     assert kube.argv[-3:] == ["list", "--kubernetes-version", f"v{K8S}"] and kube.sudo
     cil = next(c for c in host.calls if c.argv[0] == "cilium")
@@ -87,10 +87,10 @@ def test_ensure_fresh_host_pulls_everything_once_under_the_lock(
     sources(host)
     host.responses[("podman", "image", "exists")] = MISSING
     images.ensure(ctx, K8S)
-    assert len(store_pulls(host)) == 16
+    assert len(store_pulls(host)) == 15
     assert any(c.argv[:2] == ["mkdir", str(ctx.paths.images_dir / K8S)] for c in host.calls)
     assert host.files[images.conf_path(ctx.paths, K8S)] == images.storage_conf(ctx.paths, K8S)
-    assert any(line.startswith(f"  images {K8S}: 0 present, 16 pulled in ") for line in host.lines)
+    assert any(line.startswith(f"  images {K8S}: 0 present, 15 pulled in ") for line in host.lines)
     assert f"  {NODE} pulled" in host.lines
 
 
@@ -99,7 +99,7 @@ def test_ensure_again_pulls_nothing(ctx: Context, host: FakeHost) -> None:
     images.ensure(ctx, K8S)
     assert store_pulls(host) == []
     where = ctx.paths.images_dir / K8S
-    assert f"  images {K8S}: 16 present, nothing to pull ({where})" in host.lines
+    assert f"  images {K8S}: 15 present, nothing to pull ({where})" in host.lines
 
 
 def test_ensure_pulls_only_the_missing_image(ctx: Context, host: FakeHost) -> None:
@@ -107,7 +107,7 @@ def test_ensure_pulls_only_the_missing_image(ctx: Context, host: FakeHost) -> No
     host.responses[("podman", "image", "exists", "registry.k8s.io/pause:3.10.2")] = MISSING
     images.ensure(ctx, K8S)
     assert store_pulls(host) == ["registry.k8s.io/pause:3.10.2"]
-    assert any(line.startswith(f"  images {K8S}: 15 present, 1 pulled") for line in host.lines)
+    assert any(line.startswith(f"  images {K8S}: 14 present, 1 pulled") for line in host.lines)
 
 
 def test_offline_lists_the_missing_images_and_pulls_nothing(ctx: Context, host: FakeHost) -> None:
@@ -199,19 +199,6 @@ def test_prune_refuses_while_a_cluster_uses_the_version(ctx: Context, host: Fake
         images.prune(ctx, "1.30.0")
 
 
-def test_copy_to_host_goes_through_save_and_load(ctx: Context, host: FakeHost) -> None:
-    img = ctx.versions.haproxy
-    host.responses[("podman", "image", "exists", img)] = [MISSING, Result(0, "", "")]
-    host.responses[("podman", "save", img)] = Result(0, "TARBYTES", "")
-    images.copy_to_host(ctx, K8S, img)
-    load = next(c for c in host.calls if c.argv == ["podman", "load"])
-    assert load.input == "TARBYTES" and load.sudo
-    host.calls.clear()
-    host.responses[("podman", "image", "exists", img)] = Result(0, "", "")
-    images.copy_to_host(ctx, K8S, img)
-    assert not any(c.argv == ["podman", "load"] for c in host.calls)
-
-
 def test_lock_serialises_two_ensures(tmp_path: Path) -> None:
     order: list[str] = []
     lock = tmp_path / "x.lock"
@@ -268,3 +255,40 @@ def test_clusters_using_tolerates_a_broken_file(tmp_path: Path, ctx: Context) ->
     (ctx.paths.clusters_dir / "demo").mkdir()
     model.save(ctx.require_cluster(), ctx.paths.clusters_dir / "demo" / "cluster.yaml")
     assert images.clusters_using(ctx.paths, K8S) == ["demo"]
+
+
+def test_router_image_pull_build_refresh_offline(ctx: Context, host: FakeHost) -> None:
+    image = f"ghcr.io/tarokolabs/tk8s/router:{ctx.versions.vyos}"
+    host.responses[("podman", "image", "exists", image)] = Result(1, "", "")
+    host.responses[("podman", "pull", image)] = Result(125, "", "manifest unknown")
+    images.ensure_router_image(ctx)
+    build = next(c.argv for c in host.calls if c.argv[:2] == ["podman", "build"])
+    assert build == [
+        "podman",
+        "build",
+        "--build-arg",
+        f"VYOS={ctx.versions.vyos}",
+        "--build-arg",
+        f"SHA256={ctx.versions.vyos_sha256}",
+        "--force-rm",
+        "-t",
+        image,
+        str(ctx.paths.home / "images" / "router"),
+    ]
+    assert f"  {image} is not published; building locally" in " ".join(host.lines)
+    host.responses[("podman", "image", "exists", image)] = Result(0, "", "")
+    host.calls.clear()
+    images.ensure_router_image(ctx)
+    assert not any(c.argv[:2] in (["podman", "pull"], ["podman", "build"]) for c in host.calls)
+    ctx.options.offline = True
+    host.responses[("podman", "image", "exists", image)] = Result(1, "", "")
+    with pytest.raises(images.ImagesError, match="TK_OFFLINE=1"):
+        images.ensure_router_image(ctx)
+
+
+def test_status_makes_sure_the_router_image_is_on_the_host(ctx: Context, host: FakeHost) -> None:
+    """tkctl pull images / get images pull or build the router image next to the node image."""
+    sources(host)
+    images.status(ctx, K8S)
+    image = f"ghcr.io/tarokolabs/tk8s/router:{ctx.versions.vyos}"
+    assert ["podman", "image", "exists", image] in [c.argv for c in host.calls]
