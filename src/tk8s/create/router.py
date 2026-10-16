@@ -1,6 +1,7 @@
 """router: the VyOS container of a cluster: its image, the server blocks of its tkctl.boot,
 and how tkctl waits for it, reads its load balancer status and reloads its configuration."""
 
+import json
 import time
 
 from .. import model, versions
@@ -93,9 +94,70 @@ def backends(ctx: Context) -> list[tuple[str, str]]:
     ]
 
 
+def _vtysh(ctx: Context, command: str) -> object | None:
+    """One op-mode query as JSON, or None when the router or FRR does not answer."""
+    r = ctx.host.run(
+        ["podman", "exec", name(ctx), "vtysh", "-c", f"{command} json"],
+        sudo=True,
+        capture=True,
+        check=False,
+    )
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    try:
+        data: object = json.loads(r.stdout)
+    except ValueError:
+        return None
+    return data
+
+
+def peers(ctx: Context, c: model.Cluster) -> list[tuple[str, str]]:
+    """(control plane, BGP state) per neighbor in `show bgp ipv4 unicast summary`; a neighbor
+    cluster.yaml does not have is listed by address."""
+    data = _vtysh(ctx, "show bgp ipv4 unicast summary")
+    if not isinstance(data, dict):
+        return []
+    by_ip = {str(n.ip): n.name for n in c.control_planes}
+    return [
+        (by_ip.get(ip, ip), str(p.get("state", "?")))
+        for ip, p in data.get("peers", {}).items()
+        if isinstance(p, dict)
+    ]
+
+
+def nexthops(ctx: Context, c: model.Cluster) -> int:
+    """How many next hops the router's route to the VIP has: the ECMP width, 0 without a route."""
+    vip = c.spec.network.vip
+    data = _vtysh(ctx, f"show ip route {vip}/32")
+    entries = data.get(f"{vip}/32", []) if isinstance(data, dict) else []
+    chosen = next((e for e in entries if e.get("selected")), entries[0] if entries else None)
+    return len(chosen.get("nexthops", [])) if isinstance(chosen, dict) else 0
+
+
+def bfd_down(ctx: Context, c: model.Cluster) -> list[str]:
+    """The control planes whose BFD session with the router is not up."""
+    data = _vtysh(ctx, "show bfd peers")
+    status = {s.get("peer"): s.get("status") for s in data} if isinstance(data, list) else {}
+    return [n.name for n in c.control_planes if status.get(str(n.ip)) != "up"]
+
+
+def members(ctx: Context, c: model.Cluster) -> list[tuple[str, str]]:
+    """What the router knows per control plane in this mode: backends or BGP peers."""
+    return backends(ctx) if c.spec.network.ha == "proxy" else peers(ctx, c)
+
+
+def kind(c: model.Cluster) -> str:
+    return "backend" if c.spec.network.ha == "proxy" else "peer"
+
+
+def show(c: model.Cluster) -> str:
+    """The op-mode command a person runs to see the same list."""
+    return f"{OP} show haproxy" if c.spec.network.ha == "proxy" else "vtysh -c 'show bgp summary'"
+
+
 def synced(ctx: Context, c: model.Cluster) -> bool:
-    """The router's backend list is exactly the cluster's control planes, by name."""
-    return {n for n, _ in backends(ctx)} == {n.name for n in c.control_planes}
+    """The router's backend (proxy) or peer (bgp) list is exactly the cluster's control planes."""
+    return {n for n, _ in members(ctx, c)} == {n.name for n in c.control_planes}
 
 
 def wait_booted(ctx: Context) -> None:
@@ -113,21 +175,23 @@ def wait_booted(ctx: Context) -> None:
 
 
 def wait_synced(ctx: Context, c: model.Cluster) -> None:
-    """Every control plane listed as a backend, no other: the config took. The backends stay
-    DOWN until kubeadm brings an apiserver up."""
+    """Every control plane listed as a backend (proxy) or neighbor (bgp), no other: the config
+    took. The backends stay DOWN, the sessions short of Established, until kubeadm brings an
+    apiserver up (and, in bgp mode, kubeadm/frr starts FRR in the control plane)."""
     for i in range(1, 31):
         if synced(ctx, c):
             got = len(c.control_planes)
             ctx.say(
-                f"  {name(ctx)}: VyOS up, {got} control plane backend(s) at {c.spec.network.router}"
+                f"  {name(ctx)}: VyOS up, {got} control plane {kind(c)}(s) at "
+                f"{c.spec.network.router}"
             )
             return
         if i == 30:
-            listed = ", ".join(n for n, _ in backends(ctx)) or "nothing"
+            listed = ", ".join(n for n, _ in members(ctx, c)) or "nothing"
             want = ", ".join(n.name for n in c.control_planes)
             raise PhaseFailed(
-                f"{name(ctx)} lists {listed} as backends, cluster.yaml has {want} "
-                f"(podman exec {name(ctx)} {OP} show haproxy)"
+                f"{name(ctx)} lists {listed} as {kind(c)}s, cluster.yaml has {want} "
+                f"(podman exec {name(ctx)} {show(c)})"
             )
         time.sleep(ctx.options.poll)
 

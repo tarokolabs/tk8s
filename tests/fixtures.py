@@ -1,5 +1,6 @@
 """A fake host on which every create phase is already done, for whole-command tests."""
 
+import json
 from pathlib import Path
 
 from tk8s import model, versions
@@ -18,6 +19,57 @@ SHOW_HAPROXY = (
     "api                   demo-control-plane-1  UP         0 ms         4s\n"
 )
 OP = "/opt/vyatta/bin/vyatta-op-cmd-wrapper"
+VTYSH_SUMMARY = (
+    "podman",
+    "exec",
+    "demo-router",
+    "vtysh",
+    "-c",
+    "show bgp ipv4 unicast summary json",
+)
+VTYSH_ROUTE = ("podman", "exec", "demo-router", "vtysh", "-c", "show ip route 172.23.0.1/32 json")
+VTYSH_BFD = ("podman", "exec", "demo-router", "vtysh", "-c", "show bfd peers json")
+
+
+def bgp_router_answers(
+    host: FakeHost, *, established: int = 3, hops: int = 3, bfd_up: int = 3
+) -> None:
+    """The demo bgp router (3 control planes .1 .2 .3) as vtysh reports it: the first `established`
+    peers Established and the rest Active, `hops` ECMP next hops to the VIP, the first `bfd_up` BFD
+    sessions up. The JSON shapes are FRR 10's, trimmed to the keys tkctl reads."""
+    ips = ["172.22.0.1", "172.22.0.2", "172.22.0.3"]
+    summary = {
+        "as": 65000,
+        "peers": {
+            ip: {
+                "remoteAs": 65001,
+                "state": "Established" if i < established else "Active",
+                "pfxRcd": 1 if i < established else 0,
+            }
+            for i, ip in enumerate(ips)
+        },
+    }
+    route: dict[str, object] = {}
+    if hops:
+        route = {
+            "172.23.0.1/32": [
+                {
+                    "prefix": "172.23.0.1/32",
+                    "protocol": "bgp",
+                    "selected": True,
+                    "nexthops": [{"ip": ip, "active": True} for ip in ips[:hops]],
+                }
+            ]
+        }
+    bfd = [{"peer": ip, "status": "up" if i < bfd_up else "down"} for i, ip in enumerate(ips)]
+    host.responses[("podman", "exec", "demo-router", "cat", "/tmp/vyos-config-status")] = Result(
+        0, "0\n", ""
+    )
+    host.responses[VTYSH_SUMMARY] = Result(0, json.dumps(summary), "")
+    host.responses[VTYSH_ROUTE] = Result(0, json.dumps(route), "")
+    host.responses[VTYSH_BFD] = Result(0, json.dumps(bfd), "")
+
+
 # the router reload: a configuration session fed on stdin, in VyOS's configuration group
 VBASH = ("podman", "exec", "-i", "demo-router", "sg", "vyattacfg", "-c", "/bin/vbash -s")
 

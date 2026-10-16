@@ -1,6 +1,14 @@
+import json
+
 import pytest
 
-from tests.fixtures import OP, SHOW_HAPROXY, VBASH
+from tests.fixtures import (
+    OP,
+    SHOW_HAPROXY,
+    VBASH,
+    VTYSH_SUMMARY,
+    bgp_router_answers,
+)
 from tk8s.create import router
 from tk8s.host import FakeHost, Result
 from tk8s.phases import Context, PhaseFailed
@@ -167,3 +175,79 @@ def test_neighbors_and_bfd_peers_render_one_block_per_control_plane(bgp_ctx: Con
         "            }\n"
         "        }\n"
     )
+
+
+def test_peers_maps_vtysh_summary_to_control_plane_names(bgp_ctx: Context, host: FakeHost) -> None:
+    bgp_router_answers(host, established=2)
+    assert router.peers(bgp_ctx, bgp_ctx.require_cluster()) == [
+        ("demo-control-plane-1", "Established"),
+        ("demo-control-plane-2", "Established"),
+        ("demo-control-plane-3", "Active"),
+    ]
+
+
+def test_peers_lists_a_neighbor_cluster_yaml_does_not_know_by_address(
+    bgp_ctx: Context, host: FakeHost
+) -> None:
+    bgp_router_answers(host)
+    answer = host.responses[VTYSH_SUMMARY]
+    assert isinstance(answer, Result)
+    extra = json.loads(answer.stdout)
+    extra["peers"]["172.22.0.9"] = {"state": "Active"}
+    host.responses[VTYSH_SUMMARY] = Result(0, json.dumps(extra), "")
+    assert ("172.22.0.9", "Active") in router.peers(bgp_ctx, bgp_ctx.require_cluster())
+
+
+def test_peers_is_empty_when_vtysh_fails_or_answers_garbage(
+    bgp_ctx: Context, host: FakeHost
+) -> None:
+    host.responses[VTYSH_SUMMARY] = Result(1, "", "bgpd is not running")
+    assert router.peers(bgp_ctx, bgp_ctx.require_cluster()) == []
+    host.responses[VTYSH_SUMMARY] = Result(0, "not json", "")
+    assert router.peers(bgp_ctx, bgp_ctx.require_cluster()) == []
+
+
+def test_nexthops_counts_the_ecmp_width_and_zero_without_a_route(
+    bgp_ctx: Context, host: FakeHost
+) -> None:
+    c = bgp_ctx.require_cluster()
+    bgp_router_answers(host, hops=2)
+    assert router.nexthops(bgp_ctx, c) == 2
+    bgp_router_answers(host, hops=0)
+    assert router.nexthops(bgp_ctx, c) == 0
+
+
+def test_bfd_down_names_the_control_planes_whose_session_is_not_up(
+    bgp_ctx: Context, host: FakeHost
+) -> None:
+    bgp_router_answers(host, bfd_up=1)
+    assert router.bfd_down(bgp_ctx, bgp_ctx.require_cluster()) == [
+        "demo-control-plane-2",
+        "demo-control-plane-3",
+    ]
+
+
+def test_synced_in_bgp_mode_compares_peers_with_the_control_planes(
+    bgp_ctx: Context, host: FakeHost
+) -> None:
+    c = bgp_ctx.require_cluster()
+    bgp_router_answers(host, established=0)  # configured is enough; sessions come up later
+    assert router.synced(bgp_ctx, c)
+    assert router.members(bgp_ctx, c)[0] == ("demo-control-plane-1", "Active")
+    one = {"peers": {"172.22.0.1": {"state": "Active"}}}
+    host.responses[VTYSH_SUMMARY] = Result(0, json.dumps(one), "")
+    assert not router.synced(bgp_ctx, c)
+
+
+def test_wait_synced_in_bgp_mode_names_peers(bgp_ctx: Context, host: FakeHost) -> None:
+    bgp_router_answers(host)
+    router.wait(bgp_ctx)
+    assert "  demo-router: VyOS up, 3 control plane peer(s) at 172.22.0.253" in host.lines
+    host.responses[VTYSH_SUMMARY] = Result(0, "{}", "")
+    with pytest.raises(
+        PhaseFailed,
+        match=r"demo-router lists nothing as peers, cluster\.yaml has demo-control-plane-1, "
+        r"demo-control-plane-2, demo-control-plane-3 "
+        r"\(podman exec demo-router vtysh -c 'show bgp summary'\)",
+    ):
+        router.wait(bgp_ctx)

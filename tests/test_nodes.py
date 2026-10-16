@@ -1,6 +1,6 @@
 import pytest
 
-from tests.fixtures import OP, SHOW_HAPROXY
+from tests.fixtures import OP, SHOW_HAPROXY, VTYSH_SUMMARY, bgp_router_answers
 from tk8s.create import nodes
 from tk8s.host import FakeHost, Result
 from tk8s.phases import Context, PhaseFailed, Runner
@@ -123,3 +123,22 @@ def test_up_is_done_when_target_nodes_and_router_are_up(ctx: Context, host: Fake
         Result(1, "starting\n", "")
     )
     assert not nodes.up_done(ctx)
+
+
+def test_up_in_bgp_mode_is_done_once_the_router_lists_every_peer(
+    bgp_ctx: Context, host: FakeHost
+) -> None:
+    bgp_router_answers(host, established=0)
+    for n in (
+        "demo-control-plane-1",
+        "demo-control-plane-2",
+        "demo-control-plane-3",
+        "demo-worker-1",
+    ):
+        host.responses[("podman", "exec", n, "systemctl", "is-system-running")] = Result(
+            0, "running\n", ""
+        )
+    host.active.add("demo.target")
+    assert nodes.up_done(bgp_ctx)
+    host.responses[VTYSH_SUMMARY] = Result(0, "{}", "")
+    assert not nodes.up_done(bgp_ctx)
