@@ -46,6 +46,7 @@ kubectl get nodes
 tkctl create cluster demo --workers 3                  # 名稱 demo，三台 worker
 tkctl create cluster ha --control-planes 3              # 三台 control plane，HA
 tkctl create cluster ha --control-planes 3 --defer-join # 額外的 control plane 建好但不加入，供 HA 練習
+tkctl create cluster ha --control-planes 3 --ha bgp     # 同樣三台，apiserver 入口改走 BGP + ECMP 的 anycast VIP
 tkctl create cluster sandbox --gvisor                   # 多一個 gvisor 的 RuntimeClass
 tkctl create cluster old --k8s 1.36.5                   # 次新版
 tkctl create cluster big --cpu 4 --memory 8G
@@ -85,8 +86,9 @@ nodes              start the nodes
   up                 start the cluster target and wait for every node and the router
 kubeadm            initialise the first control plane and join the others
   render             write the kubeadm init configuration into the state dir
+  frr                bgp mode: FRR and the VIP health timer on every control plane
   init               kubeadm init on the first control plane
-  kubeconfig         hand the host a kubeconfig that points at the router
+  kubeconfig         hand the host a kubeconfig that points at the router (proxy) or the VIP (bgp)
   join               join the other control planes and the workers
 cni                install the CNI and wait for the nodes
   install            install the CNI (cilium: kube-proxy replacement, LB-IPAM, Gateway API)
@@ -192,7 +194,7 @@ kubectl 風格，動詞在前。全部如下：
 
 ```
 tkctl create cluster [名稱] [--control-planes N] [--workers N] [--cpu N] [--memory SIZE]
-                     [--k8s 版本] [--datapath auto|netkit|veth] [--gvisor] [--defer-join]
+                     [--k8s 版本] [--datapath auto|netkit|veth] [--gvisor] [--ha proxy|bgp] [--defer-join]
                      [-f cluster.yaml] [--allow-overlap] [--dry-run]
                      [--phase P] [--skip-phases P,...] [--list-phases] [--quiet]
 tkctl delete cluster <名稱> [--yes] [--phase P] [--list-phases]
@@ -214,7 +216,7 @@ tkctl version
 幾個規則：
 
 - 名稱格式 `^[a-z][a-z0-9-]{0,15}$`，用於節點名稱與叢集 DNS 網域（`<名稱>.k8s`）。
-- `--control-planes` 要是奇數、最多 5；不論幾台，apiserver 的入口都是 `api.<名稱>.k8s:6443`，由 `.253` 的 VyOS router 服務。
+- `--control-planes` 要是奇數、最多 5；不論幾台，apiserver 的入口都是 `api.<名稱>.k8s:6443`，由 `.253` 的 VyOS router 服務。`--ha bgp` 時入口不是 router 本身而是 VIP `172.23.N.1`：每台 control plane 的 FRR 只在自己的 apiserver ready 時宣告它，router 對宣告中的 control plane 做 ECMP，整台 control plane 消失靠 BFD 約 1 秒收斂；`describe` 的 `Router:` 段列出 peers 與 next hop 數。
 - `--gvisor` 需要 veth datapath，會自動選；明確指定 `--datapath netkit` 加 `--gvisor` 會被拒絕。
 - `--memory` 接受 `4G`、`4096M`，`4Gi` 不行。
 - 已完成的叢集再 `create` 會被拒絕；`delete cluster`、`delete node` 也有 `--phase`，中途失敗再執行一次會接續。

@@ -26,13 +26,21 @@ def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str
         gateway=net.gateway,
         router_ip=net.router,
     )
+    blocks: dict[str, object]
+    if net.ha == "proxy":
+        boot, blocks = "router/tkctl-proxy.boot", {"servers": router.servers(c)}
+    else:
+        # the reject route at distance 254 loses to any BGP-learned VIP (distance 20); with no
+        # control plane announcing, the router refuses at once instead of looping the packet
+        # back to the host, whose VIP/32 route points here
+        boot = "router/tkctl-bgp.boot"
+        blocks = {
+            "neighbors": router.neighbors(c),
+            "bfd_peers": router.bfd_peers(c),
+            "vip": net.vip,
+        }
     files[state / "router" / "tkctl.boot"] = template(
-        p.home,
-        "router/tkctl.boot",
-        cluster=c.name,
-        router_ip=net.router,
-        gateway=net.gateway,
-        servers=router.servers(c),
+        p.home, boot, cluster=c.name, router_ip=net.router, gateway=net.gateway, **blocks
     )
     files[state / "router" / "scripts" / "vyos-preconfig-bootup.script"] = template(
         p.home, "router/vyos-preconfig-bootup.script", cluster=c.name
@@ -59,7 +67,7 @@ def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str
             after="" if n is cp else f"\nAfter={cp.name}.service",
             image=c.node_image,
             domain=c.domain,
-            router_ip=net.router,
+            api_ip=c.endpoint_ip,
             cni_dir=p.cni_dir,
             images_dir=p.images_dir,
             k8s=c.spec.kubernetes,
@@ -84,6 +92,12 @@ def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str
         cp_ip=cp.ip,
         pods=net.pods,
         services=net.services,
+        vip_start=""
+        if net.vip is None
+        else f"\nExecStart=ip route replace {net.vip}/32 via {net.router}",
+        vip_stop=""
+        if net.vip is None
+        else f"\nExecStop=-ip route del {net.vip}/32 via {net.router}",
     )
     return files
 

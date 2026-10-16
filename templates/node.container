@@ -10,9 +10,10 @@ HostName=$name
 Network=$cluster.network
 IP=$ip
 Environment=TZ=Asia/Taipei
-# api.<cluster>.k8s is the controlPlaneEndpoint and resolves to the router for every node (the
-# kubeadm HA model: one load balancer in front of the control planes, every client goes through it).
-AddHost=api.$domain:$router_ip
+# api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
+# mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
+# anycast VIP the control planes announce to the router (bgp mode).
+AddHost=api.$domain:$api_ip
 Volume=$cni_dir:/opt/cni/bin
 Volume=/lib/modules:/lib/modules:ro
 # Quadlet recreates the container on every start (--rm --replace). Everything the node

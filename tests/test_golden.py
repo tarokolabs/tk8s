@@ -40,6 +40,10 @@ def normalise(out: str, tmp: Path) -> str:
                 "--dry-run",
             ],
         ),
+        (
+            "bgp",
+            ["create", "cluster", "bgp", "--control-planes", "3", "--ha", "bgp", "--dry-run"],
+        ),
     ],
 )
 def test_dry_run_matches_golden(

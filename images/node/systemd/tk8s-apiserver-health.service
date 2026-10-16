@@ -1,0 +1,8 @@
+[Unit]
+Description=tk8s: keep the apiserver VIP on lo while /readyz answers ok (bgp mode)
+# the timer starts this every second; systemd's default start rate limit is 5 per 10 s
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/tk8s-apiserver-health

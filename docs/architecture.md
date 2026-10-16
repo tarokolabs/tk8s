@@ -35,7 +35,7 @@ src/tk8s/
   lifecycle.py              # get、describe、stop、start、use
   delete.py                 # delete cluster
   images.py                 # 共用 image store
-  verify.py                 # verify cluster 的 15 個檢查，一個檢查一個函式
+  verify/                   # verify cluster 的 15 個檢查，一個檢查一個函式，一個 [section] 一檔
 templates/                  # 寫到主機上的檔，與實際內容只差 $變數
 ```
 
@@ -77,11 +77,21 @@ templates/                  # 寫到主機上的檔，與實際內容只差 $變
 
 每個叢集有一個 VyOS 容器跟節點一起啟停：`<名稱>-router`，位址 `.253`。它是節點的預設閘道（連外流量經它轉給主機 bridge `.254`），也是 apiserver 的負載平衡：`load-balancing haproxy` 在 6443 接連線，對 `cluster.yaml` 裡的每一台 control plane 做 TCP 檢查、round-robin、TLS passthrough。`controlPlaneEndpoint` 與憑證都是 `api.<名稱>.k8s:6443`：每個節點把這個名字指到 `.253`（kubelet、Cilium 都走它），主機的 kubeconfig 直接寫 `.253`。這是 kubeadm 文件所畫的 HA 拓樸：一個 load balancer 在 control plane 前面，所有客戶端都連它。
 
-tkctl 渲染的是 `tkctl.boot`；VyOS 開機前的 `vyos-preconfig-bootup.script` 把它複製成 `config.boot` 並補上 VyOS 自己產生的版本註腳，沒有這行 VyOS 會對檔案跑一輪 migration（加區塊、改寫檔案）。新增或刪除 control plane 時 tkctl 重新產生 `tkctl.boot`，以 `vbash` 做同一件事再 `load`、`commit`，VyOS 套用差異，既有連線不中斷（也因此 backend 轉 DOWN 時既有連線不會像 HAProxy 的 `shutdown-sessions` 那樣被切斷，要等 client 自己發現）；VyOS 的 `commit` 結束碼不可靠（沒有變更回 1、失敗反而回 0），所以 tkctl 等到 `show haproxy` 列出的 backend 正好是 cluster.yaml 的 control plane 才算完成，node add/delete 重跑時也以此判斷 router 是否已更新。`sudo podman exec -it <名稱>-router vbash` 進去就是 VyOS 的 CLI：`show configuration`、`show haproxy`、`show ip route`。
+tkctl 渲染的是 `tkctl.boot`；VyOS 開機前的 `vyos-preconfig-bootup.script` 把它複製成 `config.boot` 並補上 VyOS 自己產生的版本註腳，沒有這行 VyOS 會對檔案跑一輪 migration（加區塊、改寫檔案）。新增或刪除 control plane 時 tkctl 重新產生 `tkctl.boot`，以 `vbash` 做同一件事再 `load`、`commit`，VyOS 套用差異，既有連線不中斷（也因此 backend 轉 DOWN 時既有連線不會像 HAProxy 的 `shutdown-sessions` 那樣被切斷，要等 client 自己發現）；VyOS 的 `commit` 結束碼不可靠（沒有變更回 1、失敗反而回 0），所以 tkctl 等到 `show haproxy` 列出的 backend 正好是 cluster.yaml 的 control plane 才算完成，node add/delete 重跑時也以此判斷 router 是否已更新。刪除 control plane 時，`kubeadm reset` 讓那台的 apiserver 消失後 router 還會把新連線送過去幾秒（haproxy 的 check 約 6 秒才標 DOWN；bgp 模式要等 health timer 撤回），所以 `delete node` 先等 router 不再列它（`show haproxy` 的 backend 離開 UP，或 VIP 路由的 next hop 少了它），再 `kubectl delete node`。`sudo podman exec -it <名稱>-router vbash` 進去就是 VyOS 的 CLI：`show configuration`、`show haproxy`、`show ip route`。
 
 **為什麼是 TCP 檢查**：VyOS 的 haproxy 整合沒有 `check-ssl`，設 `ssl` 會把流量也包進 TLS、破壞 passthrough，`http-check` 又只能明文，所以打 `/readyz` 的健康檢查做不到。應用層的健康檢查本來就是負載平衡器而不是 router 的功能，雲端給 apiserver 的 NLB 也是 TCP 檢查。代價是 apiserver 起來但還沒 ready 的那幾秒流量仍會送過去，client 的重試會蓋掉；CP 停掉約 6 秒才標 DOWN。
 
 跟 VIP 的差別：沒有 ARP、沒有 lease、沒有 static pod；單 control plane 的叢集也走同一條路，所以 `verify` 的 `[router]` 每個叢集都會檢查。pod 內不需要也無法解析 `api.<名稱>.k8s`（叢集內的 CoreDNS 擁有這個網域）：pod 走 `kubernetes` Service 的 ClusterIP。
+
+### bgp 模式（`--ha bgp`）
+
+同一個 VyOS 容器，換一份 `tkctl.boot`：沒有 haproxy，`protocols bgp`（AS 65000，每台 control plane 一個 eBGP neighbor，AS 65001，`maximum-paths ebgp 8`）加 `protocols bfd`（300 ms × 3）。`api.<名稱>.k8s` 解析到 VIP `172.23.N.1`，刻意放在另一個 /16：在節點網段裡的位址節點會直接 ARP，就看不到路由。主機的 `<名稱>-routes.service` 多一條 `VIP/32 via .253`，kubeconfig 直接寫 VIP。
+
+每台 control plane 裡跑 node image 內建的 FRR（`kubeadm/frr` 寫 `/etc/frr/frr.conf`、`/etc/tk8s/vip`，啟用 `frr.service` 與 `tk8s-apiserver-health.timer`）。`/etc/frr/frr.conf` 由 tkctl 從 `templates/node/frr.conf` 算出來，每次 `kubeadm/frr` 都比對整份內容、不同就重寫，所以在節點裡手改會在下一次 create、add node 或 join node 時被蓋回去。timer 每秒打本機 `/readyz`：連續 3 次 ok 才把 VIP 放到 `lo`，連續 2 次不是 ok 才拿掉，一次慢回應或 refused 不動它（每次變動都會讓 router 的 ECMP 重算 hash）；探測失敗、撤回、宣告都寫進節點的 journal（`journalctl -u tk8s-apiserver-health`），級距夠不夠寬看那裡；FRR 的 `redistribute connected route-map vip-only` 加 `neighbor … route-map vip-only out` 只宣告那個 /32，所以宣告與撤回就是 `ip addr show lo` 的一個位址。router 對所有宣告中的 control plane 做 ECMP（`show ip route 172.23.N.1`），每台 control plane 連 VIP 連到的是自己（lo 的本機路由優先，anycast 的正常行為）。
+
+兩種故障、兩種收斂：apiserver 掛但節點活著，timer 連續兩次探測失敗後撤回，約 2 秒（探測掛住不回應時約 3 秒）；整台 control plane 無聲消失，BFD 約 1 秒判定鄰居死亡（只靠 BGP timers 3/9 要 9 秒）；`podman stop` 這種優雅停止 FRR 送 cease，0.3 秒撤回。憑證 SAN 同時含 `.253` 與 VIP。`verify` 的 `[router]` 在這個模式檢查每台已加入的 control plane Established、ECMP 的 next hop 數（也就是正在宣告 VIP 的 control plane 數）等於已加入的 control plane 數、BFD 全 up。router 另有一條 `reject` 的 static route 指向 VIP（distance 254，BGP 的 20 會壓過它）：沒有任何 control plane 宣告時，client 立刻收到 unreachable，而不是封包在 router 與主機之間繞到 TTL 耗盡。
+
+一個 ECMP 固有的代價：control plane 加入、離開或撤回時 next hop 群組重算 hash，既有連到 VIP 的連線有一部分會被送到另一台、收到 RST 重連；kubectl 與各元件的 client 會自己重連，但 bgp 模式不像 proxy 模式那樣保證既有連線不受影響。
 
 ## 主機的 sysctl
 

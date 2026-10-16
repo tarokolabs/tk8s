@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 Role = Literal["control-plane", "worker"]
 NODE_NAME = r"^[a-z][a-z0-9-]*$"
@@ -36,7 +36,8 @@ class NodeGroup(Strict):
 class UserNetwork(Strict):
     nodes: IPv4Network | None = None
     router: IPv4Address | None = None
-    ha: Literal["proxy"] | None = None
+    ha: Literal["proxy", "bgp"] | None = None
+    vip: IPv4Address | None = None
 
 
 class UserSpec(Strict):
@@ -85,10 +86,19 @@ class Network(Strict):
     nodes: IPv4Network
     gateway: IPv4Address
     router: IPv4Address
-    ha: Literal["proxy"] = "proxy"
+    ha: Literal["proxy", "bgp"] = "proxy"
+    vip: IPv4Address | None = None  # bgp mode only: the anycast apiserver address, 172.23.N.1
     lb_range: str
     pods: IPv4Network
     services: IPv4Network
+
+    @model_validator(mode="after")
+    def _vip_follows_ha(self) -> Network:
+        if (self.ha == "bgp") != (self.vip is not None):
+            raise ValueError(
+                "spec.network.vip is required with ha: bgp and not allowed with ha: proxy"
+            )
+        return self
 
 
 class Spec(Strict):
@@ -121,6 +131,12 @@ class Cluster(Strict):
     @property
     def domain(self) -> str:
         return f"{self.name}.k8s"
+
+    @property
+    def endpoint_ip(self) -> IPv4Address:
+        """What api.<cluster>.k8s resolves to: the router in proxy mode, the VIP in bgp mode."""
+        net = self.spec.network
+        return net.vip if net.vip is not None else net.router
 
     @property
     def control_planes(self) -> list[Node]:

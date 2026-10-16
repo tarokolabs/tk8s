@@ -142,3 +142,60 @@ def test_router_unit_counts_systemd_halt_as_success(ctx: Context) -> None:
     files = units.render(ctx, ctx.require_cluster())
     unit = files[ctx.paths.unit_dir / "demo" / "demo-router.container"]
     assert "SuccessExitStatus=130" in unit
+
+
+def test_bgp_router_config_has_bgp_and_bfd_and_no_haproxy(bgp_ctx: Context) -> None:
+    boot = units.render(bgp_ctx)[bgp_ctx.state_dir / "router" / "tkctl.boot"]
+    assert "load-balancing" not in boot
+    assert "protocols {\n    bfd {\n        peer 172.22.0.1 {\n" in boot
+    assert (
+        "    bgp {\n"
+        "        address-family {\n"
+        "            ipv4-unicast {\n"
+        "                maximum-paths {\n"
+        '                    ebgp "8"\n'
+        "                }\n"
+        "            }\n"
+        "        }\n"
+        "        neighbor 172.22.0.1 {\n"
+    ) in boot
+    assert '        system-as "65000"\n    }\n    static {\n' in boot
+    assert 'host-name "demo-router"' in boot and 'address "172.22.0.253/24"' in boot
+
+
+def test_proxy_router_config_is_unchanged_by_the_bgp_template(ctx: Context) -> None:
+    boot = units.render(ctx)[ctx.state_dir / "router" / "tkctl.boot"]
+    assert "load-balancing {" in boot and "protocols {\n    static {" in boot
+    assert "bgp" not in boot and "bfd" not in boot
+
+
+def test_bgp_nodes_resolve_the_api_name_to_the_vip(bgp_ctx: Context) -> None:
+    files = units.render(bgp_ctx)
+    for name in ("demo-control-plane-1", "demo-worker-1"):
+        unit = files[bgp_ctx.paths.unit_dir / "demo" / f"{name}.container"]
+        assert "AddHost=api.demo.k8s:172.23.0.1" in unit
+        assert "172.22.0.253" not in unit.split("AddHost=")[1].split("\n")[0]
+
+
+def test_bgp_host_routes_reach_the_vip_through_the_router(bgp_ctx: Context) -> None:
+    unit = units.render(bgp_ctx)[bgp_ctx.paths.systemd_dir / "demo-routes.service"]
+    assert "ExecStart=ip route replace 172.23.0.1/32 via 172.22.0.253\n" in unit
+    assert "ExecStop=-ip route del 172.23.0.1/32 via 172.22.0.253\n" in unit
+
+
+def test_proxy_host_routes_have_no_vip_line(ctx: Context) -> None:
+    unit = units.render(ctx)[ctx.paths.systemd_dir / "demo-routes.service"]
+    assert "172.23." not in unit and unit.count("ExecStart=") == 2 and unit.count("ExecStop=") == 2
+
+
+def test_bgp_router_rejects_the_vip_when_no_control_plane_announces_it(bgp_ctx: Context) -> None:
+    """Without this the router's default route sends a VIP packet back to the host, whose VIP/32
+    route sends it back to the router: a TTL loop and a hanging client instead of a refusal."""
+    boot = units.render(bgp_ctx)[bgp_ctx.state_dir / "router" / "tkctl.boot"]
+    assert (
+        "        route 172.23.0.1/32 {\n"
+        "            reject {\n"
+        '                distance "254"\n'
+        "            }\n"
+        "        }\n"
+    ) in boot

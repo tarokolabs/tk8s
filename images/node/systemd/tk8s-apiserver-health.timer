@@ -1,0 +1,10 @@
+[Unit]
+Description=tk8s: check the local apiserver every second (bgp mode)
+
+[Timer]
+OnBootSec=5
+OnUnitActiveSec=1
+AccuracySec=100ms
+
+[Install]
+WantedBy=timers.target

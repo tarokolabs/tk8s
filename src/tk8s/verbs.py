@@ -43,7 +43,8 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
         )
     if a.gvisor and a.datapath is None:
         a.datapath = "veth"
-    topo = any(f in raw for f in ("--control-planes", "--workers", "--cpu", "--memory"))
+    flags = ("--control-planes", "--workers", "--cpu", "--memory", "--ha")
+    topo = any(a == f or a.startswith(f + "=") for a in raw for f in flags)  # --ha bgp, --ha=bgp
     user = user_cluster_from_file(a, topo) if a.file else user_cluster_from_flags(a)
     ctx = make_context(dry_run=a.dry_run, quiet=a.quiet)
     name = user.metadata.name

@@ -78,6 +78,10 @@ def test_flags(capsys: pytest.CaptureFixture[str]) -> None:
     assert "gvisor: true" in out and "datapath: veth" in out
     rc, out = run(capsys, "create", "cluster", "demo", "--memory", "4096M", "--dry-run")
     assert rc == 0 and "memory: 4096m" in out
+    rc, out = run(capsys, "create", "cluster", "demo", "--ha", "bgp", "--dry-run")
+    assert rc == 0 and "ha: bgp" in out and "vip: 172.23." in out
+    rc, out = run(capsys, "create", "cluster", "demo", "--dry-run")
+    assert "ha: proxy" in out and "vip:" not in out
 
 
 @pytest.mark.parametrize(
@@ -105,6 +109,14 @@ def test_flags(capsys: pytest.CaptureFixture[str]) -> None:
             "--control-planes must be odd",
         ),
         (["create", "cluster", "demo", "--control-planes", "7", "--dry-run"], "at most 5"),
+        (
+            ["create", "cluster", "-f", "x.yaml", "--ha", "bgp", "--dry-run"],
+            "-f cannot be combined with --control-planes/--workers/--cpu/--memory/--ha",
+        ),
+        (
+            ["create", "cluster", "-f", "x.yaml", "--ha=bgp", "--dry-run"],
+            "-f cannot be combined with --control-planes/--workers/--cpu/--memory/--ha",
+        ),
         (
             ["create", "cluster", "demo", "--k8s", "1.36", "--dry-run"],
             "--k8s must look like 1.37.0",
@@ -312,6 +324,7 @@ def test_create_runs_every_phase_and_marks_the_cluster_ready(
         "nodes/cni-plugins",
         "nodes/up",
         "kubeadm/render",
+        "kubeadm/frr",
         "kubeadm/init",
         "kubeadm/kubeconfig",
         "kubeadm/join",

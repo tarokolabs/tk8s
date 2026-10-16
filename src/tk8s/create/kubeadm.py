@@ -10,6 +10,7 @@ from pathlib import Path
 from .. import model
 from ..phases import Context, Phase, PhaseFailed
 from ..render import template
+from . import frr, router
 
 KEY_RE = re.compile(r"--certificate-key ([0-9a-f]+)")
 
@@ -22,7 +23,10 @@ def kubectl_env(ctx: Context) -> dict[str, str]:
 def render_init(ctx: Context) -> str:
     c = ctx.require_cluster()
     cp, net = c.first_control_plane, c.spec.network
-    sans = [f"api.{c.domain}", str(net.router), *(str(n.ip) for n in c.control_planes)]
+    sans = [f"api.{c.domain}", str(net.router)]
+    if net.vip is not None:
+        sans.append(str(net.vip))
+    sans += [str(n.ip) for n in c.control_planes]
     return template(
         ctx.paths.home,
         "init-config.yaml",
@@ -71,10 +75,11 @@ def save_certificate_key(ctx: Context, key: str) -> None:
 
 
 def wait_router_ready(ctx: Context) -> None:
-    """kubeadm talked to the apiserver through the router; make sure the router reports a healthy
-    control plane before anything else uses the endpoint."""
+    """kubeadm talked to the apiserver through api.<cluster>.k8s; make sure the endpoint (the
+    router in proxy mode, the VIP the router routes in bgp mode) answers before anything else
+    uses it."""
     c = ctx.require_cluster()
-    endpoint = c.spec.network.router
+    endpoint = c.endpoint_ip
     for i in range(1, 31):
         r = ctx.host.run(
             ["curl", "-sk", "--max-time", "3", f"https://{endpoint}:6443/readyz"],
@@ -85,8 +90,8 @@ def wait_router_ready(ctx: Context) -> None:
             return
         if i == 30:
             raise PhaseFailed(
-                f"the apiserver router at {endpoint} has no healthy control plane after 60 s "
-                f"(podman exec {c.name}-router /opt/vyatta/bin/vyatta-op-cmd-wrapper show haproxy)"
+                f"the apiserver at {endpoint} (via {c.name}-router) answered no readyz within "
+                f"60 s (podman exec {c.name}-router {router.show(c)})"
             )
         time.sleep(ctx.options.poll)
 
@@ -187,7 +192,8 @@ def kubeconfig_done(ctx: Context) -> bool:
 
 
 def kubeconfig_run(ctx: Context) -> None:
-    """The host cannot resolve api.<cluster>.k8s; its kubeconfig points straight at the router."""
+    """The host cannot resolve api.<cluster>.k8s; its kubeconfig points straight at what the name
+    means: the router, or the VIP in bgp mode (routes.service gives the host a route to it)."""
     c = ctx.require_cluster()
     cp = c.first_control_plane.name
     r = ctx.host.run(
@@ -199,7 +205,7 @@ def kubeconfig_run(ctx: Context) -> None:
     if r.returncode != 0 or not r.stdout.strip():
         raise PhaseFailed(f"could not read /etc/kubernetes/admin.conf from {cp}")
     text = r.stdout.replace(
-        f"server: https://api.{c.domain}:6443", f"server: https://{c.spec.network.router}:6443"
+        f"server: https://api.{c.domain}:6443", f"server: https://{c.endpoint_ip}:6443"
     )
     ctx.host.write(ctx.state_dir / "kubeconfig", text, mode=0o600)
     # On a resume init is already done and skipped: this is where the apiserver gets waited for.
@@ -208,7 +214,7 @@ def kubeconfig_run(ctx: Context) -> None:
 
 KUBECONFIG = Phase(
     "kubeconfig",
-    "hand the host a kubeconfig that points at the router",
+    "hand the host a kubeconfig that points at the router (proxy) or the VIP (bgp)",
     kubeconfig_done,
     kubeconfig_run,
 )
@@ -320,5 +326,5 @@ PHASE = Phase(
     "initialise the first control plane and join the others",
     None,
     lambda ctx: None,
-    children=(RENDER, INIT, KUBECONFIG, JOIN),
+    children=(RENDER, frr.PHASE, INIT, KUBECONFIG, JOIN),
 )

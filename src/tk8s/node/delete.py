@@ -2,6 +2,8 @@
 without it, take it out of cluster.yaml. Like delete cluster, every phase's done() is "that
 part is already gone", so a delete that stopped halfway is finished by running it again."""
 
+import time
+
 from .. import model
 from ..create import kubeadm, router, units
 from ..create.kubeadm import kubectl_env
@@ -13,7 +15,7 @@ from ..delete import (
     volume_exists,
 )
 from ..lifecycle import ClusterError, save_cluster
-from ..phases import Context, Phase
+from ..phases import Context, Phase, PhaseFailed
 from .common import find, require_node, unit_file, without_node
 
 
@@ -65,9 +67,27 @@ def drain_run(ctx: Context) -> None:
     ctx.host.run(
         ["podman", "exec", n, "kubeadm", "reset", "-f"], sudo=True, capture=True, check=False
     )
-    # A control plane's apiserver just went away; the router keeps routing to it for seconds.
+    node = find(ctx.require_cluster(), n)
+    if node is not None and node.role == "control-plane":
+        _wait_router_forgot(ctx, node)
     kubeadm.wait_router_ready(ctx)
     ctx.host.run(["kubectl", "delete", "node", n], env=kubectl_env(ctx), capture=True)
+
+
+def _wait_router_forgot(ctx: Context, n: model.Node) -> None:
+    """kubeadm reset took this control plane's apiserver down, but the router keeps sending it
+    connections for a few seconds (haproxy's check in proxy mode, the health timer's withdrawal
+    in bgp mode); a kubectl delete node in that window can land on the dead one."""
+    c = ctx.require_cluster()
+    for i in range(1, 16):
+        if not router.routes_to(ctx, c, n):
+            return
+        if i == 15:
+            raise PhaseFailed(
+                f"{c.name}-router still sends apiserver connections to {n.name} after 30 s "
+                f"(podman exec {c.name}-router {router.show_path(c)})"
+            )
+        time.sleep(ctx.options.poll)
 
 
 DRAIN = Phase(

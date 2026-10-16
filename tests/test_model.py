@@ -144,7 +144,20 @@ def test_network_ha_defaults_to_proxy_and_accepts_only_proxy_for_now() -> None:
     c = model.load_text(GOOD.replace("    ha: proxy\n", ""))
     assert c.spec.network.ha == "proxy"
     with pytest.raises(model.ClusterFileError, match="ha"):
-        model.load_text(GOOD.replace("ha: proxy", "ha: bgp"))
+        model.load_text(GOOD.replace("ha: proxy", "ha: anycast"))
+
+
+def test_ha_and_vip_go_together() -> None:
+    """bgp without a VIP, or proxy with one, is a malformed file: later phases must never guess."""
+    bgp = GOOD.replace("    ha: proxy\n", "    ha: bgp\n    vip: 172.23.3.1\n")
+    c = model.load_text(bgp)
+    assert c.spec.network.ha == "bgp" and str(c.spec.network.vip) == "172.23.3.1"
+    assert str(c.endpoint_ip) == "172.23.3.1"
+    assert str(model.load_text(GOOD).endpoint_ip) == "172.22.3.253"
+    with pytest.raises(model.ClusterFileError, match="vip"):
+        model.load_text(GOOD.replace("    ha: proxy\n", "    ha: bgp\n"))
+    with pytest.raises(model.ClusterFileError, match="vip"):
+        model.load_text(GOOD.replace("    ha: proxy\n", "    ha: proxy\n    vip: 172.23.3.1\n"))
 
 
 def test_node_request_is_frozen_and_defaults_to_join() -> None:
