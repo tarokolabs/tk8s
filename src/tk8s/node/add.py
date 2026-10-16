@@ -40,7 +40,7 @@ PLAN = Phase(
 
 def start_done(ctx: Context) -> bool:
     n = require_node(ctx)
-    if not ctx.host.is_active(f"{n}.service"):
+    if not ctx.host.is_active(f"{n}.service") or not router.synced(ctx, ctx.require_cluster()):
         return False
     return nodes.systemd_state(ctx, n) in ("running", "degraded")
 
@@ -50,7 +50,7 @@ def start_run(ctx: Context) -> None:
     starts."""
     n = require_node(ctx)
     ctx.host.run(["systemctl", "daemon-reload"], sudo=True)
-    router.reload(ctx)
+    router.reload(ctx, ctx.require_cluster())
     ctx.host.run(["systemctl", "start", f"{n}.service"], sudo=True)
     nodes.wait_node(ctx, n)
 

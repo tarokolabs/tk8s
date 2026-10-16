@@ -305,19 +305,23 @@ def check_router(r: Report) -> None:
     c = r.ctx.require_cluster()
     endpoint = c.spec.network.router
     joined = sum(1 for n in c.control_planes if n.join)
-    up = sum(1 for _, status in router.backends(r.ctx) if status.startswith("UP"))  # "UP 1/2" too
+    listed = router.backends(r.ctx)
+    up = sum(1 for _, status in listed if status.startswith("UP"))  # "UP 1/2" too
+    stale = {n for n, _ in listed} != {n.name for n in c.control_planes}
     ready = r.ctx.host.run(
         ["curl", "-sk", "--max-time", "5", f"https://{endpoint}:6443/readyz"],
         capture=True,
         check=False,
     ).stdout[:40]
-    if ready == "ok" and up == joined:
+    if ready == "ok" and up == joined and not stale:
         r.ok(f"apiserver router {endpoint} healthy ({up}/{joined} control planes UP)")
     else:
+        names = ", ".join(n for n, _ in listed) or "nothing"
         r.ng(
             f"apiserver router {endpoint}",
-            f"readyz='{ready}', {up} of {joined} control planes UP "
-            f"(podman exec {c.name}-router {router.OP} show haproxy)",
+            f"readyz='{ready}', {up} of {joined} control planes UP"
+            + (f", backends {names}" if stale else "")
+            + f" (podman exec {c.name}-router {router.OP} show haproxy)",
         )
 
 

@@ -103,7 +103,9 @@ def test_router_that_never_lists_the_control_planes_fails_by_name(
     host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(
         0, SHOW_HAPROXY.split("api                   demo-control-plane-1")[0], ""
     )
-    with pytest.raises(PhaseFailed, match="demo-router lists 0 of 1 control planes within 60 s"):
+    with pytest.raises(
+        PhaseFailed, match=r"demo-router lists nothing as backends, cluster\.yaml has demo-control"
+    ):
         Runner([nodes.PHASE], only="nodes/up").run(ctx)
 
 

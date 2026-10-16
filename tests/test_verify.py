@@ -153,6 +153,21 @@ def test_router_rising_counts_as_up_and_down_fails(ctx: Context, host: FakeHost)
     ) in host.lines
 
 
+def test_router_check_fails_on_a_backend_cluster_yaml_does_not_have(
+    ctx: Context, host: FakeHost
+) -> None:
+    """A deleted control plane the router still lists is DOWN, so counting UP alone passes it."""
+    healthy(ctx, host)
+    stale = SHOW_HAPROXY + "api                   demo-control-plane-9  DOWN       0 ms      4s\n"
+    host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(0, stale, "")
+    verify.run(ctx)
+    assert (
+        "FAIL  apiserver router 172.22.0.253 — readyz='ok', 1 of 1 control planes UP, "
+        "backends demo-control-plane-1, demo-control-plane-9 "
+        f"(podman exec demo-router {OP} show haproxy)"
+    ) in host.lines
+
+
 def test_only_runs_one_check(ctx: Context, host: FakeHost) -> None:
     healthy(ctx, host)
     assert verify.run(ctx, only="router") == 0

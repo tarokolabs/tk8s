@@ -116,7 +116,8 @@ def trimmed(ctx: Context) -> model.Cluster:
 
 
 def units_done(ctx: Context) -> bool:
-    return not ctx.host.exists(unit_file(ctx)) and units.done(ctx, trimmed(ctx))
+    c = trimmed(ctx)
+    return not ctx.host.exists(unit_file(ctx)) and units.done(ctx, c) and router.synced(ctx, c)
 
 
 def units_run(ctx: Context) -> None:
@@ -129,7 +130,7 @@ def units_run(ctx: Context) -> None:
     ctx.host.run(
         ["systemctl", "reset-failed", f"{n}.service"], sudo=True, capture=True, check=False
     )
-    router.reload(ctx)
+    router.reload(ctx, trimmed(ctx))
 
 
 UNITS = Phase(

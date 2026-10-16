@@ -57,33 +57,48 @@ def backends(ctx: Context) -> list[tuple[str, str]]:
     ]
 
 
-def wait(ctx: Context) -> None:
-    """Booted, then every control plane listed as a backend: the config was good. The backends
-    stay DOWN until kubeadm brings an apiserver up."""
-    c = ctx.require_cluster()
+def synced(ctx: Context, c: model.Cluster) -> bool:
+    """The router's backend list is exactly the cluster's control planes, by name."""
+    return {n for n, _ in backends(ctx)} == {n.name for n in c.control_planes}
+
+
+def wait_booted(ctx: Context) -> None:
+    """The boot-time config load holds VyOS for a few seconds after start; a load alongside it
+    fails ("Failed to generate committed config") with exit status 0."""
     for i in range(1, 31):
         if booted(ctx):
-            break
+            return
         if i == 30:
             raise PhaseFailed(
                 f"{name(ctx)} did not finish booting within 60 s (podman logs {name(ctx)}; "
                 f"podman exec {name(ctx)} cat /tmp/vyos-config-status)"
             )
         time.sleep(ctx.options.poll)
-    want = len(c.control_planes)
+
+
+def wait_synced(ctx: Context, c: model.Cluster) -> None:
+    """Every control plane listed as a backend, no other: the config took. The backends stay
+    DOWN until kubeadm brings an apiserver up."""
     for i in range(1, 31):
-        got = len(backends(ctx))
-        if got >= want:
+        if synced(ctx, c):
+            got = len(c.control_planes)
             ctx.say(
                 f"  {name(ctx)}: VyOS up, {got} control plane backend(s) at {c.spec.network.router}"
             )
             return
         if i == 30:
+            listed = ", ".join(n for n, _ in backends(ctx)) or "nothing"
+            want = ", ".join(n.name for n in c.control_planes)
             raise PhaseFailed(
-                f"{name(ctx)} lists {got} of {want} control planes within 60 s "
+                f"{name(ctx)} lists {listed} as backends, cluster.yaml has {want} "
                 f"(podman exec {name(ctx)} {OP} show haproxy)"
             )
         time.sleep(ctx.options.poll)
+
+
+def wait(ctx: Context) -> None:
+    wait_booted(ctx)
+    wait_synced(ctx, ctx.require_cluster())
 
 
 RELOAD = (
@@ -92,29 +107,28 @@ RELOAD = (
     "source /opt/vyatta/etc/functions/script-template\n"
     "configure\n"
     "load /opt/vyatta/etc/config/config.boot\n"
+    "loaded=$?\n"
     "commit\n"
     "exit\n"
+    "builtin exit $loaded\n"
 )
 
 
-def reload(ctx: Context) -> None:
-    """tkctl.boot was re-rendered (a control plane came or went); it becomes config.boot with
+def reload(ctx: Context, c: model.Cluster) -> None:
+    """tkctl.boot was re-rendered (a control plane came or went): it becomes config.boot with
     VyOS's version footer (so nothing is migrated), then VyOS loads it and commits the difference
-    without dropping connections. The boot-time commit holds a lock for a few seconds after
-    start: retry through it."""
-    for attempt in range(1, 4):
-        r = ctx.host.run(
-            ["podman", "exec", "-i", name(ctx), "/bin/vbash", "-s"],
-            sudo=True,
-            input=RELOAD,
-            capture=True,
-            check=False,
-        )
-        out = r.stdout + r.stderr
-        if r.returncode != 0:
-            raise PhaseFailed(f"{name(ctx)} did not accept config.boot: {out.strip()[-300:]}")
-        if "temporarily locked" not in out:
-            return
-        if attempt == 3:
-            raise PhaseFailed(f"{name(ctx)} kept the configuration locked through three attempts")
-        time.sleep(ctx.options.poll)
+    without dropping connections. `exit` in script-template only tears the session down, so the
+    script carries load's status out itself; commit's is useless both ways (1 when nothing
+    changed, 0 when it failed), so the backend list is the proof the change took."""
+    wait_booted(ctx)
+    r = ctx.host.run(
+        ["podman", "exec", "-i", name(ctx), "/bin/vbash", "-s"],
+        sudo=True,
+        input=RELOAD,
+        capture=True,
+        check=False,
+    )
+    out = r.stdout + r.stderr
+    if r.returncode != 0 or "Commit failed" in out:
+        raise PhaseFailed(f"{name(ctx)} did not accept config.boot: {out.strip()[-300:]}")
+    wait_synced(ctx, c)

@@ -3,8 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.fixtures import HOME, ready_host
+from tests.fixtures import HOME, OP, SHOW_HAPROXY, ready_host
 from tk8s import lifecycle, model, versions
+from tk8s.create import units
 from tk8s.delete import node_volumes
 from tk8s.host import FakeHost, Result
 from tk8s.node import add as node_add
@@ -185,6 +186,20 @@ def test_add_worker_runs_plan_units_start_addons_join_in_order(tmp_path: Path) -
     assert "  demo-worker-3 Ready (worker)" in host.lines
 
 
+def test_add_start_is_not_done_until_the_router_lists_the_new_control_plane(
+    tmp_path: Path,
+) -> None:
+    ctx, host = node_ctx(tmp_path)
+    new_node_answers(host, "demo-control-plane-2", ready_after=1)
+    ctx.request = model.NodeRequest(role="control-plane")
+    node_add.plan_run(ctx)
+    host.active.add("demo-control-plane-2.service")
+    assert not node_add.start_done(ctx)
+    two = SHOW_HAPROXY + "api                   demo-control-plane-2  DOWN       0 ms         4s\n"
+    host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(0, two, "")
+    assert node_add.start_done(ctx)
+
+
 def test_add_control_plane_uploads_a_fresh_certificate_key(tmp_path: Path) -> None:
     ctx, host = node_ctx(tmp_path)
     new_node_answers(host, "demo-control-plane-2", ready_after=1)  # ready runs once, and untaints
@@ -192,6 +207,8 @@ def test_add_control_plane_uploads_a_fresh_certificate_key(tmp_path: Path) -> No
         ("podman", "exec", "demo-control-plane-1", "kubeadm", "init", "phase", "upload-certs")
     ] = Result(0, "[upload-certs] Using certificate key:\nfeedfacefeedface\n", "")
     ctx.request = model.NodeRequest(role="control-plane", cpu=4)
+    two = SHOW_HAPROXY + "api                   demo-control-plane-2  DOWN       0 ms         4s\n"
+    host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(0, two, "")
     Runner([node_add.add_phase(join=True)], record=False).run(ctx)
     join = next(
         x for x in argvs(host) if x[:5] == ["podman", "exec", "demo-control-plane-2", "bash", "-c"]
@@ -393,6 +410,32 @@ def test_delete_control_plane_waits_for_the_router_before_deleting_the_node(tmp_
     gone = a.index(["kubectl", "delete", "node", "demo-control-plane-2"])
     polls = [i for i, x in enumerate(a) if x[:4] == ["curl", "-sk", "--max-time", "3"]]
     assert len(polls) == 3 and reset < polls[0] and polls[-1] < gone
+
+
+def test_delete_units_is_not_done_while_the_router_still_lists_the_control_plane(
+    tmp_path: Path,
+) -> None:
+    """A rerun after a failed reload must reload again, not leave VyOS with a stale backend."""
+    ctx, host = node_ctx(tmp_path)
+    ctx.cluster = node_common.with_node(
+        ctx.require_cluster(),
+        model.Node(
+            role="control-plane",
+            name="demo-control-plane-2",
+            ip=IPv4Address("172.22.0.4"),
+            cpu=2,
+            memory="4g",
+        ),
+    )
+    ctx.node = "demo-control-plane-2"
+    units.run(ctx, node_delete.trimmed(ctx))  # the target and tkctl.boot without it, unit gone
+    two = SHOW_HAPROXY + "api                   demo-control-plane-2  DOWN       0 ms         4s\n"
+    host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(0, two, "")
+    assert not node_delete.units_done(ctx)
+    host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(
+        0, SHOW_HAPROXY, ""
+    )
+    assert node_delete.units_done(ctx)
 
 
 def test_delete_node_refuses_to_guess_when_the_apiserver_is_unreachable(tmp_path: Path) -> None:
