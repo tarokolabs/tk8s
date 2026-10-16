@@ -12,6 +12,10 @@ def test_recipe_takes_the_rootfs_out_of_the_pinned_iso() -> None:
     assert "vyos/vyos-nightly-build/releases/download/${VYOS}-rolling/" in RECIPE
     assert "sha256sum -c" in RECIPE
     assert "live/filesystem.squashfs" in RECIPE and "unsquashfs" in RECIPE
+    # a build container has no mknod: the /dev nodes in the squashfs cannot be created and do
+    # not matter (podman mounts /dev); unsquashfs must go on and still exit 0
+    assert "-ignore-errors -no-exit-code" in RECIPE
+    assert "test -x /rootfs/sbin/init" in RECIPE
     assert "FROM scratch" in RECIPE and "COPY --from=" in RECIPE
 
 
