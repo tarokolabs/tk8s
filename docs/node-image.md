@@ -7,7 +7,7 @@
 - **systemd** 當 PID 1（Podman 看到 `/sbin/init` 自動啟用 systemd 模式），加上 dbus、iptables、nftables、conntrack 這些 kubeadm 與 kubelet 需要的作業系統工具，以及 nano、vim、ping、less、jq、tcpdump、strace。
 - **CRI-O** 來自官方的 static bundle（`storage.googleapis.com/cri-o/artifacts/cri-o.amd64.<版本>.tar.gz`），版本由 `versions.yaml` 的 `crio` 表依 K8s minor 決定，下載後比對 `.sha256sum`。crun、conmon、runc 都在 bundle 裡。
 - **kubeadm、kubelet、kubectl** 來自 `dl.k8s.io/release/v<版本>/bin/linux/amd64/`，各自比對 `.sha256`。kubelet 的 unit 與 kubeadm 的 drop-in 是 kubeadm 文件的標準內容，`--runtime-cgroups` 指向 `crio.service`。
-- **FRR**（Debian 的 `frr` 套件，10.x）與 `tk8s-apiserver-health.timer`：bgp 模式的 control plane 才啟用（`tkctl` 在 `kubeadm/frr` 寫入 `/etc/frr/frr.conf`、`/etc/tk8s/vip` 並 enable），image 裡兩者都是 disabled，worker 與 proxy 叢集不會碰到。timer 每 2 秒打本機 `/readyz`，ok 就把 VIP 放到 `lo`，否則拿掉；FRR 宣告的就是 lo 上的位址。
+- **FRR**（Debian 的 `frr` 套件，10.x）與 `tk8s-apiserver-health.timer`：bgp 模式的 control plane 才啟用（`tkctl` 在 `kubeadm/frr` 寫入 `/etc/frr/frr.conf`、`/etc/tk8s/vip` 並 enable），image 裡兩者都是 disabled，worker 與 proxy 叢集不會碰到。timer 每秒打本機 `/readyz`，連續 3 次 ok 才把 VIP 放到 `lo`、連續 2 次失敗才拿掉；FRR 宣告的就是 lo 上的位址。
 - **不包含**：containerd、預載的容器 image（叢集的 image 來自共用 image store）、kind 的任何元件。image 約 671 MB。
 
 每個元件都是固定版本的 artifact 加 checksum，所以同一份 `versions.yaml` 一年後重建仍是同樣的 CRI-O 與 Kubernetes（apt 安裝的套件隨 Debian 的 point release 更新，沒有固定）。

@@ -1,10 +1,10 @@
 [Unit]
-Description=tk8s: check the local apiserver every 2 seconds (bgp mode)
+Description=tk8s: check the local apiserver every second (bgp mode)
 
 [Timer]
 OnBootSec=5
-OnUnitActiveSec=2
-AccuracySec=250ms
+OnUnitActiveSec=1
+AccuracySec=100ms
 
 [Install]
 WantedBy=timers.target

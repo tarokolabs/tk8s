@@ -1,14 +1,32 @@
 #!/bin/sh
-# bgp mode, control planes only (tk8s-apiserver-health.timer runs this every 2 seconds): the
-# apiserver VIP sits on lo exactly while this node's apiserver answers /readyz. FRR announces
-# whatever is on lo (redistribute connected, route-map vip-only), so adding the address is the
-# announcement and removing it is the withdrawal: `ip addr show lo` is the whole state.
+# bgp mode, control planes only (tk8s-apiserver-health.timer runs this every second): the
+# apiserver VIP sits on lo while this node's apiserver answers /readyz. FRR announces whatever is
+# on lo (redistribute connected, route-map vip-only), so adding the address is the announcement
+# and removing it is the withdrawal: `ip addr show lo` is the whole state.
+#
+# With hysteresis: two bad probes in a row withdraw, three good ones in a row announce, and one
+# slow or refused answer leaves the VIP where it is (every change rehashes the router's ECMP and
+# can reset connections). A probe is good only when curl succeeded and the body is exactly "ok".
+# The streak lives in /run (positive = good probes, negative = bad, capped at the thresholds) and
+# starts over at boot. A failed ip command exits 1 so systemd journals it; the next tick retries.
 # /etc/tk8s/vip is written by tkctl (kubeadm/frr); a node without it has nothing to do.
-vip=$(cat /etc/tk8s/vip 2>/dev/null) || exit 0
+vip_file=${TK8S_VIP_FILE:-/etc/tk8s/vip}
+streak_file=${TK8S_STREAK_FILE:-/run/tk8s-apiserver-health.streak}
+vip=$(cat "$vip_file" 2>/dev/null) || exit 0
 [ -n "$vip" ] || exit 0
-if [ "$(curl -ks --max-time 1 https://127.0.0.1:6443/readyz)" = "ok" ]; then
-    ip -4 addr show dev lo | grep -q " $vip/32 " || ip addr add "$vip/32" dev lo
+streak=$(cat "$streak_file" 2>/dev/null) || streak=0
+if body=$(curl -ks --max-time 0.75 https://127.0.0.1:6443/readyz 2>/dev/null) && [ "$body" = ok ]; then
+    [ "$streak" -gt 0 ] 2>/dev/null || streak=0
+    [ "$streak" -ge 3 ] || streak=$((streak + 1))
 else
-    ip -4 addr show dev lo | grep -q " $vip/32 " && ip addr del "$vip/32" dev lo
+    [ "$streak" -lt 0 ] 2>/dev/null || streak=0
+    [ "$streak" -le -2 ] || streak=$((streak - 1))
+fi
+echo "$streak" > "$streak_file"
+on_lo() { ip -4 addr show dev lo | grep -q " $vip/32 "; }
+if [ "$streak" -ge 3 ] && ! on_lo; then
+    ip addr add "$vip/32" dev lo || exit 1
+elif [ "$streak" -le -2 ] && on_lo; then
+    ip addr del "$vip/32" dev lo || exit 1
 fi
 exit 0
