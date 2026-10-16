@@ -50,7 +50,7 @@ def test_reload_feeds_vyos_a_load_and_commit_script(ctx: Context, host: FakeHost
     call = next(c for c in host.calls if c.argv[:3] == ["podman", "exec", "-i"])
     assert call.sudo and call.input == (
         "cp /opt/vyatta/etc/config/tkctl.boot /opt/vyatta/etc/config/config.boot\n"
-        "/usr/libexec/vyos/system-versions-foot.py >> /opt/vyatta/etc/config/config.boot\n"
+        "grep '^// ' /opt/vyatta/etc/config.boot.default >> /opt/vyatta/etc/config/config.boot\n"
         "source /opt/vyatta/etc/functions/script-template\n"
         "configure\n"
         "load /opt/vyatta/etc/config/config.boot\n"

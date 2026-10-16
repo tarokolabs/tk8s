@@ -78,7 +78,8 @@ def test_preconfig_script_installs_tkctl_boot_with_vyos_own_version_footer(ctx: 
     assert script.startswith("#!/bin/sh\n")
     assert "cp /opt/vyatta/etc/config/tkctl.boot /opt/vyatta/etc/config/config.boot" in script
     assert (
-        "/usr/libexec/vyos/system-versions-foot.py >> /opt/vyatta/etc/config/config.boot" in script
+        "grep '^// ' /opt/vyatta/etc/config.boot.default >> /opt/vyatta/etc/config/config.boot"
+        in script
     )
 
 
