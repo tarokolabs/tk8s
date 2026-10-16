@@ -53,7 +53,7 @@ templates/                  # 寫到主機上的檔，與實際內容只差 $變
 
 要自行指定就寫在 `spec.network`；與既有叢集重疊會被拒絕，`--allow-overlap` 允許。
 
-節點的預設路由指向 router，不是主機的 bridge：`.network` 設 `no_default_route=1` 並以 `--route 0.0.0.0/0,<router>` 發給每個容器。router 自己也會拿到那條指向自己的路由，而且 zebra 把它當 kernel route 壓過 VyOS 的 static default，所以 `router/scripts/vyos-postconfig-bootup.script` 開機時把它刪掉，之後 zebra 才裝上指向 `.254` 的那條。
+節點的預設路由指向 router，不是主機的 bridge：`.network` 設 `no_default_route=1` 並以 `--route 0.0.0.0/0,<router>` 發給每個容器。router 自己也會拿到那條指向自己的路由，而且 zebra 把它當 kernel route 壓過 VyOS 的 static default，所以 `router/scripts/vyos-postconfig-bootup.script` 開機時把它刪掉，之後 zebra 才裝上指向 `.254` 的那條；容器停止時 netavark 會再刪一次同一條路由，找不到就讓 unit 以失敗收場，所以同一個腳本登記一個 transient unit 在關機時把它放回去；同一個腳本也關掉 router 的 ICMP redirect（主機 bridge 和節點在同一條 link 上，否則 router 轉送每個封包都會叫節點直接走 `.254`）。
 
 ## 狀態目錄與 unit
 
@@ -77,7 +77,7 @@ templates/                  # 寫到主機上的檔，與實際內容只差 $變
 
 每個叢集有一個 VyOS 容器跟節點一起啟停：`<名稱>-router`，位址 `.253`。它是節點的預設閘道（連外流量經它轉給主機 bridge `.254`），也是 apiserver 的負載平衡：`load-balancing haproxy` 在 6443 接連線，對 `cluster.yaml` 裡的每一台 control plane 做 TCP 檢查、round-robin、TLS passthrough。`controlPlaneEndpoint` 與憑證都是 `api.<名稱>.k8s:6443`：每個節點把這個名字指到 `.253`（kubelet、Cilium 都走它），主機的 kubeconfig 直接寫 `.253`。這是 kubeadm 文件所畫的 HA 拓樸：一個 load balancer 在 control plane 前面，所有客戶端都連它。
 
-tkctl 渲染的是 `tkctl.boot`；VyOS 開機前的 `vyos-preconfig-bootup.script` 把它複製成 `config.boot` 並補上 VyOS 自己產生的版本註腳，沒有這行 VyOS 會對檔案跑一輪 migration（加區塊、改寫檔案）。新增或刪除 control plane 時 tkctl 重新產生 `tkctl.boot`，以 `vbash` 做同一件事再 `load`、`commit`，VyOS 套用差異，既有連線不中斷；VyOS 的 `commit` 結束碼不可靠（沒有變更回 1、失敗反而回 0），所以 tkctl 等到 `show haproxy` 列出的 backend 正好是 cluster.yaml 的 control plane 才算完成，node add/delete 重跑時也以此判斷 router 是否已更新。`sudo podman exec -it <名稱>-router vbash` 進去就是 VyOS 的 CLI：`show configuration`、`show haproxy`、`show ip route`。
+tkctl 渲染的是 `tkctl.boot`；VyOS 開機前的 `vyos-preconfig-bootup.script` 把它複製成 `config.boot` 並補上 VyOS 自己產生的版本註腳，沒有這行 VyOS 會對檔案跑一輪 migration（加區塊、改寫檔案）。新增或刪除 control plane 時 tkctl 重新產生 `tkctl.boot`，以 `vbash` 做同一件事再 `load`、`commit`，VyOS 套用差異，既有連線不中斷（也因此 backend 轉 DOWN 時既有連線不會像 HAProxy 的 `shutdown-sessions` 那樣被切斷，要等 client 自己發現）；VyOS 的 `commit` 結束碼不可靠（沒有變更回 1、失敗反而回 0），所以 tkctl 等到 `show haproxy` 列出的 backend 正好是 cluster.yaml 的 control plane 才算完成，node add/delete 重跑時也以此判斷 router 是否已更新。`sudo podman exec -it <名稱>-router vbash` 進去就是 VyOS 的 CLI：`show configuration`、`show haproxy`、`show ip route`。
 
 **為什麼是 TCP 檢查**：VyOS 的 haproxy 整合沒有 `check-ssl`，設 `ssl` 會把流量也包進 TLS、破壞 passthrough，`http-check` 又只能明文，所以打 `/readyz` 的健康檢查做不到。應用層的健康檢查本來就是負載平衡器而不是 router 的功能，雲端給 apiserver 的 NLB 也是 TCP 檢查。代價是 apiserver 起來但還沒 ready 的那幾秒流量仍會送過去，client 的重試會蓋掉；CP 停掉約 6 秒才標 DOWN。
 

@@ -286,6 +286,18 @@ def test_router_image_pull_build_refresh_offline(ctx: Context, host: FakeHost) -
         images.ensure_router_image(ctx)
 
 
+def test_listing_puts_the_node_and_router_images_before_the_store(
+    ctx: Context, host: FakeHost
+) -> None:
+    """Both live in the host's podman storage, not the store; get images shows them too."""
+    sources(host)
+    router_image = f"ghcr.io/tarokolabs/tk8s/router:{ctx.versions.vyos}"
+    host.responses[("podman", "image", "exists", router_image)] = Result(1, "", "")
+    rows = images.listing(ctx, K8S)
+    assert rows[:2] == [("present", NODE), ("missing", router_image)]
+    assert rows[2:] == images.status(ctx, K8S)
+
+
 def test_status_makes_sure_the_router_image_is_on_the_host(ctx: Context, host: FakeHost) -> None:
     """tkctl pull images / get images pull or build the router image next to the node image."""
     sources(host)

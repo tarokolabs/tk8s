@@ -3,3 +3,11 @@
 # default route to the router; this container is the router, and that route would shadow the
 # static default to the host (VyOS's zebra ranks a kernel route above its own static one).
 ip route del default via $router_ip 2>/dev/null || true
+# When the container stops, netavark deletes exactly that route (gateway, metric 100, proto
+# static) and fails the unit when it is gone. A transient unit puts it back at shutdown; by then
+# nothing routes through here any more.
+# The host bridge sits on the same link as the nodes, so for every packet it forwards the
+# router would send the node an ICMP redirect to the host (ping shows them as errors, and a
+# node that accepted them would bypass the router). VyOS has no CLI knob for this.
+sysctl -qw net.ipv4.conf.all.send_redirects=0 net.ipv4.conf.eth0.send_redirects=0
+systemd-run --quiet --unit=tk8s-podman-route -p RemainAfterExit=yes -p "ExecStop=/usr/sbin/ip route replace default via $router_ip metric 100 proto static" /bin/true

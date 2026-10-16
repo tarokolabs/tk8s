@@ -119,10 +119,12 @@ def reload(ctx: Context, c: model.Cluster) -> None:
     VyOS's version footer (so nothing is migrated), then VyOS loads it and commits the difference
     without dropping connections. `exit` in script-template only tears the session down, so the
     script carries load's status out itself; commit's is useless both ways (1 when nothing
-    changed, 0 when it failed), so the backend list is the proof the change took."""
+    changed, 0 when it failed), so the backend list is the proof the change took. The session
+    runs in the vyattacfg group, as VyOS requires of configuration scripts: what it leaves under
+    /opt/vyatta/config must stay writable to that group, not become root's."""
     wait_booted(ctx)
     r = ctx.host.run(
-        ["podman", "exec", "-i", name(ctx), "/bin/vbash", "-s"],
+        ["podman", "exec", "-i", name(ctx), "sg", "vyattacfg", "-c", "/bin/vbash -s"],
         sudo=True,
         input=RELOAD,
         capture=True,

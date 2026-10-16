@@ -89,6 +89,19 @@ def test_bootup_script_drops_the_route_to_itself(ctx: Context) -> None:
     ]
     assert script.startswith("#!/bin/sh\n")
     assert "ip route del default via 172.22.0.253" in script
+    # netavark deletes exactly the route it added when the container stops, and a missing route
+    # fails the unit (ESRCH): a transient unit puts it back at shutdown
+    assert (
+        "systemd-run --quiet --unit=tk8s-podman-route -p RemainAfterExit=yes "
+        '-p "ExecStop=/usr/sbin/ip route replace default via 172.22.0.253 metric 100 proto static" '
+        "/bin/true"
+    ) in script
+    # the host bridge is on the nodes' link: without this the router answers every forwarded
+    # packet with an ICMP redirect to the host, which ping counts as errors
+    assert (
+        "sysctl -qw net.ipv4.conf.all.send_redirects=0 net.ipv4.conf.eth0.send_redirects=0"
+        in script
+    )
 
 
 def test_nodes_resolve_the_api_name_to_the_router(ctx: Context) -> None:
@@ -122,3 +135,10 @@ def test_units_phase_runs_then_is_done(ctx: Context, host: FakeHost) -> None:
     assert not units.done(ctx)
     Runner([units.PHASE]).run(ctx)
     assert units.done(ctx) and "[units] write the Quadlet units" in "".join(host.lines)
+
+
+def test_router_unit_counts_systemd_halt_as_success(ctx: Context) -> None:
+    """VyOS's systemd exits 130 on SIGRTMIN+3; without this the unit shows failed after stop."""
+    files = units.render(ctx, ctx.require_cluster())
+    unit = files[ctx.paths.unit_dir / "demo" / "demo-router.container"]
+    assert "SuccessExitStatus=130" in unit

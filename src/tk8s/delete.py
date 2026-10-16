@@ -35,7 +35,9 @@ def confirm(ctx: Context) -> None:
 
 def node_names(ctx: Context) -> list[str]:
     """From cluster.yaml, or from the unit directory when the file is gone (so containers and
-    volumes are removed before units takes that directory away)."""
+    volumes are removed before units takes that directory away). Every container unit but the
+    router's counts as a node there, a pre-router cluster's `<name>-lb.container` included: its
+    cluster.yaml does not parse any more, and this is how its container still goes."""
     if ctx.cluster is not None:
         return [n.name for n in ctx.cluster.spec.nodes]
     router = f"{ctx.cluster_name}-router.container"

@@ -18,6 +18,8 @@ SHOW_HAPROXY = (
     "api                   demo-control-plane-1  UP         0 ms         4s\n"
 )
 OP = "/opt/vyatta/bin/vyatta-op-cmd-wrapper"
+# the router reload: a configuration session fed on stdin, in VyOS's configuration group
+VBASH = ("podman", "exec", "-i", "demo-router", "sg", "vyattacfg", "-c", "/bin/vbash -s")
 
 
 def ready_host(host: FakeHost, data_dir: Path, name: str = "demo") -> model.Cluster:
