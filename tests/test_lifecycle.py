@@ -171,7 +171,7 @@ def test_stop_names_every_unit_at_once(ctx: Context, host: FakeHost) -> None:
     assert len(stops) == 1 and stops[0].sudo
     assert stops[0].argv[2:] == [
         "demo.target",
-        "demo-lb.service",
+        "demo-router.service",
         "demo-control-plane-1.service",
         "demo-worker-1.service",
         "demo-worker-2.service",

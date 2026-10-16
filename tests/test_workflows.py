@@ -25,11 +25,13 @@ def test_every_workflow_token_is_read_only_at_the_top() -> None:
 
 def test_l3_builds_the_node_image_fills_the_store_blocks_downloads_then_creates() -> None:
     build = line_of(E2E, "podman build")
+    router_build = line_of(E2E, "images/router")
     pull = line_of(E2E, "tkctl pull images --k8s")
     plugins = line_of(E2E, "--phase nodes/cni-plugins")
     offline = line_of(E2E, "tk8s-offline")
     create = line_of(E2E, "run: time tkctl create cluster ci --workers 1")
-    assert build < pull < plugins < offline < create
+    assert build < router_build < pull < plugins < offline < create
+    assert '--build-arg VYOS="$vyos"' in E2E and '--build-arg SHA256="$sha"' in E2E
     assert "nothing to pull" in E2E and 'TK_OFFLINE: "1"' in E2E and "Pulled image" in E2E
     assert '--build-arg CRIO="$crio"' in E2E and " helm.cilium.io " in E2E
     assert "task " not in E2E and "install.sh" in E2E
@@ -57,3 +59,9 @@ def test_ci_uses_the_pinned_uv_and_runs_lint_types_tests() -> None:
     for s in ("uv sync --locked", "ruff check", "ruff format --check", "mypy src tests", "pytest"):
         assert s in CI, s
     assert "shellcheck -s sh -S warning install.sh" in CI
+
+
+def test_release_builds_and_pushes_the_router_image_too() -> None:
+    assert "scripts/build-images.sh router" in RELEASE
+    assert "digests-router" in RELEASE
+    assert "needs: [node, router]" in RELEASE

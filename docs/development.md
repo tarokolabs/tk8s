@@ -36,7 +36,7 @@ v1 世代（`kto`、`conf/`）的最後版本是 [v2026.9.1](https://github.com/
 - 沒有 `kto`、`kls` 這些短命令，也沒有 `tkctl cluster create` 這種名詞在前的寫法。
 - 不需要 source profile，不需要 `bc`、`jq`、`envsubst`、`nc`。
 - 節點由 systemd 管理，主機重新開機後叢集自動啟動；v1 要手動 `kci`。
-- 多 control plane 會真正 join；apiserver 入口是每叢集的 HAProxy 與 DNS，不是 VIP（v1 用 kube-vip）。
+- 多 control plane 會真正 join；apiserver 入口是每叢集的 VyOS router，不是 VIP（v1 用 kube-vip）。
 - 不再有 macvlan 外接節點、`tkport` DNAT 註解、`route-add`、`expose`；對外曝露改用 LoadBalancer 或 Gateway。
 - 只支援 systemd 主機，Alpine 不在範圍內；節點只有 CRI-O，不再有 containerd 變體。
 

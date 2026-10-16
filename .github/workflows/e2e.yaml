@@ -1,7 +1,7 @@
 # e2e: a real cluster on a GitHub runner for each supported Kubernetes version, on every push to main
 # and tag. Ubuntu 24.04 runners ship podman 4.9, below the 5.4 floor, and OBS has no podman 5 for Ubuntu,
-# so podman is built from source; the node image is built from this checkout so e2e verifies the recipe
-# being released, not whatever GHCR holds.
+# so podman is built from source; the node and router images are built from this checkout so e2e verifies
+# the recipes being released, not whatever GHCR holds.
 # The create runs offline: the shared image store is filled first, every download host is blocked in
 # /etc/hosts, and the CRI-O journal of each node must show no pull.
 name: e2e
@@ -77,6 +77,11 @@ jobs:
           k8s="${{ matrix.k8s }}"; crio=$(sed -nE "s/^  \"${k8s%.*}\": *\"([^\"]+)\".*/\1/p" versions.yaml)
           [ -n "$crio" ] || { echo "versions.yaml has no crio entry for Kubernetes minor ${k8s%.*}"; exit 1; }
           sudo podman build --build-arg VER="$k8s" --build-arg CRIO="$crio" --force-rm -t "ghcr.io/tarokolabs/tk8s/node:v$k8s" images/node >/tmp/node-build.log 2>&1 || { tail -30 /tmp/node-build.log; exit 1; }
+      - name: Build the router image from this checkout
+        run: |
+          vyos=$(sed -nE 's/^vyos: *"([^"]+)".*/\1/p' versions.yaml); sha=$(sed -nE 's/^vyos_sha256: *"([^"]+)".*/\1/p' versions.yaml)
+          [ -n "$vyos" ] && [ -n "$sha" ] || { echo "versions.yaml has no vyos/vyos_sha256"; exit 1; }
+          sudo podman build --build-arg VYOS="$vyos" --build-arg SHA256="$sha" --force-rm -t "ghcr.io/tarokolabs/tk8s/router:$vyos" images/router >/tmp/router-build.log 2>&1 || { tail -30 /tmp/router-build.log; exit 1; }
       - name: Fill the shared image store (a second run must find it full)
         run: |
           set -eux

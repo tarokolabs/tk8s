@@ -25,8 +25,8 @@ def next_name(c: model.Cluster, role: model.Role) -> str:
 
 
 def next_ip(c: model.Cluster) -> IPv4Address:
-    """One past the highest node address. .100 is the LB and .200-.219 the LB pool, so .199 is
-    the last node."""
+    """One past the highest node address. .200-.219 is the LB-IPAM pool and .253 the router,
+    so .199 is the last node."""
     net = c.spec.network.nodes
     last = max(int(n.ip) - int(net.network_address) for n in c.spec.nodes)
     host = last + 1

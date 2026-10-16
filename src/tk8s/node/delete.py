@@ -120,7 +120,7 @@ def units_done(ctx: Context) -> bool:
 
 
 def units_run(ctx: Context) -> None:
-    """The target and haproxy.cfg are rendered without the node first, then its unit goes, then
+    """The target and config.boot are rendered without the node first, then its unit goes, then
     systemd and the LB learn about it."""
     n = require_node(ctx)
     units.run(ctx, trimmed(ctx))

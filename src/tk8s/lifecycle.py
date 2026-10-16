@@ -202,7 +202,7 @@ def stop(ctx: Context, c: model.Cluster) -> None:
     all."""
     units = [
         f"{c.name}.target",
-        f"{c.name}-lb.service",
+        f"{c.name}-router.service",
         *(f"{n.name}.service" for n in c.spec.nodes),
     ]
     # A node recorded in cluster.yaml but never given a unit (an add that died early) makes
