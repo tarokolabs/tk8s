@@ -125,18 +125,33 @@ def peers(ctx: Context, c: model.Cluster) -> list[tuple[str, str]]:
     ]
 
 
-def nexthops(ctx: Context, c: model.Cluster) -> int:
-    """How many active next hops the router's selected route to the VIP has: the ECMP width
-    that carries traffic, 0 without a route."""
+def _nexthop_ips(ctx: Context, c: model.Cluster) -> list[str]:
+    """The active next hops of the router's selected route to the VIP: where apiserver
+    connections go, empty without a route."""
     vip = c.spec.network.vip
     data = _vtysh(ctx, f"show ip route {vip}/32")
     entries = data.get(f"{vip}/32", []) if isinstance(data, dict) else []
     dicts = [e for e in entries if isinstance(e, dict)]
     chosen = next((e for e in dicts if e.get("selected")), dicts[0] if dicts else None)
     if not isinstance(chosen, dict):
-        return 0
+        return []
     hops = chosen.get("nexthops", [])
-    return sum(1 for h in hops if isinstance(h, dict) and h.get("active")) if hops else 0
+    if not isinstance(hops, list):
+        return []
+    return [str(h.get("ip", "")) for h in hops if isinstance(h, dict) and h.get("active")]
+
+
+def nexthops(ctx: Context, c: model.Cluster) -> int:
+    """How many active next hops the route to the VIP has: the ECMP width that carries traffic."""
+    return len(_nexthop_ips(ctx, c))
+
+
+def routes_to(ctx: Context, c: model.Cluster, n: model.Node) -> bool:
+    """Whether the router still sends apiserver connections to this control plane: an UP backend
+    in proxy mode, an active next hop of the VIP route in bgp mode."""
+    if c.spec.network.ha == "proxy":
+        return any(name == n.name and status.startswith("UP") for name, status in backends(ctx))
+    return str(n.ip) in _nexthop_ips(ctx, c)
 
 
 def bfd_down(ctx: Context, c: model.Cluster) -> list[str]:
@@ -158,6 +173,13 @@ def kind(c: model.Cluster) -> str:
 def show(c: model.Cluster) -> str:
     """The op-mode command a person runs to see the same list."""
     return f"{OP} show haproxy" if c.spec.network.ha == "proxy" else "vtysh -c 'show bgp summary'"
+
+
+def show_path(c: model.Cluster) -> str:
+    """The op-mode command that shows where apiserver connections go right now."""
+    if c.spec.network.ha == "proxy":
+        return f"{OP} show haproxy"
+    return f"vtysh -c 'show ip route {c.spec.network.vip}'"
 
 
 def synced(ctx: Context, c: model.Cluster) -> bool:

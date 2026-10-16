@@ -10,6 +10,7 @@ from tests.fixtures import (
     VTYSH_SUMMARY,
     bgp_router_answers,
 )
+from tk8s import model
 from tk8s.create import router
 from tk8s.host import FakeHost, Result
 from tk8s.phases import Context, PhaseFailed
@@ -216,6 +217,36 @@ def test_nexthops_counts_the_ecmp_width_and_zero_without_a_route(
     assert router.nexthops(bgp_ctx, c) == 2
     bgp_router_answers(host, hops=0)
     assert router.nexthops(bgp_ctx, c) == 0
+
+
+def test_routes_to_is_an_up_backend_in_proxy_mode(ctx: Context, host: FakeHost) -> None:
+    c = ctx.require_cluster()
+    key = ("podman", "exec", "demo-router", OP, "show", "haproxy")
+    host.responses[key] = Result(0, SHOW_HAPROXY, "")
+    assert router.routes_to(ctx, c, c.control_planes[0])
+    gone = model.Node(
+        role="control-plane", name="demo-control-plane-2", ip="172.22.0.4", cpu=2, memory="4g"
+    )
+    host.responses[key] = Result(
+        0, SHOW_HAPROXY + "api                   demo-control-plane-2  DOWN       0 ms   4s\n", ""
+    )
+    assert not router.routes_to(ctx, c, gone)
+    host.responses[key] = Result(0, SHOW_HAPROXY, "")
+    assert not router.routes_to(ctx, c, gone)  # not listed at all
+
+
+def test_routes_to_is_an_active_next_hop_in_bgp_mode(bgp_ctx: Context, host: FakeHost) -> None:
+    c = bgp_ctx.require_cluster()
+    bgp_router_answers(host, hops=2)
+    assert router.routes_to(bgp_ctx, c, c.control_planes[0])
+    assert not router.routes_to(bgp_ctx, c, c.control_planes[2])
+    bgp_router_answers(host, hops=0)
+    assert not router.routes_to(bgp_ctx, c, c.control_planes[0])
+
+
+def test_show_path_names_the_haproxy_or_the_vip_route(ctx: Context, bgp_ctx: Context) -> None:
+    assert router.show_path(ctx.require_cluster()) == f"{OP} show haproxy"
+    assert router.show_path(bgp_ctx.require_cluster()) == "vtysh -c 'show ip route 172.23.0.1'"
 
 
 def test_bfd_down_names_the_control_planes_whose_session_is_not_up(

@@ -12,7 +12,7 @@ from tk8s.node import add as node_add
 from tk8s.node import common as node_common
 from tk8s.node import delete as node_delete
 from tk8s.paths import Paths
-from tk8s.phases import Context, Options, Runner
+from tk8s.phases import Context, Options, PhaseFailed, Runner
 
 
 def worker(n: int, ip: str, join: bool = True) -> model.Node:
@@ -301,6 +301,7 @@ def test_delete_node_drains_stops_removes_and_rerenders(tmp_path: Path) -> None:
     gone = a.index(["kubectl", "delete", "node", "demo-worker-2"])
     stop = a.index(["systemctl", "stop", "demo-worker-2.service"])
     assert drain < reset < gone < stop < a.index(["podman", "rm", "-f", "demo-worker-2"])
+    assert not any(x[3:] == [OP, "show", "haproxy"] for x in a[:gone])  # no apiserver on a worker
     for v in node_volumes("demo-worker-2"):
         assert ["podman", "volume", "rm", "-f", v] in a
     saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
@@ -377,9 +378,10 @@ def test_confirm_delete_node(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert host.lines == []
 
 
-def test_delete_control_plane_waits_for_the_router_before_deleting_the_node(tmp_path: Path) -> None:
-    """kubeadm reset takes the apiserver on that node down; the LB keeps routing to it for a few
-    seconds, and a kubectl delete node in that window dies with EOF."""
+def test_delete_control_plane_waits_until_the_router_stops_routing_to_it(tmp_path: Path) -> None:
+    """kubeadm reset takes the apiserver on that node down; the router keeps routing to it for a
+    few seconds (haproxy's check, the health timer's withdrawal), and a kubectl delete node in
+    that window can land on the dead one."""
     ctx, host = node_ctx(tmp_path)
     ctx.cluster = node_common.with_node(
         ctx.require_cluster(),
@@ -403,13 +405,48 @@ def test_delete_control_plane_waits_for_the_router_before_deleting_the_node(tmp_
         Result(56, "", "EOF"),
         Result(0, "ok", ""),
     ]
+    row = "api                   demo-control-plane-2  %s       0 ms         4s\n"
+    host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = [
+        Result(0, SHOW_HAPROXY + row % "UP", ""),
+        Result(0, SHOW_HAPROXY + row % "UP", ""),
+        Result(0, SHOW_HAPROXY + row % "DOWN", ""),
+        Result(0, SHOW_HAPROXY, ""),  # delete/units: the reload took it out
+    ]
     ctx.node = "demo-control-plane-2"
     Runner([node_delete.PHASE], record=False).run(ctx)
     a = argvs(host)
     reset = a.index(["podman", "exec", "demo-control-plane-2", "kubeadm", "reset", "-f"])
     gone = a.index(["kubectl", "delete", "node", "demo-control-plane-2"])
+    shows = [i for i, x in enumerate(a) if x[3:] == [OP, "show", "haproxy"] and i < gone]
     polls = [i for i, x in enumerate(a) if x[:4] == ["curl", "-sk", "--max-time", "3"]]
-    assert len(polls) == 3 and reset < polls[0] and polls[-1] < gone
+    assert len(shows) == 3 and reset < shows[0] and shows[-1] < polls[0]
+    assert len(polls) == 3 and polls[-1] < gone
+
+
+def test_delete_control_plane_gives_up_when_the_router_keeps_routing_to_it(tmp_path: Path) -> None:
+    ctx, host = node_ctx(tmp_path)
+    ctx.cluster = node_common.with_node(
+        ctx.require_cluster(),
+        model.Node(
+            role="control-plane",
+            name="demo-control-plane-2",
+            ip=IPv4Address("172.22.0.4"),
+            cpu=2,
+            memory="4g",
+        ),
+    )
+    row = "api                   demo-control-plane-2  UP         0 ms         4s\n"
+    host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(
+        0, SHOW_HAPROXY + row, ""
+    )
+    ctx.node = "demo-control-plane-2"
+    with pytest.raises(
+        PhaseFailed,
+        match=r"demo-router still sends apiserver connections to demo-control-plane-2 after "
+        r"30 s \(podman exec demo-router /opt/vyatta/bin/vyatta-op-cmd-wrapper show haproxy\)",
+    ):
+        Runner([node_delete.PHASE], record=False).run(ctx)
+    assert ["kubectl", "delete", "node", "demo-control-plane-2"] not in argvs(host)
 
 
 def test_delete_units_is_not_done_while_the_router_still_lists_the_control_plane(
