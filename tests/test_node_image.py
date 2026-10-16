@@ -144,4 +144,6 @@ def test_health_timer_fires_every_second() -> None:
     assert "OnUnitActiveSec=1\n" in timer and "OnBootSec=5\n" in timer
     assert "WantedBy=timers.target" in timer
     assert "Type=oneshot\n" in service
+    # a oneshot started every second trips systemd's default start rate limit (5 per 10 s)
+    assert "StartLimitIntervalSec=0\n" in service.split("[Service]")[0]
     assert "ExecStart=/usr/local/sbin/tk8s-apiserver-health\n" in service
