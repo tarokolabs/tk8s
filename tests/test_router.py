@@ -134,3 +134,36 @@ def test_reload_fails_by_name_when_commit_fails(ctx: Context, host: FakeHost) ->
     host.responses[VBASH] = Result(1, "", "Commit failed")
     with pytest.raises(PhaseFailed, match=r"demo-router did not accept config\.boot"):
         router.reload(ctx, ctx.require_cluster())
+
+
+def test_neighbors_and_bfd_peers_render_one_block_per_control_plane(bgp_ctx: Context) -> None:
+    c = bgp_ctx.require_cluster()
+    n = router.neighbors(c)
+    assert n.count("        neighbor 172.22.0.") == 3 and "neighbor 172.22.0.4 " not in n
+    assert n.startswith(
+        "        neighbor 172.22.0.1 {\n"
+        "            address-family {\n"
+        "                ipv4-unicast {\n"
+        "                }\n"
+        "            }\n"
+        "            bfd {\n"
+        "            }\n"
+        '            remote-as "65001"\n'
+        "            timers {\n"
+        '                holdtime "9"\n'
+        '                keepalive "3"\n'
+        "            }\n"
+        "        }\n"
+        "        neighbor 172.22.0.2 {"
+    )
+    b = router.bfd_peers(c)
+    assert b.count("        peer 172.22.0.") == 3
+    assert b.startswith(
+        "        peer 172.22.0.1 {\n"
+        "            interval {\n"
+        '                multiplier "3"\n'
+        '                receive "300"\n'
+        '                transmit "300"\n'
+        "            }\n"
+        "        }\n"
+    )

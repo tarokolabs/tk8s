@@ -34,7 +34,7 @@ def test_node_container_has_the_variables_units_will_pass() -> None:
         after="\nAfter=c-control-plane-1.service",
         image="img",
         domain="c.k8s",
-        router_ip="172.22.0.253",
+        api_ip="172.22.0.253",
         cni_dir="/d/cni",
         images_dir="/d/images",
         k8s="1.37.1",

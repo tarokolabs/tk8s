@@ -26,6 +26,42 @@ def servers(c: model.Cluster) -> str:
     )
 
 
+def neighbors(c: model.Cluster) -> str:
+    """One eBGP neighbor per control plane (AS 65001, BFD on, timers 3/9), in config.boot's own
+    layout, for the bgp template."""
+    return "\n".join(
+        f"        neighbor {n.ip} {{\n"
+        f"            address-family {{\n"
+        f"                ipv4-unicast {{\n"
+        f"                }}\n"
+        f"            }}\n"
+        f"            bfd {{\n"
+        f"            }}\n"
+        f'            remote-as "65001"\n'
+        f"            timers {{\n"
+        f'                holdtime "9"\n'
+        f'                keepalive "3"\n'
+        f"            }}\n"
+        f"        }}"
+        for n in c.control_planes
+    )
+
+
+def bfd_peers(c: model.Cluster) -> str:
+    """One BFD peer per control plane, 300 ms x 3: a silent control plane is dead in about a
+    second (the spike measured 1.1 s against 8.8 s on BGP timers alone)."""
+    return "\n".join(
+        f"        peer {n.ip} {{\n"
+        f"            interval {{\n"
+        f'                multiplier "3"\n'
+        f'                receive "300"\n'
+        f'                transmit "300"\n'
+        f"            }}\n"
+        f"        }}"
+        for n in c.control_planes
+    )
+
+
 def name(ctx: Context) -> str:
     return f"{ctx.cluster_name}-router"
 

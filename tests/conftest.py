@@ -49,3 +49,35 @@ def ctx(paths: Paths, host: FakeHost) -> Context:
         tk8s_version="test",
     )
     return c
+
+
+@pytest.fixture
+def bgp_ctx(paths: Paths, host: FakeHost) -> Context:
+    """demo in bgp mode: 3 control planes (.1 .2 .3) + 1 worker (.4), index 0, VIP 172.23.0.1."""
+    vers = versions.load(HOME / "versions.yaml")
+    user = model.UserCluster(
+        metadata=model.Metadata(name="demo"),
+        spec=model.UserSpec(
+            network=model.UserNetwork(ha="bgp"),
+            nodes=[
+                model.NodeGroup(role="control-plane", count=3),
+                model.NodeGroup(role="worker"),
+            ],
+        ),
+    )
+    c = Context(
+        host=host,
+        paths=paths,
+        versions=vers,
+        options=Options(retry_delay=0, poll=0, poll_slow=0),
+        say=host.lines.append,
+    )
+    c.cluster = resolve(
+        user,
+        k8s_default=vers.kubernetes.default,
+        existing=None,
+        used_indices=set(),
+        allow_overlap=False,
+        tk8s_version="test",
+    )
+    return c
