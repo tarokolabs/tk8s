@@ -35,7 +35,7 @@ src/tk8s/
   lifecycle.py              # get、describe、stop、start、use
   delete.py                 # delete cluster
   images.py                 # 共用 image store
-  verify.py                 # verify cluster 的 15 個檢查，一個檢查一個函式
+  verify/                   # verify cluster 的 15 個檢查，一個檢查一個函式，一個 [section] 一檔
 templates/                  # 寫到主機上的檔，與實際內容只差 $變數
 ```
 
