@@ -61,6 +61,7 @@ def configure(ctx: Context, n: model.Node) -> None:
             f"{n.name} has no FRR: its node image predates bgp mode; run tkctl pull images "
             f"--refresh --k8s {c.spec.kubernetes} and create the cluster again"
         )
+    previous = (_read(ctx, n.name, "/etc/tk8s/vip") or "").strip()
     ctx.host.run(["podman", "exec", n.name, "sed", "-i", DAEMONS, "/etc/frr/daemons"], sudo=True)
     ctx.host.run(
         [
@@ -97,6 +98,13 @@ def configure(ctx: Context, n: model.Node) -> None:
         sudo=True,
         input=f"{net.vip}\n",
     )
+    if previous and previous != str(net.vip):
+        # the health script only moves the current VIP; a changed one would leave the old /32 on lo
+        ctx.host.run(
+            ["podman", "exec", n.name, "ip", "addr", "del", f"{previous}/32", "dev", "lo"],
+            sudo=True,
+            check=False,
+        )
     ctx.host.run(["podman", "exec", n.name, "systemctl", "enable", "--quiet", *UNITS], sudo=True)
     # restart, not start: a rerun with a changed frr.conf must load it
     ctx.host.run(["podman", "exec", n.name, "systemctl", "restart", *UNITS], sudo=True)

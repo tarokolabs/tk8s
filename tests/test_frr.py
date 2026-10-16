@@ -69,6 +69,25 @@ def test_configure_writes_daemons_conf_vip_and_enables_the_units(
     ) in host.lines
 
 
+def test_configure_takes_a_previous_vip_off_lo(bgp_ctx: Context, host: FakeHost) -> None:
+    """A changed spec.network.vip: the old /32 would otherwise stay on lo (unannounced, the
+    prefix-list only passes the new one, but there) until the node restarts."""
+    n = cp(bgp_ctx, 0)
+    node_answers(host, n.name, vip="172.23.0.9")
+    frr.configure(bgp_ctx, n)
+    a = [c.argv for c in host.calls]
+    gone = ["podman", "exec", n.name, "ip", "addr", "del", "172.23.0.9/32", "dev", "lo"]
+    assert gone in a and a.index(gone) < a.index(
+        ["podman", "exec", n.name, "systemctl", "restart", *frr.UNITS]
+    )
+    host.calls.clear()
+    node_answers(host, n.name)  # the same VIP, and a node that never had one
+    frr.configure(bgp_ctx, n)
+    host.responses.pop(("podman", "exec", n.name, "cat", "/etc/tk8s/vip"))
+    frr.configure(bgp_ctx, n)
+    assert not any(c.argv[3:6] == ["ip", "addr", "del"] for c in host.calls)
+
+
 def test_configured_needs_the_vip_the_same_conf_and_both_units_active(
     bgp_ctx: Context, host: FakeHost
 ) -> None:
