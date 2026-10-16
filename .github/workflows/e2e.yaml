@@ -155,7 +155,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: e2e-logs-${{ github.run_id }}-${{ matrix.k8s }}
+          name: e2e-logs-${{ github.run_id }}-${{ matrix.k8s }}-${{ matrix.ha }}
           path: logs/
       - name: Delete the cluster
         if: always()

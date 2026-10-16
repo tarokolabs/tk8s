@@ -114,6 +114,10 @@ def test_flags(capsys: pytest.CaptureFixture[str]) -> None:
             "-f cannot be combined with --control-planes/--workers/--cpu/--memory/--ha",
         ),
         (
+            ["create", "cluster", "-f", "x.yaml", "--ha=bgp", "--dry-run"],
+            "-f cannot be combined with --control-planes/--workers/--cpu/--memory/--ha",
+        ),
+        (
             ["create", "cluster", "demo", "--k8s", "1.36", "--dry-run"],
             "--k8s must look like 1.37.0",
         ),

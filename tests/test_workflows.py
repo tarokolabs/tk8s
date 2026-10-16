@@ -36,6 +36,8 @@ def test_l3_builds_the_node_image_fills_the_store_blocks_downloads_then_creates(
     assert '--build-arg CRIO="$crio"' in E2E and " helm.cilium.io " in E2E
     assert "task " not in E2E and "install.sh" in E2E
     assert line_of(E2E, "tk8s-offline$/d") < line_of(E2E, "upload-artifact")
+    # one artifact per matrix cell: the default k8s version runs both ha modes
+    assert "name: e2e-logs-${{ github.run_id }}-${{ matrix.k8s }}-${{ matrix.ha }}" in E2E
     assert "branches: [v2, main]" in E2E
 
 
