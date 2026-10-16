@@ -14,7 +14,7 @@
 | cgroup | v2 |
 | swap | 關閉：`sudo swapoff -a`，並註解 `/etc/fstab` 的 swap 行 |
 | 權限 | `sudo` 免密碼；每一道 sudo 指令執行時都會印出 |
-| 網路 | 第一次需要對外連線，下載約 2 GB；之後建叢集不需要網路 |
+| 網路 | 第一次需要對外連線，下載約 3 GB（含 router image）；之後建叢集不需要網路 |
 | 其他 | `curl`、`git` |
 
 ## 安裝
@@ -40,7 +40,7 @@ tkctl use cluster tk8s      # ~/.kube/config 指向它（原檔留在 ~/.kube/co
 kubectl get nodes
 ```
 
-名稱省略是 `tk8s`，節點是 `tk8s-control-plane-1`、`tk8s-worker-1`、`tk8s-worker-2`。其他常見的拓樸：
+名稱省略是 `tk8s`，節點是 `tk8s-control-plane-1`、`tk8s-worker-1`、`tk8s-worker-2`，另有一個 VyOS 的 `tk8s-router`：節點的預設閘道，也是 apiserver 的負載平衡。其他常見的拓樸：
 
 ```bash
 tkctl create cluster demo --workers 3                  # 名稱 demo，三台 worker
@@ -79,14 +79,14 @@ $ tkctl create cluster --list-phases
 preflight          check the host: podman, systemd, cgroup v2, swap, sudo, sysctls, data tree
 plan               resolve cluster.yaml: defaults, subnet, node names
 images             pull every image the cluster needs into the shared store
-units              write the Quadlet units, the target, the routes and the LB config
+units              write the Quadlet units, the target, the routes and the router config
 nodes              start the nodes
   cni-plugins        install the CNI plugins the nodes mount
-  up                 start the cluster target and wait for every node and the LB
+  up                 start the cluster target and wait for every node and the router
 kubeadm            initialise the first control plane and join the others
   render             write the kubeadm init configuration into the state dir
   init               kubeadm init on the first control plane
-  kubeconfig         hand the host a kubeconfig that points at the LB
+  kubeconfig         hand the host a kubeconfig that points at the router
   join               join the other control planes and the workers
 cni                install the CNI and wait for the nodes
   install            install the CNI (cilium: kube-proxy replacement, LB-IPAM, Gateway API)
@@ -104,7 +104,7 @@ addons             RuntimeClass, gVisor, metrics-server, local-path
 
 ```bash
 tkctl get clusters                 # 全部叢集：節點數、版本、狀態、網段
-tkctl describe cluster demo        # 節點、位址、Status、供其他機器連線的路由指令
+tkctl describe cluster demo        # 節點、位址、Status、Router、供其他機器連線的路由指令
 tkctl verify cluster demo          # 逐項 PASS/FAIL/SKIP，任一 FAIL 結束碼 1
 tkctl stop cluster demo            # 停止所有節點，狀態與資料保留
 tkctl start cluster demo           # 啟動，等節點回報 Ready（最多約 7 分鐘），列出每個節點的狀態
@@ -176,7 +176,8 @@ spec:
       join: false            # 建立並啟動，但不加入叢集（預設 true）
   network:                   # 省略即自動分配
     nodes: 172.22.16.0/24
-    lb: 172.22.16.100        # apiserver LB 的位址，預設 .100
+    router: 172.22.16.253    # router 的位址，預設 .253
+    ha: proxy                # 目前只有 proxy
 ```
 
 ```bash
@@ -213,7 +214,7 @@ tkctl version
 幾個規則：
 
 - 名稱格式 `^[a-z][a-z0-9-]{0,15}$`，用於節點名稱與叢集 DNS 網域（`<名稱>.k8s`）。
-- `--control-planes` 要是奇數、最多 5；不論幾台，apiserver 的入口都是 `api.<名稱>.k8s:6443`。
+- `--control-planes` 要是奇數、最多 5；不論幾台，apiserver 的入口都是 `api.<名稱>.k8s:6443`，由 `.253` 的 VyOS router 服務。
 - `--gvisor` 需要 veth datapath，會自動選；明確指定 `--datapath netkit` 加 `--gvisor` 會被拒絕。
 - `--memory` 接受 `4G`、`4096M`，`4Gi` 不行。
 - 已完成的叢集再 `create` 會被拒絕；`delete cluster`、`delete node` 也有 `--phase`，中途失敗再執行一次會接續。
@@ -225,14 +226,15 @@ tkctl version
 ```
 /opt/taroko/clusters/<名稱>/     # cluster.yaml、kubeconfig、storage/（PVC 資料）、logs/
 /opt/taroko/images/<K8s 版本>/   # 共用 image store
+/opt/taroko/clusters/<名稱>/router/  # VyOS 的設定（tkctl.boot），依 cluster.yaml 產生
 /opt/taroko/cni/                 # CNI plugins
-/etc/containers/systemd/<名稱>/  # 節點與 LB 的 Quadlet unit；systemctl status <名稱>.target
+/etc/containers/systemd/<名稱>/  # 節點與 router 的 Quadlet unit；systemctl status <名稱>.target
 ```
 
 ## 延伸閱讀
 
-- [架構](docs/architecture.md)：phase 的執行機制、程式碼導讀、網段、狀態目錄、apiserver 的入口、主機的 sysctl 與 sudo。
-- [節點 image 與共用 image store](docs/node-image.md)：image 的內容、自行建置、store 為什麼唯讀。
+- [架構](docs/architecture.md)：phase 的執行機制、程式碼導讀、網段、狀態目錄、router 與 apiserver 的入口、主機的 sysctl 與 sudo。
+- [節點 image 與共用 image store](docs/node-image.md)：節點與 router image 的內容、自行建置、store 為什麼唯讀。
 - [開發](docs/development.md)：測試規範、CI、版本政策、與 v1 的差異。
 
 ## 想參與

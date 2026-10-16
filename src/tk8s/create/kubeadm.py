@@ -22,7 +22,7 @@ def kubectl_env(ctx: Context) -> dict[str, str]:
 def render_init(ctx: Context) -> str:
     c = ctx.require_cluster()
     cp, net = c.first_control_plane, c.spec.network
-    sans = [f"api.{c.domain}", str(net.lb), *(str(n.ip) for n in c.control_planes)]
+    sans = [f"api.{c.domain}", str(net.router), *(str(n.ip) for n in c.control_planes)]
     return template(
         ctx.paths.home,
         "init-config.yaml",
@@ -70,14 +70,14 @@ def save_certificate_key(ctx: Context, key: str) -> None:
     ctx.host.write(ctx.state_dir / ".certificate-key", key + "\n", mode=0o600)
 
 
-def wait_lb_ready(ctx: Context) -> None:
-    """kubeadm talked to the apiserver through the LB; make sure the LB reports it healthy before
-    anything else uses the endpoint."""
+def wait_router_ready(ctx: Context) -> None:
+    """kubeadm talked to the apiserver through the router; make sure the router reports a healthy
+    control plane before anything else uses the endpoint."""
     c = ctx.require_cluster()
-    lb = c.spec.network.lb
+    endpoint = c.spec.network.router
     for i in range(1, 31):
         r = ctx.host.run(
-            ["curl", "-sk", "--max-time", "3", f"https://{lb}:6443/readyz"],
+            ["curl", "-sk", "--max-time", "3", f"https://{endpoint}:6443/readyz"],
             capture=True,
             check=False,
         )
@@ -85,8 +85,8 @@ def wait_lb_ready(ctx: Context) -> None:
             return
         if i == 30:
             raise PhaseFailed(
-                f"the apiserver LB at {lb} has no healthy control plane after 60 s "
-                f"(podman logs {c.name}-lb)"
+                f"the apiserver router at {endpoint} has no healthy control plane after 60 s "
+                f"(podman exec {c.name}-router /opt/vyatta/bin/vyatta-op-cmd-wrapper show haproxy)"
             )
         time.sleep(ctx.options.poll)
 
@@ -130,10 +130,12 @@ def init_done(ctx: Context) -> bool:
 
 def init_run(ctx: Context) -> None:
     """kubeadm init on the first control plane; keep the certificate key for the other control
-    planes; wait until the LB sees the apiserver."""
+    planes; wait until the router sees the apiserver."""
     cp = ctx.require_cluster().first_control_plane.name
     if _initialised(ctx, cp):
-        wait_lb_ready(ctx)  # a resume right after a restart: the apiserver may still be coming up
+        wait_router_ready(
+            ctx
+        )  # a resume right after a restart: the apiserver may still be coming up
         if not _completed(ctx, cp):
             raise PhaseFailed(
                 f"kubeadm init on {cp} did not complete (admin.conf exists but the cluster was "
@@ -165,7 +167,7 @@ def init_run(ctx: Context) -> None:
             raise PhaseFailed("certificate key not found in kubeadm output")
         save_certificate_key(ctx, m.group(1))
         ctx.say(f"  {cp} initialized")
-    wait_lb_ready(ctx)
+    wait_router_ready(ctx)
 
 
 INIT = Phase("init", "kubeadm init on the first control plane", init_done, init_run)
@@ -185,7 +187,7 @@ def kubeconfig_done(ctx: Context) -> bool:
 
 
 def kubeconfig_run(ctx: Context) -> None:
-    """The host cannot resolve api.<cluster>.k8s; its kubeconfig points straight at the LB."""
+    """The host cannot resolve api.<cluster>.k8s; its kubeconfig points straight at the router."""
     c = ctx.require_cluster()
     cp = c.first_control_plane.name
     r = ctx.host.run(
@@ -197,16 +199,16 @@ def kubeconfig_run(ctx: Context) -> None:
     if r.returncode != 0 or not r.stdout.strip():
         raise PhaseFailed(f"could not read /etc/kubernetes/admin.conf from {cp}")
     text = r.stdout.replace(
-        f"server: https://api.{c.domain}:6443", f"server: https://{c.spec.network.lb}:6443"
+        f"server: https://api.{c.domain}:6443", f"server: https://{c.spec.network.router}:6443"
     )
     ctx.host.write(ctx.state_dir / "kubeconfig", text, mode=0o600)
     # On a resume init is already done and skipped: this is where the apiserver gets waited for.
-    wait_lb_ready(ctx)
+    wait_router_ready(ctx)
 
 
 KUBECONFIG = Phase(
     "kubeconfig",
-    "hand the host a kubeconfig that points at the LB",
+    "hand the host a kubeconfig that points at the router",
     kubeconfig_done,
     kubeconfig_run,
 )

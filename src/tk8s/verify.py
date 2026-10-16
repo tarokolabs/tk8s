@@ -9,8 +9,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .create import router
 from .create.kubeadm import kubectl_env
-from .create.nodes import stats_csv
 from .phases import Context, Phase, PhaseFailed
 from .render import template
 
@@ -300,26 +300,28 @@ def check_gvisor_network(r: Report) -> None:
         )
 
 
-def check_apiserver_lb(r: Report) -> None:
-    """The LB's stats CSV (column 18 = status) says how many control planes it sees UP."""
+def check_router(r: Report) -> None:
+    """`show haproxy` in the router: how many control planes the api backend sees UP."""
     c = r.ctx.require_cluster()
-    lb = c.spec.network.lb
+    endpoint = c.spec.network.router
     joined = sum(1 for n in c.control_planes if n.join)
-    rows = [ln.split(",") for ln in stats_csv(r.ctx).splitlines()]
-    up = sum(
-        1
-        for f in rows
-        if len(f) > 17 and f[0] == "control-planes" and f[1] != "BACKEND" and f[17].startswith("UP")
-    )  # "UP 1/2" (rise window) serves too
+    listed = router.backends(r.ctx)
+    up = sum(1 for _, status in listed if status.startswith("UP"))  # "UP 1/2" too
+    stale = {n for n, _ in listed} != {n.name for n in c.control_planes}
     ready = r.ctx.host.run(
-        ["curl", "-sk", "--max-time", "5", f"https://{lb}:6443/readyz"], capture=True, check=False
+        ["curl", "-sk", "--max-time", "5", f"https://{endpoint}:6443/readyz"],
+        capture=True,
+        check=False,
     ).stdout[:40]
-    if ready == "ok" and up == joined:
-        r.ok(f"apiserver LB {lb} healthy ({up}/{joined} control planes UP)")
+    if ready == "ok" and up == joined and not stale:
+        r.ok(f"apiserver router {endpoint} healthy ({up}/{joined} control planes UP)")
     else:
+        names = ", ".join(n for n, _ in listed) or "nothing"
         r.ng(
-            f"apiserver LB {lb}",
-            f"readyz='{ready}', {up} of {joined} control planes UP (podman logs {c.name}-lb)",
+            f"apiserver router {endpoint}",
+            f"readyz='{ready}', {up} of {joined} control planes UP"
+            + (f", backends {names}" if stale else "")
+            + f" (podman exec {c.name}-router {router.OP} show haproxy)",
         )
 
 
@@ -438,7 +440,7 @@ CHECKS = [
     ("runtimeclass-crun", "a pod under RuntimeClass crun", check_runtimeclass_crun),
     ("runtimeclass-gvisor", "a pod under RuntimeClass gvisor", check_runtimeclass_gvisor),
     ("gvisor-network", "the kubernetes API reachable from a gVisor sandbox", check_gvisor_network),
-    ("apiserver-lb", "the LB healthy with every joined control plane UP", check_apiserver_lb),
+    ("router", "the router healthy with every joined control plane UP", check_router),
     ("gatewayclass", "GatewayClass cilium Accepted", check_gatewayclass),
     ("gateway", "a Gateway programmed by LB-IPAM", check_gateway),
     ("httproute", "an HTTPRoute reachable from the host", check_httproute),
@@ -461,7 +463,7 @@ SECTIONS = {
     "metrics": "metrics-server",
     "storage": "local-path",
     "runtimeclass-crun": "runtimeclass",
-    "apiserver-lb": "apiserver-lb",
+    "router": "router",
     "gatewayclass": "gateway-api",
 }
 

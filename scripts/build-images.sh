@@ -3,6 +3,7 @@
 #
 # 用法：
 #   build-images.sh node <K8s版本>...     # 每個版本建一個 node image（CRI-O）
+#   build-images.sh router                # VyOS router image, version from versions.yaml
 # （toolbox/admin 等叢集內 image 屬教材範疇，見 wulin repo 的 bin/build-images.sh）
 #
 # 環境變數：
@@ -48,8 +49,15 @@ node)
       build_push "node:v${v}" images/node --build-arg=VER=${v} --build-arg=CRIO=${crio}
    done
    ;;
+router)
+   # VyOS rolling by build number and ISO checksum, both from versions.yaml
+   vyos=$(sed -nE 's/^vyos: *"([^"]+)".*/\1/p' "${TK}/versions.yaml")
+   sha=$(sed -nE 's/^vyos_sha256: *"([^"]+)".*/\1/p' "${TK}/versions.yaml")
+   if [ -z "${vyos}" ] || [ -z "${sha}" ]; then echo "versions.yaml has no vyos/vyos_sha256; cannot build router" && exit 1; fi
+   build_push "router:${vyos}" images/router --build-arg=VYOS=${vyos} --build-arg=SHA256=${sha}
+   ;;
 *)
-   echo "build-images.sh node <K8s版本>..."
+   echo "build-images.sh node <K8s版本>... | router"
    exit 1
    ;;
 esac

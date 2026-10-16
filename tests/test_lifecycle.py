@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.fixtures import OP, SHOW_HAPROXY
 from tk8s import lifecycle, model
 from tk8s.host import FakeHost, Result
 from tk8s.phases import Context
@@ -85,7 +86,7 @@ def test_describe_sections(ctx: Context, host: FakeHost) -> None:
         "Name:        demo",
         "State:       Creating",
         "Kubernetes:  1.37.1   cni: cilium   datapath: auto   gvisor: false",
-        "lb 172.22.0.100",
+        "router 172.22.0.253",
         "Nodes:",
         "  demo-worker-1 ",
         "172.22.0.2",
@@ -97,13 +98,21 @@ def test_describe_sections(ctx: Context, host: FakeHost) -> None:
         "Addons:",
         "  unavailable (cluster is not running)",
         "Access:",
-        "  apiserver:  https://172.22.0.100:6443",
+        "  apiserver:  https://172.22.0.253:6443 (VyOS haproxy in demo-router; every node "
+        "and this host go through it)",
         "sudo ip route add 172.22.0.0/24 via <host-ip>",
         "Paths:",
         "/etc/containers/systemd/demo/",
     ):
         assert s in out, s
     assert "dns 172" not in out
+    i = host.lines.index("Router:")
+    assert host.lines[i + 1 : i + 5] == [
+        "  mode:     proxy (VyOS load-balancing haproxy, TCP check on every control plane)",
+        "  address:  172.22.0.253 (api.demo.k8s resolves to it on every node)",
+        "  shell:    sudo podman exec -it demo-router vbash",
+        "  backends: unavailable (cluster is not running)",
+    ]
 
 
 def test_describe_running_cluster_asks_kubectl_with_the_cluster_kubeconfig(
@@ -162,7 +171,7 @@ def test_stop_names_every_unit_at_once(ctx: Context, host: FakeHost) -> None:
     assert len(stops) == 1 and stops[0].sudo
     assert stops[0].argv[2:] == [
         "demo.target",
-        "demo-lb.service",
+        "demo-router.service",
         "demo-control-plane-1.service",
         "demo-worker-1.service",
         "demo-worker-2.service",
@@ -244,3 +253,19 @@ def test_stop_survives_a_node_recorded_without_a_unit(ctx: Context, host: FakeHo
     )
     lifecycle.stop(ctx, ctx.require_cluster())
     assert host.lines[-1] == "cluster demo stopped"
+
+
+def test_describe_running_cluster_lists_the_router_backends(ctx: Context, host: FakeHost) -> None:
+    c = ctx.require_cluster()
+    assert c.status is not None
+    ctx.cluster = c.model_copy(update={"status": c.status.model_copy(update={"phase": "Ready"})})
+    c = on_disk(ctx, host)
+    host.active.add("demo.target")
+    r = host.responses
+    r[("kubectl", "--request-timeout=5s")] = Result(1, "", "nope")
+    r[("ip", "-4", "route", "get")] = Result(
+        0, "1.1.1.1 via 192.168.1.1 dev eth0 src 10.0.0.9\n", ""
+    )
+    r[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(0, SHOW_HAPROXY, "")
+    lifecycle.describe(ctx, c, None)
+    assert "  backends: demo-control-plane-1 UP" in host.lines

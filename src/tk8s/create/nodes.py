@@ -1,15 +1,10 @@
-"""nodes: the CNI plugins the nodes mount, the LB image in the host store, then start the cluster
-target and wait for every node's systemd and CRI-O and for the LB to list the control planes."""
+"""nodes: the CNI plugins the nodes mount, then start the cluster target and wait for every
+node's systemd and CRI-O and for the router to boot and list the control planes."""
 
 import time
 
-from .. import images
 from ..phases import Context, Phase, PhaseFailed
-
-STATS_CMD = (
-    'exec 3<>/dev/tcp/127.0.0.1/8404; printf "GET /stats;csv HTTP/1.0\\r\\n\\r\\n" >&3; cat <&3'
-)
-
+from . import router
 
 # ---- cni-plugins
 
@@ -62,30 +57,13 @@ def systemd_state(ctx: Context, node: str) -> str:
     return r.stdout.strip()
 
 
-def stats_csv(ctx: Context) -> str:
-    c = ctx.require_cluster()
-    r = ctx.host.run(
-        ["podman", "exec", f"{c.name}-lb", "bash", "-c", STATS_CMD],
-        sudo=True,
-        capture=True,
-        check=False,
-    )
-    return r.stdout
-
-
-def lb_backends(ctx: Context) -> int:
-    """Rows of the control-planes backend in the LB's stats CSV, the BACKEND summary excluded."""
-    rows = (line.split(",") for line in stats_csv(ctx).splitlines())
-    return sum(1 for f in rows if len(f) > 1 and f[0] == "control-planes" and f[1] != "BACKEND")
-
-
 def up_done(ctx: Context) -> bool:
     c = ctx.require_cluster()
     if not ctx.host.is_active(f"{c.name}.target"):
         return False
     if any(systemd_state(ctx, n.name) not in ("running", "degraded") for n in c.spec.nodes):
         return False
-    return lb_backends(ctx) >= len(c.control_planes)
+    return router.booted(ctx) and len(router.backends(ctx)) >= len(c.control_planes)
 
 
 def remove_stale_volumes(ctx: Context) -> None:
@@ -134,28 +112,8 @@ def wait_node(ctx: Context, node: str) -> None:
         time.sleep(ctx.options.poll)
 
 
-def wait_lb(ctx: Context) -> None:
-    """The LB listing every control plane as a backend proves it is up with a good config; the
-    backends stay DOWN until kubeadm brings an apiserver up."""
-    c = ctx.require_cluster()
-    want = len(c.control_planes)
-    got = 0
-    for i in range(1, 31):
-        got = lb_backends(ctx)
-        if got >= want:
-            ctx.say(f"  {c.name}-lb: {got} control plane backend(s) at {c.spec.network.lb}")
-            return
-        if i == 30:
-            raise PhaseFailed(
-                f"{c.name}-lb lists {got} of {want} control planes within 60 s "
-                f"(podman logs {c.name}-lb)"
-            )
-        time.sleep(ctx.options.poll)
-
-
 def up_run(ctx: Context) -> None:
     c = ctx.require_cluster()
-    images.copy_to_host(ctx, c.spec.kubernetes, ctx.versions.haproxy)
     ctx.host.mkdir(ctx.state_dir / "storage")
     ctx.host.mkdir(ctx.state_dir / "logs")
     if not ctx.host.exists(ctx.paths.wulin_dir):
@@ -168,9 +126,9 @@ def up_run(ctx: Context) -> None:
     ctx.host.run(["systemctl", "enable", "--now", "--quiet", f"{c.name}.target"], sudo=True)
     for n in c.spec.nodes:
         wait_node(ctx, n.name)
-    wait_lb(ctx)
+    router.wait(ctx)
 
 
-UP = Phase("up", "start the cluster target and wait for every node and the LB", up_done, up_run)
+UP = Phase("up", "start the cluster target and wait for every node and the router", up_done, up_run)
 
 PHASE = Phase("nodes", "start the nodes", None, lambda ctx: None, children=(CNI_PLUGINS, UP))

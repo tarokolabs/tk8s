@@ -19,7 +19,8 @@ spec:
     index: 3
     nodes: 172.22.3.0/24
     gateway: 172.22.3.254
-    lb: 172.22.3.100
+    router: 172.22.3.253
+    ha: proxy
     lb_range: 172.22.3.200-172.22.3.219
     pods: 10.244.24.0/21
     services: 10.98.3.0/24
@@ -97,15 +98,6 @@ def test_duplicate_keys_are_refused(tmp_path: Path) -> None:
         ("metadata: {name: x}\nspec: {nodes: [{role: worker, cpu: two}]}\n", "spec.nodes.0.cpu"),
         ("metadata: {name: x}\nspec: {nodes: [{role: worker, name: Big_Node}]}\n", "Big_Node"),
         (
-            "metadata: {name: x}\nspec: {runtime: crio, nodes: [{role: control-plane}]}\n",
-            "spec.runtime is not a field any more",
-        ),
-        (
-            "metadata: {name: x}\nspec: {network: {nodes: 172.22.7.0/24, vip: 172.22.7.100}, "
-            "nodes: [{role: control-plane}]}\n",
-            "spec.network.vip is no longer supported",
-        ),
-        (
             "metadata: {name: x}\nspec: {nodes: [{role: control-plane}]}\nstatus: {phase: Ready}\n",
             "status is written by tkctl",
         ),
@@ -128,17 +120,31 @@ def test_user_file_with_spec_before_metadata_is_fine(tmp_path: Path) -> None:
     assert u.metadata.name == "later" and u.spec.nodes[1].name == "later-big"
 
 
-def test_user_network_accepts_lb_pin() -> None:
+def test_user_network_accepts_router_pin() -> None:
     u = model.UserCluster.model_validate(
         {
             "metadata": {"name": "pin"},
             "spec": {
-                "network": {"nodes": "172.22.9.0/24", "lb": "172.22.9.240"},
+                "network": {"nodes": "172.22.9.0/24", "router": "172.22.9.240"},
                 "nodes": [{"role": "control-plane"}],
             },
         }
     )
-    assert u.spec.network is not None and u.spec.network.lb == IPv4Address("172.22.9.240")
+    assert u.spec.network is not None and u.spec.network.router == IPv4Address("172.22.9.240")
+
+
+def test_a_cluster_file_with_the_old_lb_key_is_refused_as_a_plain_extra_field() -> None:
+    """No compatibility and no special message: clusters made before the router existed are
+    deleted with that version's tkctl and recreated."""
+    with pytest.raises(model.ClusterFileError, match=r"spec\.network"):
+        model.load_text(GOOD.replace("    router: 172.22.3.253\n", "    lb: 172.22.3.100\n"))
+
+
+def test_network_ha_defaults_to_proxy_and_accepts_only_proxy_for_now() -> None:
+    c = model.load_text(GOOD.replace("    ha: proxy\n", ""))
+    assert c.spec.network.ha == "proxy"
+    with pytest.raises(model.ClusterFileError, match="ha"):
+        model.load_text(GOOD.replace("ha: proxy", "ha: bgp"))
 
 
 def test_node_request_is_frozen_and_defaults_to_join() -> None:

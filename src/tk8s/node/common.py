@@ -6,7 +6,6 @@ from ipaddress import IPv4Address
 from pathlib import Path
 
 from .. import model
-from ..create import nodes
 from ..create.kubeadm import kubectl_env
 from ..lifecycle import ClusterError
 from ..phases import Context, PhaseFailed
@@ -26,13 +25,11 @@ def next_name(c: model.Cluster, role: model.Role) -> str:
 
 
 def next_ip(c: model.Cluster) -> IPv4Address:
-    """One past the highest node address. .100 is the LB and .200-.219 the LB pool, so .199 is
-    the last node."""
+    """One past the highest node address. .200-.219 is the LB-IPAM pool and .253 the router,
+    so .199 is the last node."""
     net = c.spec.network.nodes
     last = max(int(n.ip) - int(net.network_address) for n in c.spec.nodes)
     host = last + 1
-    if host == 100:
-        host = 101
     if host > 199:
         raise ClusterError(f"no free node address left in {net} (.200-.219 is the LB pool)")
     return net.network_address + host
@@ -106,34 +103,6 @@ def unit_file(ctx: Context) -> Path:
 
 
 # ---- host-side helpers
-
-
-OLD_LB_MOUNT = "/usr/local/etc/haproxy/haproxy.cfg"
-
-
-def reload_lb(ctx: Context) -> None:
-    """The LB's backend list came from cluster.yaml; SIGUSR2 makes HAProxy reload it without
-    dropping connections. An LB started by v2026.10.x bind-mounted the single haproxy.cfg file
-    and still reads the inode the config was replaced under: restart it once, the unit on disk
-    already mounts the directory."""
-    c = ctx.require_cluster()
-    mounts = ctx.host.run(
-        [
-            "podman",
-            "inspect",
-            f"{c.name}-lb",
-            "--format",
-            "{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}",
-        ],
-        sudo=True,
-        capture=True,
-        check=False,
-    ).stdout
-    if OLD_LB_MOUNT in mounts:
-        ctx.host.run(["systemctl", "restart", f"{c.name}-lb.service"], sudo=True)
-        nodes.wait_lb(ctx)
-        return
-    ctx.host.run(["podman", "kill", "--signal", "USR2", f"{c.name}-lb"], sudo=True, capture=True)
 
 
 def node_ready(ctx: Context, name: str) -> bool:

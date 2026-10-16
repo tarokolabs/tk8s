@@ -4,7 +4,7 @@ with the cluster. join node runs the same tail to finish a node that an add left
 
 import time
 
-from ..create import addons, kubeadm, nodes, units
+from ..create import addons, kubeadm, nodes, router, units
 from ..create import images as create_images
 from ..lifecycle import save_cluster
 from ..phases import Context, Phase, PhaseFailed
@@ -14,7 +14,6 @@ from .common import (
     node_of,
     node_ready,
     plan_add,
-    reload_lb,
     require_node,
     with_node,
 )
@@ -41,22 +40,26 @@ PLAN = Phase(
 
 def start_done(ctx: Context) -> bool:
     n = require_node(ctx)
-    if not ctx.host.is_active(f"{n}.service"):
+    if not ctx.host.is_active(f"{n}.service") or not router.synced(ctx, ctx.require_cluster()):
         return False
     return nodes.systemd_state(ctx, n) in ("running", "degraded")
 
 
 def start_run(ctx: Context) -> None:
-    """daemon-reload picks the new unit up, the LB learns the new backend list, the node starts."""
+    """daemon-reload picks the new unit up, the router learns the new backend list, the node
+    starts."""
     n = require_node(ctx)
     ctx.host.run(["systemctl", "daemon-reload"], sudo=True)
-    reload_lb(ctx)
+    router.reload(ctx, ctx.require_cluster())
     ctx.host.run(["systemctl", "start", f"{n}.service"], sudo=True)
     nodes.wait_node(ctx, n)
 
 
 START = Phase(
-    "start", "reload the LB, start the node, wait for its systemd and CRI-O", start_done, start_run
+    "start",
+    "reload the router, start the node, wait for its systemd and CRI-O",
+    start_done,
+    start_run,
 )
 
 

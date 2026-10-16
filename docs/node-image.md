@@ -1,4 +1,4 @@
-# 節點 image 與共用 image store
+# 節點 image、router image 與共用 image store
 
 ## 節點 image
 
@@ -39,7 +39,7 @@ CI 的 `release` workflow 在每個 tag 以同一份配方建兩個支援版本�
 
 ## 共用 image store
 
-建叢集需要的 image（control plane、Cilium、metrics-server、local-path、HAProxy、`verify` 的測試 image）由主機拉一次，放在 `/opt/taroko/images/<K8s 版本>/`，每個節點容器以唯讀掛在 `/var/lib/containers/shared`，CRI-O 把它當 additional image store：查 image 先看這裡，有就直接用，沒有才照常 pull 進節點自己的 `/var`。
+建叢集需要的 image（control plane、Cilium、metrics-server、local-path、`verify` 的測試 image）由主機拉一次，放在 `/opt/taroko/images/<K8s 版本>/`，每個節點容器以唯讀掛在 `/var/lib/containers/shared`，CRI-O 把它當 additional image store：查 image 先看這裡，有就直接用，沒有才照常 pull 進節點自己的 `/var`。
 
 - 第一次 `tkctl create cluster` 多花一次下載（約 2 GB、一兩分鐘），之後每個叢集、每個節點都是零下載；`--k8s` 不同版本各有一個目錄。
 - 離線的教室先在有網路時 `tkctl pull images` 與 `tkctl create cluster --phase nodes/cni-plugins`（CNI plugins 不在 store 裡），上課時 `TK_OFFLINE=1 tkctl create cluster`：缺任何 image 會直接列出而不嘗試下載。CI 的 e2e 就是這樣建的。`--gvisor` 的叢集另外需要 gVisor 的下載，目前不受 `TK_OFFLINE` 管。
@@ -48,3 +48,7 @@ CI 的 `release` workflow 在每個 tag 以同一份配方建兩個支援版本�
 - 建叢集時主機要套用的 manifest 也都在 repo 裡：Gateway API CRD、metrics-server manifest 與 Cilium 的 Helm chart 由 `scripts/vendor-manifests.sh` 放進 `manifests/`，升版時重新執行一次；cilium CLI 不會再向 helm.cilium.io 下載 chart。
 - 只有 tkctl 寫這個目錄；主機的 `podman image prune`、`podman system reset` 操作的是 `/var/lib/containers/storage`，不會影響它。要刪除就 `tkctl delete images --k8s <版本>`，有叢集在用會被拒絕。
 - 節點 image 需是 2026-10 之後的配方（掛載點 `/var/lib/containers/shared`）。先前下載的本機快取用 `tkctl pull images --refresh` 更新（同一個 tag 重發時也是這樣換掉舊的）；舊 image 仍可建叢集，只是不會用到 store。
+
+## router image
+
+每個叢集的 router 跑 `ghcr.io/tarokolabs/tk8s/router:<建置編號>`，配方在 `images/router/`。VyOS 沒有可直接跑的容器 image，只有 nightly 的 ISO，所以配方把 ISO 裡的 `live/filesystem.squashfs` 取出來當 rootfs，mask 掉容器裡起不來的 auditd 與 rsyslog，`STOPSIGNAL SIGRTMIN+3`、`CMD /sbin/init`，約 1.8 GB。`versions.yaml` 的 `vyos` 是 nightly tag 去掉 `-rolling` 的建置編號，`vyos_sha256` 是 ISO 的 checksum；每次發版推到當時最新的 nightly，release 跟節點 image 一起建、推 GHCR、digest 進 release notes。tag 沒發布時 `tkctl pull images` 會從 ISO 本地建（下載 641 MB，幾分鐘）。它跑在主機的 podman storage，不進共用 store。

@@ -1,4 +1,5 @@
-# Release (#13): pushing a v* tag builds the node image for both supported Kubernetes versions,
+# Release (#13): pushing a v* tag builds the node image for both supported Kubernetes versions and
+# the VyOS router image,
 # waits for the e2e run of the same commit, and creates the GitHub Release with notes rendered
 # from versions.yaml and the image digests (the digest table is the compatibility contract).
 # First-time setup: the GHCR package tk8s/node must grant this repo write access under
@@ -39,8 +40,23 @@ jobs:
         with:
           name: digests-node-${{ matrix.k8s }}
           path: digests/
+  router:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Build and push the router image
+        run: TK="$GITHUB_WORKSPACE" SUDO="" DIGEST_DIR="$GITHUB_WORKSPACE/digests" scripts/build-images.sh router
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-router
+          path: digests/
   release:
-    needs: [node]
+    needs: [node, router]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

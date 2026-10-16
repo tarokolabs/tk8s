@@ -69,7 +69,7 @@ def test_flags(capsys: pytest.CaptureFixture[str]) -> None:
         "--dry-run",
     )
     assert rc == 0 and "name: demo-control-plane-3" in out and "name: demo-worker-4" in out
-    assert 'kubernetes: "1.36.5"' in out and "lb: 172.22." in out
+    assert 'kubernetes: "1.36.5"' in out and "router: 172.22." in out
     rc, out = run(
         capsys, "create", "cluster", "demo", "--control-planes", "3", "--defer-join", "--dry-run"
     )
@@ -130,7 +130,7 @@ def test_bad_invocations_fail_with_the_old_messages(
 TAKEN = (
     "apiVersion: taroko.io/v1alpha1\nkind: Cluster\nmetadata: {name: taken}\n"
     'spec:\n  kubernetes: "1.37.1"\n  cni: cilium\n  datapath: auto\n  gvisor: false\n'
-    "  network: {index: 0, nodes: 172.22.0.0/24, gateway: 172.22.0.254, lb: 172.22.0.100, "
+    "  network: {index: 0, nodes: 172.22.0.0/24, gateway: 172.22.0.254, router: 172.22.0.253, "
     "lb_range: 172.22.0.200-172.22.0.219, pods: 10.244.0.0/21, services: 10.98.0.0/24}\n"
     "  nodes: [{role: control-plane, name: taken-control-plane-1, ip: 172.22.0.1, cpu: 2, "
     "memory: 4g, join: true}]\n"

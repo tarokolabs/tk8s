@@ -10,10 +10,14 @@ from tk8s.paths import Paths
 from tk8s.phases import Context, Options
 
 HOME = Path(__file__).resolve().parents[1]
-STATS = (
-    "control-planes,demo-control-plane-1,0,0,0,0,,0,0,0,,0,,0,0,0,0,UP,1\n"
-    "control-planes,BACKEND,0,0,0,0,200,0,0,0,0,0,,0,0,0,0,UP,1\n"
+SHOW_HAPROXY = (
+    "Proxy name            Role       Status    Req rate    Resp time    Last change\n"
+    "--------------------  ---------  --------  ----------  -----------  -------------\n"
+    "api                   FRONTEND   OPEN      0\n"
+    "api                   BACKEND    UP                    0 ms         4s\n"
+    "api                   demo-control-plane-1  UP         0 ms         4s\n"
 )
+OP = "/opt/vyatta/bin/vyatta-op-cmd-wrapper"
 
 
 def ready_host(host: FakeHost, data_dir: Path, name: str = "demo") -> model.Cluster:
@@ -64,7 +68,8 @@ def ready_host(host: FakeHost, data_dir: Path, name: str = "demo") -> model.Clus
     r[("id", "-u")] = Result(0, "1000\n", "")
     r[("id", "-g")] = Result(0, "1000\n", "")
     r[("id", "-un")] = Result(0, "student\n", "")
-    r[("podman", "exec", f"{name}-lb")] = Result(0, STATS, "")
+    r[("podman", "exec", f"{name}-router", "cat", "/tmp/vyos-config-status")] = Result(0, "0\n", "")
+    r[("podman", "exec", f"{name}-router", OP, "show", "haproxy")] = Result(0, SHOW_HAPROXY, "")
     for n in c.spec.nodes:
         r[("podman", "exec", n.name, "systemctl", "is-system-running")] = Result(0, "running\n", "")
         r[("podman", "exec", n.name, "test")] = Result(0, "", "")

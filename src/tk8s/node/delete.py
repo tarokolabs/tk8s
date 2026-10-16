@@ -3,7 +3,7 @@ without it, take it out of cluster.yaml. Like delete cluster, every phase's done
 part is already gone", so a delete that stopped halfway is finished by running it again."""
 
 from .. import model
-from ..create import kubeadm, units
+from ..create import kubeadm, router, units
 from ..create.kubeadm import kubectl_env
 from ..delete import (
     container_exists,
@@ -14,7 +14,7 @@ from ..delete import (
 )
 from ..lifecycle import ClusterError, save_cluster
 from ..phases import Context, Phase
-from .common import find, reload_lb, require_node, unit_file, without_node
+from .common import find, require_node, unit_file, without_node
 
 
 def confirm_delete(ctx: Context) -> None:
@@ -65,8 +65,8 @@ def drain_run(ctx: Context) -> None:
     ctx.host.run(
         ["podman", "exec", n, "kubeadm", "reset", "-f"], sudo=True, capture=True, check=False
     )
-    # A control plane's apiserver just went away; the LB keeps routing to it for a few seconds.
-    kubeadm.wait_lb_ready(ctx)
+    # A control plane's apiserver just went away; the router keeps routing to it for seconds.
+    kubeadm.wait_router_ready(ctx)
     ctx.host.run(["kubectl", "delete", "node", n], env=kubectl_env(ctx), capture=True)
 
 
@@ -116,12 +116,13 @@ def trimmed(ctx: Context) -> model.Cluster:
 
 
 def units_done(ctx: Context) -> bool:
-    return not ctx.host.exists(unit_file(ctx)) and units.done(ctx, trimmed(ctx))
+    c = trimmed(ctx)
+    return not ctx.host.exists(unit_file(ctx)) and units.done(ctx, c) and router.synced(ctx, c)
 
 
 def units_run(ctx: Context) -> None:
-    """The target and haproxy.cfg are rendered without the node first, then its unit goes, then
-    systemd and the LB learn about it."""
+    """The target and config.boot are rendered without the node first, then its unit goes, then
+    systemd and the router learn about it."""
     n = require_node(ctx)
     units.run(ctx, trimmed(ctx))
     ctx.host.run(["rm", "-f", str(unit_file(ctx))], sudo=True)
@@ -129,12 +130,12 @@ def units_run(ctx: Context) -> None:
     ctx.host.run(
         ["systemctl", "reset-failed", f"{n}.service"], sudo=True, capture=True, check=False
     )
-    reload_lb(ctx)
+    router.reload(ctx, trimmed(ctx))
 
 
 UNITS = Phase(
     "units",
-    "drop the node's unit, re-render the target and the LB config, reload the LB",
+    "drop the node's unit, re-render the target and the router config, reload the router",
     units_done,
     units_run,
 )

@@ -17,7 +17,7 @@ def everything_there(ctx: Context, host: FakeHost) -> None:
     host.files[p.systemd_dir / "demo.target"] = "x"
     host.files[p.systemd_dir / "demo-routes.service"] = "x"
     host.active.update({"demo.target", "demo-network.service"})
-    host.podman.update(f"container:{n}" for n in (*NODES, "demo-lb"))
+    host.podman.update(f"container:{n}" for n in (*NODES, "demo-router"))
     host.podman.update(f"volume:{v}" for n in NODES for v in delete.node_volumes(n))
     host.podman.add("network:demo")
     # done looks once (there), run looks twice (there, there), done looks again (gone, repeats)
@@ -45,7 +45,7 @@ def test_a_full_delete_removes_everything_in_order(ctx: Context, host: FakeHost)
     assert a.index(["podman", "rm", "-f", "demo-control-plane-1"]) < a.index(
         rm
     )  # nodes known before units go
-    for n in (*NODES, "demo-lb"):
+    for n in (*NODES, "demo-router"):
         assert ["podman", "rm", "-f", n] in a
     for n in NODES:
         for v in delete.node_volumes(n):
@@ -98,18 +98,18 @@ def test_without_cluster_yaml_the_units_name_the_nodes_to_remove(tmp_path: Path)
     host.dirs.add(unit_dir)
     for f in (
         "demo.network",
-        "demo-lb.container",
+        "demo-router.container",
         "demo-control-plane-1.container",
         "demo-worker-1.container",
     ):
         host.files[unit_dir / f] = "x"
     host.podman.update(
-        {"container:demo-lb", "container:demo-control-plane-1", "volume:demo-worker-1-var"}
+        {"container:demo-router", "container:demo-control-plane-1", "volume:demo-worker-1-var"}
     )
     assert delete.found(ctx)
     Runner([delete.PHASE], record=False).run(ctx)
     a = argvs(host)
-    assert ["podman", "rm", "-f", "demo-lb"] in a and [
+    assert ["podman", "rm", "-f", "demo-router"] in a and [
         "podman",
         "rm",
         "-f",
