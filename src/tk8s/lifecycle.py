@@ -93,9 +93,10 @@ def describe(ctx: Context, c: model.Cluster, output: str | None) -> None:
         f"Kubernetes:  {s.kubernetes}   cni: {s.cni}   "
         f"datapath: {s.datapath_resolved or s.datapath}   gvisor: {str(s.gvisor).lower()}"
     )
+    vip = f"  vip {net.vip}" if net.vip is not None else ""
     ctx.say(
         f"Network:     nodes {net.nodes} (gateway {net.gateway})  pods {net.pods}  "
-        f"services {net.services}  lb-ipam {net.lb_range}  router {net.router}"
+        f"services {net.services}  lb-ipam {net.lb_range}  router {net.router}{vip}"
     )
     ctx.say("Nodes:")
     ctx.say(f"  {'NAME':<24} {'ROLE':<14} {'IP':<14} {'RESOURCES':<14} JOIN")
@@ -107,10 +108,16 @@ def describe(ctx: Context, c: model.Cluster, output: str | None) -> None:
     describe_addons(ctx, c, state)
     describe_router(ctx, c, state)
     ctx.say("Access:")
-    ctx.say(
-        f"  apiserver:  https://{net.router}:6443 (VyOS haproxy in {c.name}-router; every node "
-        "and this host go through it)"
-    )
+    if net.ha == "proxy":
+        ctx.say(
+            f"  apiserver:  https://{net.router}:6443 (VyOS haproxy in {c.name}-router; every "
+            "node and this host go through it)"
+        )
+    else:
+        ctx.say(
+            f"  apiserver:  https://{net.vip}:6443 (anycast VIP; {c.name}-router spreads it over "
+            "the control planes announcing it)"
+        )
     ctx.say(
         f"  from this host:       LoadBalancer IPs ({net.lb_range}) and ClusterIPs "
         f"({net.services}) are routed"
@@ -131,14 +138,25 @@ def describe(ctx: Context, c: model.Cluster, output: str | None) -> None:
 def describe_router(ctx: Context, c: model.Cluster, state: str) -> None:
     net = c.spec.network
     ctx.say("Router:")
-    ctx.say(f"  mode:     {net.ha} (VyOS load-balancing haproxy, TCP check on every control plane)")
-    ctx.say(f"  address:  {net.router} (api.{c.domain} resolves to it on every node)")
+    if net.ha == "proxy":
+        ctx.say("  mode:     proxy (VyOS load-balancing haproxy, TCP check on every control plane)")
+        ctx.say(f"  address:  {net.router} (api.{c.domain} resolves to it on every node)")
+    else:
+        ctx.say(
+            "  mode:     bgp (VyOS BGP AS 65000, ECMP over every control plane announcing the VIP)"
+        )
+        ctx.say(f"  address:  {net.router} (api.{c.domain} -> {net.vip}, the VIP)")
     ctx.say(f"  shell:    sudo podman exec -it {c.name}-router vbash")
+    label = f"{router.kind(c)}s:"
     if state != "Running":
-        ctx.say("  backends: unavailable (cluster is not running)")
-        return
-    rows = router.backends(ctx)
-    ctx.say("  backends: " + (", ".join(f"{n} {s}" for n, s in rows) or "none listed"))
+        ctx.say(f"  {label:<10}unavailable (cluster is not running)")
+    else:
+        rows = router.members(ctx, c)
+        ctx.say(f"  {label:<10}" + (", ".join(f"{n} {s}" for n, s in rows) or "none listed"))
+        if net.ha == "bgp":
+            ctx.say(f"  nexthops: {router.nexthops(ctx, c)} to {net.vip} (show ip route {net.vip})")
+    if net.ha == "bgp" and len(c.control_planes) == 1:
+        ctx.say("  note:     one control plane: nothing to spread; --control-planes 3 shows ECMP")
 
 
 def describe_status(ctx: Context, c: model.Cluster) -> None:

@@ -2,10 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.fixtures import OP, SHOW_HAPROXY
-from tk8s import lifecycle, model
+from tests.fixtures import HOME, OP, SHOW_HAPROXY, bgp_router_answers
+from tk8s import lifecycle, model, versions
+from tk8s.create.plan import resolve
 from tk8s.host import FakeHost, Result
-from tk8s.phases import Context
+from tk8s.paths import Paths
+from tk8s.phases import Context, Options
 
 
 def on_disk(ctx: Context, host: FakeHost, *, marker: bool = False) -> model.Cluster:
@@ -269,3 +271,72 @@ def test_describe_running_cluster_lists_the_router_backends(ctx: Context, host: 
     r[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(0, SHOW_HAPROXY, "")
     lifecycle.describe(ctx, c, None)
     assert "  backends: demo-control-plane-1 UP" in host.lines
+
+
+ROUTE_GET = Result(0, "1.1.1.1 via 192.168.1.1 dev eth0 src 10.0.0.9\n", "")
+
+
+def test_describe_bgp_cluster_router_section(bgp_ctx: Context, host: FakeHost) -> None:
+    c = bgp_ctx.require_cluster()
+    assert c.status is not None
+    bgp_ctx.cluster = c.model_copy(
+        update={"status": c.status.model_copy(update={"phase": "Ready"})}
+    )
+    c = on_disk(bgp_ctx, host)
+    host.active.add("demo.target")
+    host.responses[("kubectl", "--request-timeout=5s")] = Result(1, "", "nope")
+    host.responses[("ip", "-4", "route", "get")] = ROUTE_GET
+    bgp_router_answers(host, established=2, hops=2)
+    lifecycle.describe(bgp_ctx, c, None)
+    out = "\n".join(host.lines)
+    assert "lb-ipam 172.22.0.200-172.22.0.219  router 172.22.0.253  vip 172.23.0.1" in out
+    i = host.lines.index("Router:")
+    section = [line for line in host.lines[i + 1 :] if not line.startswith("  $ ")]  # no echoes
+    assert section[:5] == [
+        "  mode:     bgp (VyOS BGP AS 65000, ECMP over every control plane announcing the VIP)",
+        "  address:  172.22.0.253 (api.demo.k8s -> 172.23.0.1, the VIP)",
+        "  shell:    sudo podman exec -it demo-router vbash",
+        "  peers:    demo-control-plane-1 Established, demo-control-plane-2 Established, "
+        "demo-control-plane-3 Active",
+        "  nexthops: 2 to 172.23.0.1 (show ip route 172.23.0.1)",
+    ]
+    assert (
+        "  apiserver:  https://172.23.0.1:6443 (anycast VIP; demo-router spreads it over the "
+        "control planes announcing it)"
+    ) in host.lines
+
+
+def test_describe_stopped_bgp_cluster_says_peers_unavailable(
+    bgp_ctx: Context, host: FakeHost
+) -> None:
+    c = on_disk(bgp_ctx, host)
+    host.responses[("ip", "-4", "route", "get")] = ROUTE_GET
+    lifecycle.describe(bgp_ctx, c, None)
+    assert "  peers:    unavailable (cluster is not running)" in host.lines
+
+
+def test_describe_single_control_plane_bgp_cluster_notes_no_ecmp(
+    paths: Paths, host: FakeHost
+) -> None:
+    vers = versions.load(HOME / "versions.yaml")
+    user = model.UserCluster(
+        metadata=model.Metadata(name="demo"),
+        spec=model.UserSpec(
+            network=model.UserNetwork(ha="bgp"), nodes=[model.NodeGroup(role="control-plane")]
+        ),
+    )
+    ctx = Context(host=host, paths=paths, versions=vers, options=Options(), say=host.lines.append)
+    ctx.cluster = resolve(
+        user,
+        k8s_default=vers.kubernetes.default,
+        existing=None,
+        used_indices=set(),
+        allow_overlap=False,
+        tk8s_version="test",
+    )
+    c = on_disk(ctx, host)
+    host.responses[("ip", "-4", "route", "get")] = ROUTE_GET
+    lifecycle.describe(ctx, c, None)
+    assert "  note:     one control plane: nothing to spread; --control-planes 3 shows ECMP" in (
+        host.lines
+    )

@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import model
 from .create import router
 from .create.kubeadm import kubectl_env
 from .phases import Context, Phase, PhaseFailed
@@ -300,19 +301,20 @@ def check_gvisor_network(r: Report) -> None:
         )
 
 
-def check_router(r: Report) -> None:
-    """`show haproxy` in the router: how many control planes the api backend sees UP."""
-    c = r.ctx.require_cluster()
+def _readyz(r: Report, endpoint: str) -> str:
+    return r.ctx.host.run(
+        ["curl", "-sk", "--max-time", "5", f"https://{endpoint}:6443/readyz"],
+        capture=True,
+        check=False,
+    ).stdout[:40]
+
+
+def _check_router_proxy(r: Report, c: model.Cluster, ready: str) -> None:
     endpoint = c.spec.network.router
     joined = sum(1 for n in c.control_planes if n.join)
     listed = router.backends(r.ctx)
     up = sum(1 for _, status in listed if status.startswith("UP"))  # "UP 1/2" too
     stale = {n for n, _ in listed} != {n.name for n in c.control_planes}
-    ready = r.ctx.host.run(
-        ["curl", "-sk", "--max-time", "5", f"https://{endpoint}:6443/readyz"],
-        capture=True,
-        check=False,
-    ).stdout[:40]
     if ready == "ok" and up == joined and not stale:
         r.ok(f"apiserver router {endpoint} healthy ({up}/{joined} control planes UP)")
     else:
@@ -323,6 +325,42 @@ def check_router(r: Report) -> None:
             + (f", backends {names}" if stale else "")
             + f" (podman exec {c.name}-router {router.OP} show haproxy)",
         )
+
+
+def _check_router_bgp(r: Report, c: model.Cluster, ready: str) -> None:
+    net = c.spec.network
+    joined = sum(1 for n in c.control_planes if n.join)
+    peers = router.peers(r.ctx, c)
+    up = sum(1 for _, s in peers if s == "Established")
+    stale = {n for n, _ in peers} != {n.name for n in c.control_planes}
+    hops = router.nexthops(r.ctx, c)
+    down = router.bfd_down(r.ctx, c)
+    if ready == "ok" and up == joined and not stale and hops == joined and not down:
+        r.ok(
+            f"apiserver router {net.router} healthy ({up}/{joined} control planes Established, "
+            f"{hops} ECMP next hops to {net.vip}, BFD up)"
+        )
+    else:
+        names = ", ".join(n for n, _ in peers) or "nothing"
+        r.ng(
+            f"apiserver router {net.router}",
+            f"readyz='{ready}', {up} of {joined} control planes Established, "
+            f"{hops} next hops to {net.vip}"
+            + (f", BFD down on {', '.join(down)}" if down else "")
+            + (f", peers {names}" if stale else "")
+            + f" (podman exec {c.name}-router {router.show(c)})",
+        )
+
+
+def check_router(r: Report) -> None:
+    """The endpoint answers /readyz and the router knows every joined control plane: backends UP
+    in proxy mode; peers Established, as many ECMP next hops to the VIP, BFD up in bgp mode."""
+    c = r.ctx.require_cluster()
+    ready = _readyz(r, str(c.endpoint_ip))
+    if c.spec.network.ha == "proxy":
+        _check_router_proxy(r, c, ready)
+    else:
+        _check_router_bgp(r, c, ready)
 
 
 def check_gatewayclass(r: Report) -> None:
@@ -440,7 +478,7 @@ CHECKS = [
     ("runtimeclass-crun", "a pod under RuntimeClass crun", check_runtimeclass_crun),
     ("runtimeclass-gvisor", "a pod under RuntimeClass gvisor", check_runtimeclass_gvisor),
     ("gvisor-network", "the kubernetes API reachable from a gVisor sandbox", check_gvisor_network),
-    ("router", "the router healthy with every joined control plane UP", check_router),
+    ("router", "the router healthy with every joined control plane behind it", check_router),
     ("gatewayclass", "GatewayClass cilium Accepted", check_gatewayclass),
     ("gateway", "a Gateway programmed by LB-IPAM", check_gateway),
     ("httproute", "an HTTPRoute reachable from the host", check_httproute),

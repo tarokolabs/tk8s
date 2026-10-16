@@ -1,6 +1,6 @@
 import pytest
 
-from tests.fixtures import OP, SHOW_HAPROXY
+from tests.fixtures import OP, SHOW_HAPROXY, bgp_router_answers
 from tk8s import model, verify
 from tk8s.host import FakeHost, Result
 from tk8s.phases import Context
@@ -261,3 +261,36 @@ def test_a_dependent_check_runs_its_prerequisite_first(ctx: Context, host: FakeH
         "SKIP  RuntimeClass gvisor — not enabled (create the cluster with --gvisor)"
     ]
     assert host.lines[-1] == "PASS 0  FAIL 0  SKIP 1"
+
+
+def bgp_healthy(bgp_ctx: Context, host: FakeHost) -> None:
+    healthy(bgp_ctx, host)  # the kubectl answers; the ctx is the bgp one
+    bgp_router_answers(host)
+    host.responses[("curl", "-sk", "--max-time", "5")] = Result(0, "ok", "")
+
+
+def test_router_check_in_bgp_mode_passes_with_every_peer_established_and_ecmp_full(
+    bgp_ctx: Context, host: FakeHost
+) -> None:
+    bgp_healthy(bgp_ctx, host)
+    assert verify.run(bgp_ctx, only="router") == 0
+    assert (
+        "PASS  apiserver router 172.22.0.253 healthy (3/3 control planes Established, "
+        "3 ECMP next hops to 172.23.0.1, BFD up)"
+    ) in host.lines
+    assert ["curl", "-sk", "--max-time", "5", "https://172.23.0.1:6443/readyz"] in [
+        c.argv for c in host.calls
+    ]
+
+
+def test_router_check_in_bgp_mode_fails_on_a_missing_next_hop_or_bfd(
+    bgp_ctx: Context, host: FakeHost
+) -> None:
+    bgp_healthy(bgp_ctx, host)
+    bgp_router_answers(host, established=3, hops=2, bfd_up=2)
+    assert verify.run(bgp_ctx, only="router") == 1
+    assert (
+        "FAIL  apiserver router 172.22.0.253 — readyz='ok', 3 of 3 control planes Established, "
+        "2 next hops to 172.23.0.1, BFD down on demo-control-plane-3 "
+        "(podman exec demo-router vtysh -c 'show bgp summary')"
+    ) in host.lines
