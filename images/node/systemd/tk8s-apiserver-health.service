@@ -1,0 +1,6 @@
+[Unit]
+Description=tk8s: keep the apiserver VIP on lo while /readyz answers ok (bgp mode)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/tk8s-apiserver-health

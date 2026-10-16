@@ -10,10 +10,10 @@ ARG CRIO
 ARG DEBIAN_FRONTEND=noninteractive
 
 # OS: systemd (and dbus: CRI-O's systemd cgroup manager asks systemd for cgroups over sd-bus), the
-# tools kubeadm's preflight and the kubelet need, zstd for addons:gvisor's tarball, and what a student
-# needs inside a node.
+# tools kubeadm's preflight and the kubelet need, FRR for bgp mode (bgpd, bfdd; off until tkctl
+# enables it in a control plane), zstd for addons:gvisor's tarball, and what a student needs inside a node.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      systemd systemd-sysv dbus ca-certificates curl iproute2 iptables nftables conntrack ethtool socat util-linux kmod procps \
+      systemd systemd-sysv dbus ca-certificates curl iproute2 iptables nftables conntrack ethtool frr socat util-linux kmod procps \
       nano vim iputils-ping less jq tcpdump strace zstd \
     && rm -rf /var/lib/apt/lists/*
 
@@ -44,6 +44,10 @@ RUN echo 'KUBELET_EXTRA_ARGS=--runtime-cgroups=/system.slice/crio.service' > /et
 # What kind's entrypoint did at start: rshared root and a unique product_uuid.
 COPY systemd/tk8s-node-init.service /etc/systemd/system/tk8s-node-init.service
 COPY sbin/tk8s-node-init /usr/local/sbin/tk8s-node-init
+# bgp mode: FRR announces the apiserver VIP while the health timer keeps it on lo. Both are off
+# in the image; kubeadm/frr enables them in every control plane of a bgp cluster.
+COPY systemd/tk8s-apiserver-health.service systemd/tk8s-apiserver-health.timer /etc/systemd/system/
+COPY sbin/tk8s-apiserver-health /usr/local/sbin/tk8s-apiserver-health
 
 # CRI-O and container config of the platform.
 COPY crio.conf.d/ /etc/crio/crio.conf.d/
@@ -69,8 +73,10 @@ RUN printf 'fs.inotify.max_user_instances=8192\nfs.inotify.max_user_watches=5242
 # It must exist: empty is fine (CRI-O starts without a shared store), missing makes crio fail to start.
 RUN mkdir -p /var/lib/containers/shared
 
-# systemd in a container: our units on, hardware and host-only units off.
+# systemd in a container: our units on, FRR off (Debian's postinst enables it; with every daemon
+# set to no it would still run zebra on every node), hardware and host-only units off.
 RUN systemctl enable crio.service kubelet.service tk8s-node-init.service && \
+    systemctl disable frr.service && \
     systemctl mask systemd-udevd.service systemd-udevd-kernel.socket systemd-udevd-control.socket \
       getty.target console-getty.service apt-daily.timer apt-daily-upgrade.timer e2scrub_all.timer fstrim.timer
 

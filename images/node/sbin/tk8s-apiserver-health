@@ -1,0 +1,14 @@
+#!/bin/sh
+# bgp mode, control planes only (tk8s-apiserver-health.timer runs this every 2 seconds): the
+# apiserver VIP sits on lo exactly while this node's apiserver answers /readyz. FRR announces
+# whatever is on lo (redistribute connected, route-map vip-only), so adding the address is the
+# announcement and removing it is the withdrawal: `ip addr show lo` is the whole state.
+# /etc/tk8s/vip is written by tkctl (kubeadm/frr); a node without it has nothing to do.
+vip=$(cat /etc/tk8s/vip 2>/dev/null) || exit 0
+[ -n "$vip" ] || exit 0
+if [ "$(curl -ks --max-time 1 https://127.0.0.1:6443/readyz)" = "ok" ]; then
+    ip -4 addr show dev lo | grep -q " $vip/32 " || ip addr add "$vip/32" dev lo
+else
+    ip -4 addr show dev lo | grep -q " $vip/32 " && ip addr del "$vip/32" dev lo
+fi
+exit 0
