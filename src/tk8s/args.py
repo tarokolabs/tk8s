@@ -57,6 +57,7 @@ def add_create_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--k8s")
     p.add_argument("--gvisor", action="store_true")
     p.add_argument("--datapath", choices=["auto", "netkit", "veth"])
+    p.add_argument("--ha", choices=["proxy", "bgp"])
     p.add_argument("--defer-join", action="store_true")
     p.add_argument("-f", dest="file")
     p.add_argument("--allow-overlap", action="store_true")
@@ -95,7 +96,10 @@ def user_cluster_from_flags(a: argparse.Namespace) -> model.UserCluster:
             )
         )
     groups.append(model.NodeGroup(role="worker", count=a.workers, cpu=a.cpu, memory=memory))
-    spec = model.UserSpec(kubernetes=a.k8s, gvisor=a.gvisor, datapath=a.datapath, nodes=groups)
+    network = model.UserNetwork(ha=a.ha) if a.ha else None
+    spec = model.UserSpec(
+        kubernetes=a.k8s, gvisor=a.gvisor, datapath=a.datapath, network=network, nodes=groups
+    )
     name = validate_name(a.name or "tk8s")
     return model.UserCluster(metadata=model.Metadata(name=name), spec=spec)
 
@@ -103,7 +107,7 @@ def user_cluster_from_flags(a: argparse.Namespace) -> model.UserCluster:
 def user_cluster_from_file(a: argparse.Namespace, topo_flags: bool) -> model.UserCluster:
     if topo_flags:
         raise UsageError(
-            "-f cannot be combined with --control-planes/--workers/--cpu/--memory; "
+            "-f cannot be combined with --control-planes/--workers/--cpu/--memory/--ha; "
             "put them in the file"
         )
     path = Path(a.file)

@@ -76,10 +76,16 @@ def pick_index(u: model.UserCluster, existing: model.Cluster | None, used: set[i
 
 
 def network(
-    index: int, want_router: IPv4Address | None, ha: Literal["proxy"] | None
+    index: int,
+    want_router: IPv4Address | None,
+    ha: Literal["proxy", "bgp"] | None,
+    want_vip: IPv4Address | None = None,
 ) -> model.Network:
     """Subnet by index: nodes 172.22.N.0/24 (the router at .253, LB-IPAM .200-.219), pods a /21,
-    services a /24; the gateway .254 is the host bridge, the router's upstream."""
+    services a /24; the gateway .254 is the host bridge, the router's upstream. bgp mode adds the
+    anycast VIP 172.23.N.1, deliberately outside the node subnet (same subnet would mean ARP,
+    not a route through the router)."""
+    mode: Literal["proxy", "bgp"] = "proxy" if ha is None else ha
     if want_router is not None and not re.fullmatch(
         rf"172\.22\.{index}\.(2[2-4][0-9]|25[0-3])", str(want_router)
     ):
@@ -87,12 +93,24 @@ def network(
             f"spec.network.router {want_router} must be 172.22.{index}.220-253 "
             "(the default is .253)"
         )
+    vip_net = IPv4Network(f"172.23.{index}.0/24")
+    if want_vip is not None and mode != "bgp":
+        raise PlanError(f"spec.network.vip {want_vip} is only used with ha: bgp")
+    if want_vip is not None and (
+        want_vip not in vip_net or want_vip in (vip_net.network_address, vip_net.broadcast_address)
+    ):
+        raise PlanError(
+            f"spec.network.vip {want_vip} must be a host address in {vip_net} "
+            f"(the default is 172.23.{index}.1)"
+        )
+    vip = (want_vip or IPv4Address(f"172.23.{index}.1")) if mode == "bgp" else None
     return model.Network(
         index=index,
         nodes=IPv4Network(f"172.22.{index}.0/24"),
         gateway=IPv4Address(f"172.22.{index}.254"),
         router=want_router or IPv4Address(f"172.22.{index}.253"),
-        ha="proxy" if ha is None else ha,
+        ha=mode,
+        vip=vip,
         lb_range=f"172.22.{index}.200-172.22.{index}.219",
         pods=IPv4Network(f"10.244.{index * 8}.0/21"),
         services=IPv4Network(f"10.98.{index}.0/24"),
@@ -153,6 +171,7 @@ def resolve(
             index,
             s.network.router if s.network else None,
             s.network.ha if s.network else None,
+            s.network.vip if s.network else None,
         ),
         nodes=expand_nodes(u.metadata.name, s.nodes, index),
     )

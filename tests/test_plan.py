@@ -167,6 +167,45 @@ def test_router_pin_kept_and_range_enforced() -> None:
         res(bad)
 
 
+def test_bgp_mode_allocates_the_vip_in_the_other_slash_16() -> None:
+    """The VIP must not be in the node subnet: there the nodes would ARP for it instead of routing
+    to the router, and the BGP demonstration would be void."""
+    c = res(
+        user(
+            "metadata: {name: bgp}\nspec:\n  network: {nodes: 172.22.9.0/24, ha: bgp}\n"
+            "  nodes: [{role: control-plane}]\n"
+        )
+    )
+    assert c.spec.network.ha == "bgp" and str(c.spec.network.vip) == "172.23.9.1"
+    proxy = res(user("metadata: {name: p}\nspec:\n  nodes: [{role: control-plane}]\n"))
+    assert proxy.spec.network.ha == "proxy" and proxy.spec.network.vip is None
+
+
+def test_vip_pin_must_be_in_the_other_slash_16() -> None:
+    ok = user(
+        "metadata: {name: pin}\nspec:\n"
+        "  network: {nodes: 172.22.9.0/24, ha: bgp, vip: 172.23.9.77}\n"
+        "  nodes: [{role: control-plane}]\n"
+    )
+    assert str(res(ok).spec.network.vip) == "172.23.9.77"
+    bad = user(
+        "metadata: {name: pin}\nspec:\n"
+        "  network: {nodes: 172.22.9.0/24, ha: bgp, vip: 172.22.9.100}\n"
+        "  nodes: [{role: control-plane}]\n"
+    )
+    with pytest.raises(PlanError, match=r"172\.23\.9\.0/24"):
+        res(bad)
+
+
+def test_vip_is_refused_in_proxy_mode() -> None:
+    bad = user(
+        "metadata: {name: p}\nspec:\n  network: {nodes: 172.22.9.0/24, vip: 172.23.9.1}\n"
+        "  nodes: [{role: control-plane}]\n"
+    )
+    with pytest.raises(PlanError, match=r"spec\.network\.vip .* ha: bgp"):
+        res(bad)
+
+
 def test_node_addresses_run_from_1_to_199_without_a_hole() -> None:
     """The router lives at .253, outside the node range; .100 is a node address like any other."""
     groups = [model.NodeGroup(role="control-plane"), model.NodeGroup(role="worker", count=100)]
