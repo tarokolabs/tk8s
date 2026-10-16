@@ -231,8 +231,19 @@ def wanted(ctx: Context, k8s: str) -> list[str]:
     return sorted(set(kube.stdout.split()) | set(cilium_images) | set(from_files) | set(pins))
 
 
+def listing(ctx: Context, k8s: str) -> list[tuple[str, str]]:
+    """What `get images` prints: the node and router images in the host's podman storage first,
+    then the store's status()."""
+    rows = status(ctx, k8s)
+    out: list[tuple[str, str]] = []
+    for img in (node_image(k8s), router.image(ctx.versions)):
+        on_host = ctx.host.run(["podman", "image", "exists", img], sudo=True, check=False)
+        out.append(("present" if on_host.returncode == 0 else "missing", img))
+    return out + rows
+
+
 def status(ctx: Context, k8s: str) -> list[tuple[str, str]]:
-    """("present" | "missing", image) for every wanted image, in list order."""
+    """("present" | "missing", image) for every wanted image of the store, in list order."""
     ensure_node_image(ctx, k8s)
     ensure_router_image(ctx)
     ensure_cilium_cli(ctx)

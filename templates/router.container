@@ -20,6 +20,8 @@ StopSignal=SIGRTMIN+3
 StopTimeout=30
 
 [Service]
+# VyOS's systemd exits 130 on SIGRTMIN+3, like the node image's.
+SuccessExitStatus=130
 Restart=always
 
 [Install]

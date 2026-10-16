@@ -65,3 +65,5 @@ def test_release_builds_and_pushes_the_router_image_too() -> None:
     assert "scripts/build-images.sh router" in RELEASE
     assert "digests-router" in RELEASE
     assert "needs: [node, router]" in RELEASE
+    # the first tag after the router lands creates the GHCR package; it needs the same access
+    assert "tk8s/router" in RELEASE.split("name: release")[0]

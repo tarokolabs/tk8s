@@ -144,3 +144,20 @@ def test_confirm_aborts_on_anything_but_y(ctx: Context, monkeypatch: pytest.Monk
     ctx.options.assume_yes = True
     monkeypatch.setattr("builtins.input", eof)
     delete.confirm(ctx)  # never asks
+
+
+def test_fallback_removes_a_v2026_10_lb_container_like_a_node(tmp_path: Path) -> None:
+    """A cluster from before the router (cluster.yaml with lb:, unit demo-lb.container) cannot be
+    parsed; the unit-directory fallback lists the lb unit like a node so its container goes too."""
+    from tests.test_phases import make_ctx
+
+    ctx, host = make_ctx(tmp_path)
+    ctx.name = "demo"
+    unit_dir = ctx.paths.unit_dir / "demo"
+    host.dirs.add(unit_dir)
+    for f in ("demo.network", "demo-lb.container", "demo-control-plane-1.container"):
+        host.files[unit_dir / f] = "x"
+    host.podman.update({"container:demo-lb", "container:demo-control-plane-1"})
+    assert delete.node_names(ctx) == ["demo-control-plane-1", "demo-lb"]
+    Runner([delete.PHASE], record=False).run(ctx)
+    assert ["podman", "rm", "-f", "demo-lb"] in argvs(host)

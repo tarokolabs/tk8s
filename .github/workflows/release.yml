@@ -2,8 +2,9 @@
 # the VyOS router image,
 # waits for the e2e run of the same commit, and creates the GitHub Release with notes rendered
 # from versions.yaml and the image digests (the digest table is the compatibility contract).
-# First-time setup: the GHCR package tk8s/node must grant this repo write access under
-# "Manage Actions access" for GITHUB_TOKEN to push.
+# First-time setup: the GHCR packages tk8s/node and tk8s/router must grant this repo write access
+# under "Manage Actions access" for GITHUB_TOKEN to push. A package is created by its first push
+# and comes out private: set its visibility to public there too.
 name: release
 permissions:
   contents: read

@@ -254,7 +254,7 @@ def cmd_images(verb: str, a: argparse.Namespace) -> int:
         images.ensure(ctx, k8s)
     elif verb == "get":
         print(f"{'STATUS':<8} IMAGE")
-        for s, img in images.status(ctx, k8s):
+        for s, img in images.listing(ctx, k8s):
             print(f"{s:<8} {img}")
     else:
         images.prune(ctx, k8s)

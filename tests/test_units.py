@@ -122,3 +122,10 @@ def test_units_phase_runs_then_is_done(ctx: Context, host: FakeHost) -> None:
     assert not units.done(ctx)
     Runner([units.PHASE]).run(ctx)
     assert units.done(ctx) and "[units] write the Quadlet units" in "".join(host.lines)
+
+
+def test_router_unit_counts_systemd_halt_as_success(ctx: Context) -> None:
+    """VyOS's systemd exits 130 on SIGRTMIN+3; without this the unit shows failed after stop."""
+    files = units.render(ctx, ctx.require_cluster())
+    unit = files[ctx.paths.unit_dir / "demo" / "demo-router.container"]
+    assert "SuccessExitStatus=130" in unit

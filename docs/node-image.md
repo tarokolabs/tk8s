@@ -44,7 +44,7 @@ CI 的 `release` workflow 在每個 tag 以同一份配方建兩個支援版本�
 - 第一次 `tkctl create cluster` 多花一次下載（約 2 GB、一兩分鐘），之後每個叢集、每個節點都是零下載；`--k8s` 不同版本各有一個目錄。
 - 離線的教室先在有網路時 `tkctl pull images` 與 `tkctl create cluster --phase nodes/cni-plugins`（CNI plugins 不在 store 裡），上課時 `TK_OFFLINE=1 tkctl create cluster`：缺任何 image 會直接列出而不嘗試下載。CI 的 e2e 就是這樣建的。`--gvisor` 的叢集另外需要 gVisor 的下載，目前不受 `TK_OFFLINE` 管。
 - 唯讀是刻意的：多個 CRI-O 寫同一個 store 沒有安全的用法（節點沒乾淨關機時 `crio wipe` 會清空整個 storage 目錄）。學員 `kubectl run` 自行拉取的 image 進節點本身的 volume，不會污染共用目錄。
-- 清單不是手寫的：`tkctl get images --k8s <版本>` 從 `versions.yaml`、node image 裡的 `kubeadm config images list`、`cilium install --dry-run` 與 `manifests/` 動態計算（因此 `get images` 會先確保 node image 與 cilium CLI 已在本機，沒有會先下載）。
+- 清單不是手寫的：`tkctl get images --k8s <版本>` 從 `versions.yaml`、node image 裡的 `kubeadm config images list`、`cilium install --dry-run` 與 `manifests/` 動態計算（因此 `get images` 會先確保 node image、router image 與 cilium CLI 已在本機，沒有會先下載；輸出的前兩列就是這兩個 image 在主機上的狀態，其餘是 store 的清單）。
 - 建叢集時主機要套用的 manifest 也都在 repo 裡：Gateway API CRD、metrics-server manifest 與 Cilium 的 Helm chart 由 `scripts/vendor-manifests.sh` 放進 `manifests/`，升版時重新執行一次；cilium CLI 不會再向 helm.cilium.io 下載 chart。
 - 只有 tkctl 寫這個目錄；主機的 `podman image prune`、`podman system reset` 操作的是 `/var/lib/containers/storage`，不會影響它。要刪除就 `tkctl delete images --k8s <版本>`，有叢集在用會被拒絕。
 - 節點 image 需是 2026-10 之後的配方（掛載點 `/var/lib/containers/shared`）。先前下載的本機快取用 `tkctl pull images --refresh` 更新（同一個 tag 重發時也是這樣換掉舊的）；舊 image 仍可建叢集，只是不會用到 store。

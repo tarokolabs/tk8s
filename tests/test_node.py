@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.fixtures import HOME, OP, SHOW_HAPROXY, ready_host
+from tests.fixtures import HOME, OP, SHOW_HAPROXY, VBASH, ready_host
 from tk8s import lifecycle, model, versions
 from tk8s.create import units
 from tk8s.delete import node_volumes
@@ -176,7 +176,7 @@ def test_add_worker_runs_plan_units_start_addons_join_in_order(tmp_path: Path) -
     )
     assert "demo-worker-3.service" in host.files[ctx.paths.systemd_dir / "demo.target"]
     a = argvs(host)
-    reload_ = a.index(["podman", "exec", "-i", "demo-router", "/bin/vbash", "-s"])
+    reload_ = a.index(list(VBASH))
     start = a.index(["systemctl", "start", "demo-worker-3.service"])
     assert a.index(["systemctl", "daemon-reload"]) < reload_ < start
     joins = [x for x in a if x[:5] == ["podman", "exec", "demo-worker-3", "bash", "-c"]]
@@ -306,9 +306,7 @@ def test_delete_node_drains_stops_removes_and_rerenders(tmp_path: Path) -> None:
     unit = ctx.paths.unit_dir / "demo" / "demo-worker-2.container"
     assert ["rm", "-f", str(unit)] in a and unit not in host.files
     assert "demo-worker-2.service" not in host.files[ctx.paths.systemd_dir / "demo.target"]
-    assert a.index(["podman", "exec", "-i", "demo-router", "/bin/vbash", "-s"]) > a.index(
-        ["rm", "-f", str(unit)]
-    )
+    assert a.index(list(VBASH)) > a.index(["rm", "-f", str(unit)])
     kept = ("demo-control-plane-1", "demo-worker-1")
     assert host.podman == {f"container:{n}" for n in kept} | {
         f"volume:{v}" for n in kept for v in node_volumes(n)
