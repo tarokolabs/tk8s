@@ -89,6 +89,13 @@ def test_bootup_script_drops_the_route_to_itself(ctx: Context) -> None:
     ]
     assert script.startswith("#!/bin/sh\n")
     assert "ip route del default via 172.22.0.253" in script
+    # netavark deletes exactly the route it added when the container stops, and a missing route
+    # fails the unit (ESRCH): a transient unit puts it back at shutdown
+    assert (
+        "systemd-run --quiet --unit=tk8s-podman-route -p RemainAfterExit=yes "
+        '-p "ExecStop=/usr/sbin/ip route replace default via 172.22.0.253 metric 100 proto static" '
+        "/bin/true"
+    ) in script
 
 
 def test_nodes_resolve_the_api_name_to_the_router(ctx: Context) -> None:
