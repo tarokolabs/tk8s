@@ -66,7 +66,7 @@ def drain_run(ctx: Context) -> None:
         ["podman", "exec", n, "kubeadm", "reset", "-f"], sudo=True, capture=True, check=False
     )
     # A control plane's apiserver just went away; the LB keeps routing to it for a few seconds.
-    kubeadm.wait_lb_ready(ctx)
+    kubeadm.wait_router_ready(ctx)
     ctx.host.run(["kubectl", "delete", "node", n], env=kubectl_env(ctx), capture=True)
 
 

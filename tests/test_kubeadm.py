@@ -7,7 +7,7 @@ def test_init_config_names_cluster_endpoint_and_sans(ctx: Context) -> None:
     text = kubeadm.render_init(ctx)
     assert 'kubernetesVersion: 1.37.1\ncontrolPlaneEndpoint: "api.demo.k8s:6443"' in text
     assert (
-        "  certSANs:\n    - api.demo.k8s\n    - 172.22.0.100\n    - 172.22.0.1\n  extraArgs:"
+        "  certSANs:\n    - api.demo.k8s\n    - 172.22.0.253\n    - 172.22.0.1\n  extraArgs:"
         in text
     )
     assert "advertiseAddress: 172.22.0.1" in text and "name: demo-control-plane-1" in text
@@ -46,7 +46,7 @@ def initialised(host: FakeHost) -> None:
     host.responses[("curl",)] = Result(0, "ok", "")
 
 
-def test_init_runs_kubeadm_stores_the_key_and_waits_for_the_lb(
+def test_init_runs_kubeadm_stores_the_key_and_waits_for_the_router(
     ctx: Context, host: FakeHost
 ) -> None:
     host.responses[("podman", "exec", "demo-control-plane-1", "test", "-f")] = Result(1, "", "")
@@ -74,12 +74,12 @@ def test_init_runs_kubeadm_stores_the_key_and_waits_for_the_lb(
         "-sk",
         "--max-time",
         "3",
-        "https://172.22.0.100:6443/readyz",
+        "https://172.22.0.253:6443/readyz",
     ]
     assert "  demo-control-plane-1 initialized" in host.lines
 
 
-def test_init_is_skipped_when_admin_conf_exists_but_still_waits_for_the_lb(
+def test_init_is_skipped_when_admin_conf_exists_but_still_waits_for_the_router(
     ctx: Context, host: FakeHost
 ) -> None:
     initialised(host)
@@ -98,17 +98,17 @@ def test_init_fails_when_kubeadm_fails_and_shows_the_tail(ctx: Context, host: Fa
         Runner([kubeadm.PHASE], only="kubeadm/init").run(ctx)
 
 
-def test_init_fails_when_the_lb_never_reports_healthy(ctx: Context, host: FakeHost) -> None:
+def test_init_fails_when_the_router_never_reports_healthy(ctx: Context, host: FakeHost) -> None:
     initialised(host)
     host.responses[("curl",)] = Result(0, "", "")
     with pytest.raises(
         PhaseFailed,
-        match=r"the apiserver LB at 172\.22\.0\.100 has no healthy control plane after 60 s",
+        match=r"the apiserver router at 172\.22\.0\.253 has no healthy control plane after 60 s",
     ):
-        kubeadm.init_run(ctx)  # init is "done" (admin.conf exists) but still waits for the LB
+        kubeadm.init_run(ctx)  # init is "done" (admin.conf exists) but still waits for the router
 
 
-def test_kubeconfig_points_at_the_lb_and_is_0600(ctx: Context, host: FakeHost) -> None:
+def test_kubeconfig_points_at_the_router_and_is_0600(ctx: Context, host: FakeHost) -> None:
     initialised(host)
     kubeadm.kubeconfig_run(ctx)
     write = next(
@@ -116,7 +116,7 @@ def test_kubeconfig_points_at_the_lb_and_is_0600(ctx: Context, host: FakeHost) -
     )
     assert write.argv[2] == "mode=600"
     text = host.files[ctx.state_dir / "kubeconfig"]
-    assert "server: https://172.22.0.100:6443" in text and "api.demo.k8s" not in text
+    assert "server: https://172.22.0.253:6443" in text and "api.demo.k8s" not in text
     host.responses[("kubectl", "get", "--raw", "/readyz")] = Result(0, "ok", "")
     assert kubeadm.kubeconfig_done(ctx)
 
@@ -276,7 +276,9 @@ def test_render_also_places_the_audit_policy_the_apiserver_mounts(
     assert not kubeadm.render_done(ctx)
 
 
-def test_kubeconfig_waits_for_the_apiserver_through_the_lb(ctx: Context, host: FakeHost) -> None:
+def test_kubeconfig_waits_for_the_apiserver_through_the_router(
+    ctx: Context, host: FakeHost
+) -> None:
     """On a resume init is already done and skipped, so kubeconfig is the phase that must wait
     for the apiserver (a kubelet in CrashLoopBackOff brings it up seconds to minutes later)."""
     initialised(host)
@@ -356,3 +358,9 @@ def test_audit_policy_names_only_real_resources(ctx: Context) -> None:
     for rule in policy["rules"]:
         for entry in rule["resources"]:
             assert set(entry["resources"]) <= known[entry["group"]], entry
+
+
+def test_init_config_sans_name_the_router_and_every_control_plane(ctx: Context) -> None:
+    text = kubeadm.render_init(ctx)
+    assert "    - api.demo.k8s\n    - 172.22.0.253\n    - 172.22.0.1\n" in text
+    assert ".100" not in text
