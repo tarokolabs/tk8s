@@ -26,11 +26,19 @@ def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str
         gateway=net.gateway,
         router_ip=net.router,
     )
+    blocks: dict[str, object]
     if net.ha == "proxy":
         boot, blocks = "router/tkctl-proxy.boot", {"servers": router.servers(c)}
     else:
+        # the reject route at distance 254 loses to any BGP-learned VIP (distance 20); with no
+        # control plane announcing, the router refuses at once instead of looping the packet
+        # back to the host, whose VIP/32 route points here
         boot = "router/tkctl-bgp.boot"
-        blocks = {"neighbors": router.neighbors(c), "bfd_peers": router.bfd_peers(c)}
+        blocks = {
+            "neighbors": router.neighbors(c),
+            "bfd_peers": router.bfd_peers(c),
+            "vip": net.vip,
+        }
     files[state / "router" / "tkctl.boot"] = template(
         p.home, boot, cluster=c.name, router_ip=net.router, gateway=net.gateway, **blocks
     )

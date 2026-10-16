@@ -122,10 +122,11 @@ def describe(ctx: Context, c: model.Cluster, output: str | None) -> None:
         f"  from this host:       LoadBalancer IPs ({net.lb_range}) and ClusterIPs "
         f"({net.services}) are routed"
     )
-    ctx.say(
-        f"  from another machine: sudo ip route add {net.nodes} via {host_ip(ctx)}   "
-        f"(and {net.services} for ClusterIPs)"
-    )
+    via = host_ip(ctx)
+    routes = f"sudo ip route add {net.nodes} via {via}"
+    if net.vip is not None:  # the kubeconfig points at the VIP: that route too
+        routes += f" && sudo ip route add {net.vip}/32 via {via}"
+    ctx.say(f"  from another machine: {routes}   (and {net.services} for ClusterIPs)")
     ctx.say("Paths:")
     ctx.say(f"  state:      {ctx.state_dir}/")
     ctx.say(f"  kubeconfig: {ctx.state_dir}/kubeconfig")

@@ -124,7 +124,7 @@ PROVISION: tuple[Phase, ...] = (
     create_images.PHASE,
     units.PHASE,
     START,
-    frr.PHASE,
+    frr.NODE_PHASE,
     addons.RUNTIMECLASS,
     addons.GVISOR,
 )

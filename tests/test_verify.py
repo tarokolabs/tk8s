@@ -294,3 +294,22 @@ def test_router_check_in_bgp_mode_fails_on_a_missing_next_hop_or_bfd(
         "2 next hops to 172.23.0.1, BFD down on demo-control-plane-3 "
         "(podman exec demo-router vtysh -c 'show bgp summary')"
     ) in host.lines
+
+
+def test_router_check_in_bgp_mode_counts_established_only_among_joined_control_planes(
+    bgp_ctx: Context, host: FakeHost
+) -> None:
+    """A --defer-join control plane runs FRR (session up, BFD up) but has no apiserver and no
+    VIP: it must not be counted against the joined ones."""
+    c = bgp_ctx.require_cluster()
+    nodes = [
+        n.model_copy(update={"join": False}) if n.name.endswith("-3") else n for n in c.spec.nodes
+    ]
+    bgp_ctx.cluster = c.model_copy(update={"spec": c.spec.model_copy(update={"nodes": nodes})})
+    bgp_healthy(bgp_ctx, host)
+    bgp_router_answers(host, established=3, hops=2, bfd_up=3)
+    assert verify.run(bgp_ctx, only="router") == 0
+    assert (
+        "PASS  apiserver router 172.22.0.253 healthy (2/2 control planes Established, "
+        "2 ECMP next hops to 172.23.0.1, BFD up)"
+    ) in host.lines

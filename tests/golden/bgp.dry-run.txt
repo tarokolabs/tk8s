@@ -159,6 +159,11 @@ protocols {
             next-hop 172.22.0.254 {
             }
         }
+        route 172.23.0.1/32 {
+            reject {
+                distance "254"
+            }
+        }
     }
 }
 system {

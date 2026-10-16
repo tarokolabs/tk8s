@@ -329,9 +329,11 @@ def _check_router_proxy(r: Report, c: model.Cluster, ready: str) -> None:
 
 def _check_router_bgp(r: Report, c: model.Cluster, ready: str) -> None:
     net = c.spec.network
-    joined = sum(1 for n in c.control_planes if n.join)
+    joined_names = {n.name for n in c.control_planes if n.join}
+    joined = len(joined_names)
     peers = router.peers(r.ctx, c)
-    up = sum(1 for _, s in peers if s == "Established")
+    # a --defer-join / --no-join control plane runs FRR (session up) but announces nothing
+    up = sum(1 for n, s in peers if s == "Established" and n in joined_names)
     stale = {n for n, _ in peers} != {n.name for n in c.control_planes}
     hops = router.nexthops(r.ctx, c)
     down = router.bfd_down(r.ctx, c)

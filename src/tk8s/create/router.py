@@ -126,12 +126,17 @@ def peers(ctx: Context, c: model.Cluster) -> list[tuple[str, str]]:
 
 
 def nexthops(ctx: Context, c: model.Cluster) -> int:
-    """How many next hops the router's route to the VIP has: the ECMP width, 0 without a route."""
+    """How many active next hops the router's selected route to the VIP has: the ECMP width
+    that carries traffic, 0 without a route."""
     vip = c.spec.network.vip
     data = _vtysh(ctx, f"show ip route {vip}/32")
     entries = data.get(f"{vip}/32", []) if isinstance(data, dict) else []
-    chosen = next((e for e in entries if e.get("selected")), entries[0] if entries else None)
-    return len(chosen.get("nexthops", [])) if isinstance(chosen, dict) else 0
+    dicts = [e for e in entries if isinstance(e, dict)]
+    chosen = next((e for e in dicts if e.get("selected")), dicts[0] if dicts else None)
+    if not isinstance(chosen, dict):
+        return 0
+    hops = chosen.get("nexthops", [])
+    return sum(1 for h in hops if isinstance(h, dict) and h.get("active")) if hops else 0
 
 
 def bfd_down(ctx: Context, c: model.Cluster) -> list[str]:

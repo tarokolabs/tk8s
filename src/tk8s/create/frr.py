@@ -4,7 +4,7 @@ on lo). tkctl writes the FRR configuration and the VIP into the node and turns o
 node image ships disabled. proxy mode has nothing to do here."""
 
 from .. import model
-from ..phases import Context, Phase
+from ..phases import Context, Phase, PhaseFailed
 from ..render import template
 
 UNITS = ["frr.service", "tk8s-apiserver-health.timer"]
@@ -50,7 +50,17 @@ def configured(ctx: Context, n: model.Node) -> bool:
 
 
 def configure(ctx: Context, n: model.Node) -> None:
-    net = ctx.require_cluster().spec.network
+    c = ctx.require_cluster()
+    net = c.spec.network
+    has_frr = ctx.host.run(
+        ["podman", "exec", n.name, "test", "-f", "/etc/frr/daemons"], sudo=True, check=False
+    )
+    if has_frr.returncode != 0:
+        # a host that cached the node tag from before FRR was in the recipe
+        raise PhaseFailed(
+            f"{n.name} has no FRR: its node image predates bgp mode; run tkctl pull images "
+            f"--refresh --k8s {c.spec.kubernetes} and create the cluster again"
+        )
     ctx.host.run(["podman", "exec", n.name, "sed", "-i", DAEMONS, "/etc/frr/daemons"], sudo=True)
     ctx.host.run(
         [
@@ -107,3 +117,35 @@ def run(ctx: Context) -> None:
 
 
 PHASE = Phase("frr", "bgp mode: FRR and the VIP health timer on every control plane", done, run)
+
+
+# ---- one node: what add node / join node run, so a stopped sibling control plane is no concern
+
+
+def _this_node(ctx: Context) -> model.Node | None:
+    """The control plane the node verb works on, or None (a worker, proxy mode, no node)."""
+    c = ctx.require_cluster()
+    if c.spec.network.ha != "bgp" or ctx.node is None:
+        return None
+    n = next((x for x in c.spec.nodes if x.name == ctx.node), None)
+    return n if n is not None and n.role == "control-plane" else None
+
+
+def node_done(ctx: Context) -> bool:
+    n = _this_node(ctx)
+    return n is None or configured(ctx, n)
+
+
+def node_run(ctx: Context) -> None:
+    n = _this_node(ctx)
+    if n is None:
+        return
+    if configured(ctx, n):
+        ctx.say(f"  {n.name} already configured")
+    else:
+        configure(ctx, n)
+
+
+NODE_PHASE = Phase(
+    "frr", "bgp mode: FRR and the VIP health timer on this control plane", node_done, node_run
+)

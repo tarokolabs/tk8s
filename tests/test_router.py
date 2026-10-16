@@ -6,6 +6,7 @@ from tests.fixtures import (
     OP,
     SHOW_HAPROXY,
     VBASH,
+    VTYSH_ROUTE,
     VTYSH_SUMMARY,
     bgp_router_answers,
 )
@@ -251,3 +252,18 @@ def test_wait_synced_in_bgp_mode_names_peers(bgp_ctx: Context, host: FakeHost) -
         r"\(podman exec demo-router vtysh -c 'show bgp summary'\)",
     ):
         router.wait(bgp_ctx)
+
+
+def test_nexthops_counts_only_active_next_hops_and_survives_odd_json(
+    bgp_ctx: Context, host: FakeHost
+) -> None:
+    c = bgp_ctx.require_cluster()
+    bgp_router_answers(host)
+    answer = host.responses[VTYSH_ROUTE]
+    assert isinstance(answer, Result)
+    data = json.loads(answer.stdout)
+    data["172.23.0.1/32"][0]["nexthops"][2]["active"] = False
+    host.responses[VTYSH_ROUTE] = Result(0, json.dumps(data), "")
+    assert router.nexthops(bgp_ctx, c) == 2
+    host.responses[VTYSH_ROUTE] = Result(0, json.dumps({"172.23.0.1/32": ["garbage"]}), "")
+    assert router.nexthops(bgp_ctx, c) == 0

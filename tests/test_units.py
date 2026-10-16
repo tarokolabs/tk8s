@@ -186,3 +186,16 @@ def test_bgp_host_routes_reach_the_vip_through_the_router(bgp_ctx: Context) -> N
 def test_proxy_host_routes_have_no_vip_line(ctx: Context) -> None:
     unit = units.render(ctx)[ctx.paths.systemd_dir / "demo-routes.service"]
     assert "172.23." not in unit and unit.count("ExecStart=") == 2 and unit.count("ExecStop=") == 2
+
+
+def test_bgp_router_rejects_the_vip_when_no_control_plane_announces_it(bgp_ctx: Context) -> None:
+    """Without this the router's default route sends a VIP packet back to the host, whose VIP/32
+    route sends it back to the router: a TTL loop and a hanging client instead of a refusal."""
+    boot = units.render(bgp_ctx)[bgp_ctx.state_dir / "router" / "tkctl.boot"]
+    assert (
+        "        route 172.23.0.1/32 {\n"
+        "            reject {\n"
+        '                distance "254"\n'
+        "            }\n"
+        "        }\n"
+    ) in boot

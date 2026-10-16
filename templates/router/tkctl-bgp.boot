@@ -25,6 +25,11 @@ $neighbors
             next-hop $gateway {
             }
         }
+        route $vip/32 {
+            reject {
+                distance "254"
+            }
+        }
     }
 }
 system {

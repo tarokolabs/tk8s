@@ -340,3 +340,15 @@ def test_describe_single_control_plane_bgp_cluster_notes_no_ecmp(
     assert "  note:     one control plane: nothing to spread; --control-planes 3 shows ECMP" in (
         host.lines
     )
+
+
+def test_describe_bgp_cluster_tells_other_machines_to_route_the_vip_too(
+    bgp_ctx: Context, host: FakeHost
+) -> None:
+    c = on_disk(bgp_ctx, host)
+    host.responses[("ip", "-4", "route", "get")] = ROUTE_GET
+    lifecycle.describe(bgp_ctx, c, None)
+    assert (
+        "  from another machine: sudo ip route add 172.22.0.0/24 via 10.0.0.9 && "
+        "sudo ip route add 172.23.0.1/32 via 10.0.0.9   (and 10.98.0.0/24 for ClusterIPs)"
+    ) in host.lines

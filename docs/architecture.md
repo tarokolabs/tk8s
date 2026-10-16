@@ -89,7 +89,9 @@ tkctl 渲染的是 `tkctl.boot`；VyOS 開機前的 `vyos-preconfig-bootup.scrip
 
 每台 control plane 裡跑 node image 內建的 FRR（`kubeadm/frr` 寫 `/etc/frr/frr.conf`、`/etc/tk8s/vip`，啟用 `frr.service` 與 `tk8s-apiserver-health.timer`）。timer 每 2 秒打本機 `/readyz`：ok 就把 VIP 放到 `lo`，否則拿掉；FRR 的 `redistribute connected route-map vip-only` 加 `neighbor … route-map vip-only out` 只宣告那個 /32，所以宣告與撤回就是 `ip addr show lo` 的一個位址。router 對所有宣告中的 control plane 做 ECMP（`show ip route 172.23.N.1`），每台 control plane 連 VIP 連到的是自己（lo 的本機路由優先，anycast 的正常行為）。
 
-兩種故障、兩種收斂：apiserver 掛但節點活著，timer 最多 2 秒撤回；整台 control plane 無聲消失，BFD 約 1 秒判定鄰居死亡（只靠 BGP timers 3/9 要 9 秒）；`podman stop` 這種優雅停止 FRR 送 cease，0.3 秒撤回。憑證 SAN 同時含 `.253` 與 VIP。`verify` 的 `[router]` 在這個模式檢查每台已加入的 control plane Established、ECMP 的 next hop 數等於 control plane 數、BFD 全 up。
+兩種故障、兩種收斂：apiserver 掛但節點活著，timer 最多 2 秒撤回；整台 control plane 無聲消失，BFD 約 1 秒判定鄰居死亡（只靠 BGP timers 3/9 要 9 秒）；`podman stop` 這種優雅停止 FRR 送 cease，0.3 秒撤回。憑證 SAN 同時含 `.253` 與 VIP。`verify` 的 `[router]` 在這個模式檢查每台已加入的 control plane Established、ECMP 的 next hop 數等於已加入的 control plane 數、BFD 全 up。router 另有一條 `reject` 的 static route 指向 VIP（distance 254，BGP 的 20 會壓過它）：沒有任何 control plane 宣告時，client 立刻收到 unreachable，而不是封包在 router 與主機之間繞到 TTL 耗盡。
+
+一個 ECMP 固有的代價：control plane 加入、離開或撤回時 next hop 群組重算 hash，既有連到 VIP 的連線有一部分會被送到另一台、收到 RST 重連；kubectl 與各元件的 client 會自己重連，但 bgp 模式不像 proxy 模式那樣保證既有連線不受影響。
 
 ## 主機的 sysctl
 
