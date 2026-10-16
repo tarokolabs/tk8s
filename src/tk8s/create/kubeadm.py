@@ -214,7 +214,7 @@ def kubeconfig_run(ctx: Context) -> None:
 
 KUBECONFIG = Phase(
     "kubeconfig",
-    "hand the host a kubeconfig that points at the router",
+    "hand the host a kubeconfig that points at the router (proxy) or the VIP (bgp)",
     kubeconfig_done,
     kubeconfig_run,
 )

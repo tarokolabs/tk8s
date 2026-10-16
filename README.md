@@ -88,7 +88,7 @@ kubeadm            initialise the first control plane and join the others
   render             write the kubeadm init configuration into the state dir
   frr                bgp mode: FRR and the VIP health timer on every control plane
   init               kubeadm init on the first control plane
-  kubeconfig         hand the host a kubeconfig that points at the router
+  kubeconfig         hand the host a kubeconfig that points at the router (proxy) or the VIP (bgp)
   join               join the other control planes and the workers
 cni                install the CNI and wait for the nodes
   install            install the CNI (cilium: kube-proxy replacement, LB-IPAM, Gateway API)
