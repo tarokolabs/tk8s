@@ -51,7 +51,8 @@ def test_resolve_fills_defaults_and_skips_a_used_index() -> None:
     n = c.spec.network
     assert n.index == 1 and n.nodes == IPv4Network("172.22.1.0/24")
     assert n.pods == IPv4Network("10.244.8.0/21") and n.services == IPv4Network("10.98.1.0/24")
-    assert n.gateway == IPv4Address("172.22.1.254") and n.lb == IPv4Address("172.22.1.100")
+    assert n.gateway == IPv4Address("172.22.1.254") and n.router == IPv4Address("172.22.1.253")
+    assert n.ha == "proxy"
     assert n.lb_range == "172.22.1.200-172.22.1.219"
     assert [x.name for x in c.spec.nodes] == [
         "demo-control-plane-1",
@@ -77,7 +78,7 @@ def test_ha_and_deferred_join() -> None:
         "defer-control-plane-3",
     ]
     assert [x.join for x in c.spec.nodes] == [True, False, False]
-    assert c.spec.network.lb == IPv4Address("172.22.0.100")
+    assert c.spec.network.router == IPv4Address("172.22.0.253")
 
 
 def test_resume_keeps_index_and_resolved_datapath() -> None:
@@ -152,24 +153,25 @@ def test_explicit_memory_and_names_are_kept_lower_cased() -> None:
     assert c.spec.nodes[1].name == "good-big" and c.spec.nodes[1].cpu == 8
 
 
-def test_lb_pin_kept_and_range_enforced() -> None:
+def test_router_pin_kept_and_range_enforced() -> None:
     ok = user(
-        "metadata: {name: pin}\nspec:\n  network: {nodes: 172.22.9.0/24, lb: 172.22.9.240}\n"
+        "metadata: {name: pin}\nspec:\n  network: {nodes: 172.22.9.0/24, router: 172.22.9.240}\n"
         "  nodes: [{role: control-plane}]\n"
     )
-    assert res(ok).spec.network.lb == IPv4Address("172.22.9.240")
+    assert res(ok).spec.network.router == IPv4Address("172.22.9.240")
     bad = user(
-        "metadata: {name: clash}\nspec:\n  network: {nodes: 172.22.9.0/24, lb: 172.22.9.99}\n"
+        "metadata: {name: clash}\nspec:\n  network: {nodes: 172.22.9.0/24, router: 172.22.9.99}\n"
         "  nodes: [{role: control-plane}]\n"
     )
     with pytest.raises(PlanError, match=r"172\.22\.9\.220-253"):
         res(bad)
 
 
-def test_node_allocation_skips_the_lb_address() -> None:
+def test_node_addresses_run_from_1_to_199_without_a_hole() -> None:
+    """The router lives at .253, outside the node range; .100 is a node address like any other."""
     groups = [model.NodeGroup(role="control-plane"), model.NodeGroup(role="worker", count=100)]
     ips = [str(n.ip) for n in expand_nodes("big", groups, 1)]
-    assert "172.22.1.100" not in ips and ips[99] == "172.22.1.101"
+    assert ips[99] == "172.22.1.100" and ips[100] == "172.22.1.101"
 
 
 def test_index_and_existing_come_from_the_clusters_dir(tmp_path: Path) -> None:

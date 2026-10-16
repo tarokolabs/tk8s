@@ -5,6 +5,7 @@ Fills defaults, allocates the subnet index, expands node groups into named, numb
 
 import re
 from ipaddress import IPv4Address, IPv4Network
+from typing import Literal
 
 from .. import model
 from ..paths import Paths
@@ -74,20 +75,24 @@ def pick_index(u: model.UserCluster, existing: model.Cluster | None, used: set[i
     return n
 
 
-def network(index: int, want_lb: IPv4Address | None) -> model.Network:
-    """172.22.N.0/24: nodes .1-.199, the LB .100 (custom: .220-.253), LB-IPAM .200-.219,
-    the gateway .254."""
-    if want_lb is not None and not re.fullmatch(
-        rf"172\.22\.{index}\.(2[2-4][0-9]|25[0-3])", str(want_lb)
+def network(
+    index: int, want_router: IPv4Address | None, ha: Literal["proxy"] | None
+) -> model.Network:
+    """Subnet by index: nodes 172.22.N.0/24 (the router at .253, LB-IPAM .200-.219), pods a /21,
+    services a /24; the gateway .254 is the host bridge, the router's upstream."""
+    if want_router is not None and not re.fullmatch(
+        rf"172\.22\.{index}\.(2[2-4][0-9]|25[0-3])", str(want_router)
     ):
         raise PlanError(
-            f"spec.network.lb {want_lb} must be 172.22.{index}.220-253 (the default is .100)"
+            f"spec.network.router {want_router} must be 172.22.{index}.220-253 "
+            "(the default is .253)"
         )
     return model.Network(
         index=index,
         nodes=IPv4Network(f"172.22.{index}.0/24"),
         gateway=IPv4Address(f"172.22.{index}.254"),
-        lb=want_lb or IPv4Address(f"172.22.{index}.100"),
+        router=want_router or IPv4Address(f"172.22.{index}.253"),
+        ha="proxy" if ha is None else ha,
         lb_range=f"172.22.{index}.200-172.22.{index}.219",
         pods=IPv4Network(f"10.244.{index * 8}.0/21"),
         services=IPv4Network(f"10.98.{index}.0/24"),
@@ -95,15 +100,13 @@ def network(index: int, want_lb: IPv4Address | None) -> model.Network:
 
 
 def expand_nodes(name: str, groups: list[model.NodeGroup], index: int) -> list[model.Node]:
-    """Each group becomes count nodes named <cluster>-control-plane-N / <cluster>-worker-N; IPs
-    skip .100."""
+    """Each group becomes count nodes named <cluster>-control-plane-N / <cluster>-worker-N, with
+    addresses .1 upwards (the router at .253 and the LB-IPAM pool are outside that range)."""
     nodes: list[model.Node] = []
     ip, cp, wk = 0, 0, 0
     for g in groups:
         for _ in range(g.count):
             ip += 1
-            if ip == 100:
-                ip = 101
             if g.role == "control-plane":
                 cp += 1
                 auto = f"{name}-control-plane-{cp}"
@@ -146,7 +149,11 @@ def resolve(
         datapath=s.datapath or ("veth" if s.gvisor else "auto"),
         datapath_resolved=existing.spec.datapath_resolved if existing else None,
         gvisor=s.gvisor,
-        network=network(index, s.network.lb if s.network else None),
+        network=network(
+            index,
+            s.network.router if s.network else None,
+            s.network.ha if s.network else None,
+        ),
         nodes=expand_nodes(u.metadata.name, s.nodes, index),
     )
     status = existing.status if existing else model.Status(phase="Creating", tk8s=tk8s_version)

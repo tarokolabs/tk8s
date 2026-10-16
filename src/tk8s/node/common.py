@@ -31,8 +31,6 @@ def next_ip(c: model.Cluster) -> IPv4Address:
     net = c.spec.network.nodes
     last = max(int(n.ip) - int(net.network_address) for n in c.spec.nodes)
     host = last + 1
-    if host == 100:
-        host = 101
     if host > 199:
         raise ClusterError(f"no free node address left in {net} (.200-.219 is the LB pool)")
     return net.network_address + host

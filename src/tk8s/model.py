@@ -35,7 +35,8 @@ class NodeGroup(Strict):
 
 class UserNetwork(Strict):
     nodes: IPv4Network | None = None
-    lb: IPv4Address | None = None
+    router: IPv4Address | None = None
+    ha: Literal["proxy"] | None = None
 
 
 class UserSpec(Strict):
@@ -83,7 +84,8 @@ class Network(Strict):
     index: int = Field(ge=0, le=255)
     nodes: IPv4Network
     gateway: IPv4Address
-    lb: IPv4Address
+    router: IPv4Address
+    ha: Literal["proxy"] = "proxy"
     lb_range: str
     pods: IPv4Network
     services: IPv4Network
@@ -175,25 +177,8 @@ def _first_error(where: str, err: ValidationError) -> str:
     return f"{where}: {loc}: {e['msg']}{got}"
 
 
-def _refuse_old_keys(raw: Any) -> None:
-    spec = raw.get("spec") if isinstance(raw, dict) else None
-    if not isinstance(spec, dict):
-        return
-    if "runtime" in spec:
-        raise ClusterFileError(
-            "spec.runtime is not a field any more: nodes run CRI-O from the single node image; "
-            "remove the key"
-        )
-    if isinstance(spec.get("network"), dict) and "vip" in spec["network"]:
-        raise ClusterFileError(
-            "spec.network.vip is no longer supported: every cluster gets an apiserver LB at "
-            "spec.network.lb; recreate the cluster"
-        )
-
-
 def load_user_text(text: str, where: str = "cluster file") -> UserCluster:
     raw = _parse(text, where)
-    _refuse_old_keys(raw)
     if isinstance(raw, dict) and "status" in raw:
         raise ClusterFileError(f"{where}: status is written by tkctl, not given in a cluster file")
     try:
