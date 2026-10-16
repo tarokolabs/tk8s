@@ -1,21 +1,20 @@
 import pytest
 
+from tests.fixtures import OP, SHOW_HAPROXY
 from tk8s.create import nodes
 from tk8s.host import FakeHost, Result
 from tk8s.phases import Context, PhaseFailed, Runner
-
-STATS = (
-    "# pxname,svname,qcur,qmax,scur,smax,slim,stot,bin,bout,dreq,dresp,ereq,econ,eresp,wretr,"
-    "wredis,status\n"
-    "control-planes,demo-control-plane-1,0,0,0,0,,0,0,0,,0,,0,0,0,0,DOWN\n"
-    "control-planes,BACKEND,0,0,0,0,200,0,0,0,0,0,,0,0,0,0,DOWN\n"
-)
 
 
 def healthy(host: FakeHost, ctx: Context) -> None:
     host.responses[("id", "-u")] = Result(0, "1000\n", "")
     host.responses[("id", "-g")] = Result(0, "1000\n", "")
-    host.responses[("podman", "exec", "demo-lb")] = Result(0, STATS, "")
+    host.responses[("podman", "exec", "demo-router", "cat", "/tmp/vyos-config-status")] = Result(
+        0, "0\n", ""
+    )
+    host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(
+        0, SHOW_HAPROXY, ""
+    )
     for n in ("demo-control-plane-1", "demo-worker-1", "demo-worker-2"):
         host.responses[("podman", "exec", n, "systemctl", "is-system-running")] = Result(
             0, "running\n", ""
@@ -52,24 +51,18 @@ def test_cni_plugins_offline_without_plugins_fails_by_name(ctx: Context, host: F
     assert not any(c.argv[0] == "curl" for c in host.calls)
 
 
-def test_up_copies_the_lb_image_starts_the_target_and_waits(ctx: Context, host: FakeHost) -> None:
+def test_up_starts_the_target_and_waits_for_nodes_and_router(ctx: Context, host: FakeHost) -> None:
     healthy(host, ctx)
     host.active.discard("demo.target")
-    host.responses[("podman", "image", "exists", ctx.versions.haproxy)] = [
-        Result(1, "", ""),
-        Result(0, "", ""),
-    ]
-    host.responses[("podman", "save")] = Result(0, "TAR", "")
     nodes.up_run(ctx)
     a = argvs(host)
-    load_at = a.index(["podman", "load"])
-    start_at = a.index(["systemctl", "enable", "--now", "--quiet", "demo.target"])
-    assert load_at < start_at, "the LB image is in the host store before the target starts"
+    assert ["systemctl", "enable", "--now", "--quiet", "demo.target"] in a
     assert ["systemctl", "daemon-reload"] in a and ["systemctl", "reset-failed", "demo*"] in a
     assert ["mkdir", str(ctx.state_dir / "storage")] in a
     assert ["mkdir", str(ctx.state_dir / "logs")] in a
     assert ["mkdir", str(ctx.paths.wulin_dir), "owner=1000:1000"] in a
-    assert "  demo-lb: 1 control plane backend(s) at 172.22.0.100" in host.lines
+    assert not any(c[:2] == ["podman", "load"] for c in a)  # nothing is copied for the router
+    assert "  demo-router: VyOS up, 1 control plane backend(s) at 172.22.0.253" in host.lines
 
 
 def test_stale_volumes_of_a_new_node_are_removed(ctx: Context, host: FakeHost) -> None:
@@ -102,14 +95,19 @@ def test_a_node_whose_systemd_never_comes_up_fails_by_name(ctx: Context, host: F
         Runner([nodes.PHASE], only="nodes/up").run(ctx)
 
 
-def test_lb_that_never_lists_the_control_planes_fails_by_name(ctx: Context, host: FakeHost) -> None:
+def test_router_that_never_lists_the_control_planes_fails_by_name(
+    ctx: Context, host: FakeHost
+) -> None:
     healthy(host, ctx)
-    host.responses[("podman", "exec", "demo-lb")] = Result(0, "# pxname,svname\n", "")
-    with pytest.raises(PhaseFailed, match="demo-lb lists 0 of 1 control planes within 60 s"):
+    ctx.options.poll = 0
+    host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(
+        0, SHOW_HAPROXY.split("api                   demo-control-plane-1")[0], ""
+    )
+    with pytest.raises(PhaseFailed, match="demo-router lists 0 of 1 control planes within 60 s"):
         Runner([nodes.PHASE], only="nodes/up").run(ctx)
 
 
-def test_up_is_done_when_target_nodes_and_lb_are_up(ctx: Context, host: FakeHost) -> None:
+def test_up_is_done_when_target_nodes_and_router_are_up(ctx: Context, host: FakeHost) -> None:
     healthy(host, ctx)
     assert nodes.up_done(ctx)
     host.active.discard("demo.target")
@@ -123,10 +121,3 @@ def test_up_is_done_when_target_nodes_and_lb_are_up(ctx: Context, host: FakeHost
         Result(1, "starting\n", "")
     )
     assert not nodes.up_done(ctx)
-
-
-def test_lb_backends_parses_the_stats_csv(ctx: Context, host: FakeHost) -> None:
-    healthy(host, ctx)
-    assert nodes.lb_backends(ctx) == 1
-    stats = next(c for c in host.calls if c.argv[:3] == ["podman", "exec", "demo-lb"])
-    assert stats.argv[3:5] == ["bash", "-c"] and "127.0.0.1/8404" in stats.argv[5]

@@ -1,7 +1,12 @@
-"""router: the VyOS container of a cluster. Plan 1: the image name and the config.boot text;
-the wait, the backend status and the reload come with the nodes phase and the node verbs."""
+"""router: the VyOS container of a cluster: its image, the server blocks of its config.boot,
+and how tkctl waits for it, reads its load balancer status and reloads its configuration."""
+
+import time
 
 from .. import model, versions
+from ..phases import Context, PhaseFailed
+
+OP = "/opt/vyatta/bin/vyatta-op-cmd-wrapper"
 
 
 def image(v: versions.Versions) -> str:
@@ -19,3 +24,63 @@ def servers(c: model.Cluster) -> str:
         f"            }}"
         for n in c.control_planes
     )
+
+
+def name(ctx: Context) -> str:
+    return f"{ctx.cluster_name}-router"
+
+
+def booted(ctx: Context) -> bool:
+    """VyOS writes /tmp/vyos-config-status (0 = applied) when the boot-time config load ends;
+    vyos-router.service is active long before that."""
+    r = ctx.host.run(
+        ["podman", "exec", name(ctx), "cat", "/tmp/vyos-config-status"],
+        sudo=True,
+        capture=True,
+        check=False,
+    )
+    return r.returncode == 0 and r.stdout.strip() == "0"
+
+
+def backends(ctx: Context) -> list[tuple[str, str]]:
+    """(server, status) for every control plane in the api backend, from `show haproxy`."""
+    r = ctx.host.run(
+        ["podman", "exec", name(ctx), OP, "show", "haproxy"], sudo=True, capture=True, check=False
+    )
+    if r.returncode != 0:
+        return []
+    rows = (line.split() for line in r.stdout.splitlines())
+    return [
+        (f[1], f[2])
+        for f in rows
+        if len(f) > 2 and f[0] == "api" and f[1] not in ("FRONTEND", "BACKEND")
+    ]
+
+
+def wait(ctx: Context) -> None:
+    """Booted, then every control plane listed as a backend: the config was good. The backends
+    stay DOWN until kubeadm brings an apiserver up."""
+    c = ctx.require_cluster()
+    for i in range(1, 31):
+        if booted(ctx):
+            break
+        if i == 30:
+            raise PhaseFailed(
+                f"{name(ctx)} did not finish booting within 60 s (podman logs {name(ctx)}; "
+                f"podman exec {name(ctx)} cat /tmp/vyos-config-status)"
+            )
+        time.sleep(ctx.options.poll)
+    want = len(c.control_planes)
+    for i in range(1, 31):
+        got = len(backends(ctx))
+        if got >= want:
+            ctx.say(
+                f"  {name(ctx)}: VyOS up, {got} control plane backend(s) at {c.spec.network.router}"
+            )
+            return
+        if i == 30:
+            raise PhaseFailed(
+                f"{name(ctx)} lists {got} of {want} control planes within 60 s "
+                f"(podman exec {name(ctx)} {OP} show haproxy)"
+            )
+        time.sleep(ctx.options.poll)
