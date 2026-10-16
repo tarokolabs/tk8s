@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from tk8s import versions
@@ -14,7 +15,8 @@ def test_real_versions_yaml_loads_and_pins_everything() -> None:
         "metrics_server",
         "local_path_provisioner",
         "gvisor",
-        "haproxy",
+        "vyos",
+        "vyos_sha256",
         "verify_busybox",
         "verify_alpine",
         "verify_agnhost",
@@ -32,3 +34,10 @@ def test_crio_table_covers_both_supported_minors() -> None:
 def test_uv_is_pinned() -> None:
     v = versions.load(HOME / "versions.yaml")
     assert v.uv == "0.13.1"
+
+
+def test_vyos_is_pinned_by_build_and_checksum_and_haproxy_is_gone() -> None:
+    v = versions.load(HOME / "versions.yaml")
+    assert re.fullmatch(r"\d{4}\.\d{2}\.\d{2}-\d{4}", v.vyos), v.vyos
+    assert re.fullmatch(r"[0-9a-f]{64}", v.vyos_sha256)
+    assert not hasattr(v, "haproxy")

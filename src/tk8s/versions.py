@@ -23,7 +23,8 @@ class Versions(BaseModel):
     local_path_provisioner: str
     gvisor: str
     gateway_api: str
-    haproxy: str
+    vyos: str
+    vyos_sha256: str
     crun: str
     podman: str
     uv: str

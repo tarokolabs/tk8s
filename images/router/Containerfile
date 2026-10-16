@@ -1,0 +1,24 @@
+# tk8s router image: VyOS rolling as a container. VyOS publishes no runnable container image, only
+# the nightly ISO, so the live rootfs (a squashfs inside the ISO) becomes the image. Pinned by the
+# nightly build number and the ISO's sha256 in versions.yaml; the same pair always builds the same
+# image. Runs privileged with systemd as PID 1 (podman's systemd mode), stops with SIGRTMIN+3.
+ARG VYOS=0000.00.00-0000
+ARG SHA256=0
+
+FROM docker.io/library/debian:13-slim AS extract
+ARG VYOS
+ARG SHA256
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libarchive-tools squashfs-tools \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL -o /vyos.iso "https://github.com/vyos/vyos-nightly-build/releases/download/${VYOS}-rolling/vyos-${VYOS}-rolling-generic-amd64.iso" \
+    && echo "${SHA256}  /vyos.iso" | sha256sum -c - \
+    && bsdtar -C / -xf /vyos.iso live/filesystem.squashfs \
+    && unsquashfs -q -n -d /rootfs /live/filesystem.squashfs \
+    && rm -f /vyos.iso /live/filesystem.squashfs
+
+FROM scratch
+COPY --from=extract /rootfs /
+# A container has no audit subsystem and journald already keeps the log; both units fail in a loop.
+RUN systemctl mask auditd.service rsyslog.service
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

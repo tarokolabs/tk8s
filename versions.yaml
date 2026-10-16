@@ -16,8 +16,12 @@ local_path_provisioner: "v0.0.37"
 # gVisor release (single gvisor.tar.zstd per release); installed into nodes by addons:gvisor
 gvisor: "20261005.0"
 gateway_api: "v1.6.3"
-# apiserver LB per cluster (host-side container at .100)
-haproxy: "docker.io/library/haproxy:3.3.17-trixie"
+# The router container of every cluster (VyOS rolling, built from the nightly ISO by
+# images/router/; the apiserver load balancer and, from Plan 2 on, the BGP router). The build
+# number is the nightly tag without "-rolling"; the checksum is of the generic-amd64 ISO. Move
+# both to the newest nightly at every release.
+vyos: "2026.10.07-0712"
+vyos_sha256: "1417a2fd96183672f43e83d680e02ccfce5cd5ae3851978e9a37efd11edbd5a0"
 # crun for the e2e runner only (Ubuntu 24.04 ships 1.14, too old for podman 5); nodes get crun from CRI-O
 crun: "1.30.1"
 # podman built from source on the e2e runner (Ubuntu 24.04 ships 4.9); hosts need >= 5.4
