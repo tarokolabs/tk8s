@@ -184,6 +184,24 @@ def test_existing_cluster_is_refused_and_indices_come_from_the_real_dir(
     assert rc == 1 and "already used" in out
 
 
+def test_create_refuses_a_cluster_yaml_without_status(
+    capsys: pytest.CaptureFixture[str], data_dir: Path
+) -> None:
+    """A cluster.yaml this tkctl did not write (no status: a tk8s before v2026.10.7) is neither
+    Ready nor a create to resume; resuming would re-resolve the topology from the flags and
+    overwrite the file. create refuses and names the way out."""
+    taken = data_dir / "clusters" / "taken"
+    taken.mkdir(parents=True)
+    legacy = TAKEN.replace("status: {phase: Ready, tk8s: test}\n", "")
+    assert "status:" not in legacy
+    (taken / "cluster.yaml").write_text(legacy)
+    rc, out = run(capsys, "create", "cluster", "taken", "--control-planes", "3", "--dry-run")
+    assert rc == 1
+    assert "cluster taken has a cluster.yaml without status" in out
+    assert "tkctl delete cluster taken" in out
+    assert (taken / "cluster.yaml").read_text() == legacy
+
+
 def test_file_input(capsys: pytest.CaptureFixture[str], data_dir: Path) -> None:
     f = data_dir / "c.yaml"
     f.write_text(

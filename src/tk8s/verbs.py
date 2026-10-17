@@ -44,6 +44,13 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
     ctx = make_context(dry_run=a.dry_run, quiet=a.quiet)
     name = user.metadata.name
     existing = load_existing(ctx.paths, name)
+    if existing is not None and existing.status is None:
+        # not a create to resume: a tk8s before v2026.10.7 wrote this file, and resuming would
+        # re-resolve the topology from today's flags and overwrite it
+        raise UsageError(
+            f"cluster {name} has a cluster.yaml without status (created by an older tk8s); "
+            f"delete it first: tkctl delete cluster {name}"
+        )
     if existing is not None and existing.status is not None and existing.status.phase == "Ready":
         raise UsageError(f"cluster {name} already exists; delete it first or pick another name")
     ctx.cluster = resolve(

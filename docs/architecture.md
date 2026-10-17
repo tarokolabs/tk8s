@@ -72,7 +72,7 @@ templates/                  # 寫到主機上的檔，與實際內容只差 $變
 
 節點容器由 Quadlet 管理，每次啟停會重建；節點必須保留的 `/var`、`/etc`、`/usr/local/bin` 放在每節點的 named volume（`<節點>-var`、`-etc`、`-usr-local-bin`），`delete` 會一併移除。
 
-`cluster.yaml` 的 `status` 區塊（`phase: Creating|Ready`、`completed:` 每個 phase 的完成時間、`tk8s:` 建立時的 tk8s 版本）由 tkctl 寫，`-f` 的檔不能有。沒有 `status` 的 `cluster.yaml`（v2026.10.9 之前建的叢集）一律視為 Creating；那些叢集請刪除後重建，tkctl 不再讀 `.create-complete` 標記。
+`cluster.yaml` 的 `status` 區塊（`phase: Creating|Ready`、`completed:` 每個 phase 的完成時間、`tk8s:` 建立時的 tk8s 版本）由 tkctl 寫，`-f` 的檔不能有。沒有 `status` 的 `cluster.yaml`（v2026.10.7 之前建的叢集）tkctl 不再讀 `.create-complete` 標記來判 Ready：`get clusters` 列為 Creating，`create` 拒絕把它當成中斷的建立來續跑（續跑會依今天的旗標重算拓樸並覆寫檔案）；請刪除後重建。
 
 ## router 與 apiserver 的入口
 
