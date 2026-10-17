@@ -106,6 +106,7 @@ def describe(ctx: Context, c: model.Cluster, output: str | None) -> None:
     describe_router(ctx, c, state)
     ctx.say("Access:")
     routers = " and ".join(r.name for r in c.routers)
+    spread = "spreads" if len(c.routers) == 1 else "spread"
     if net.ha == "proxy":
         ctx.say(
             f"  apiserver:  https://{net.router}:6443 (VyOS haproxy in {routers}; every "
@@ -113,7 +114,7 @@ def describe(ctx: Context, c: model.Cluster, output: str | None) -> None:
         )
     else:
         ctx.say(
-            f"  apiserver:  https://{net.vip}:6443 (anycast VIP; {routers} spreads it over "
+            f"  apiserver:  https://{net.vip}:6443 (anycast VIP; {routers} {spread} it over "
             "the control planes announcing it)"
         )
     ctx.say(

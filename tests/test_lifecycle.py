@@ -393,7 +393,7 @@ def test_describe_two_router_cluster_lists_both_routers_and_their_vrrp_state(
     ]
     assert (
         "  apiserver:  https://172.23.0.1:6443 (anycast VIP; demo-router-1 and demo-router-2 "
-        "spreads it over the control planes announcing it)"
+        "spread it over the control planes announcing it)"
     ) in host.lines
 
 
