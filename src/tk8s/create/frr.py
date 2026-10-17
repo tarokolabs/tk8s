@@ -81,49 +81,40 @@ def configure(ctx: Context, n: model.Node) -> None:
     ctx.say(f"  {n.name}: FRR announces {net.vip} to {net.router} while its apiserver is ready")
 
 
-def done(ctx: Context) -> bool:
+def _targets(ctx: Context, *, only_this_node: bool) -> list[model.Node]:
+    """bgp mode's control planes; with only_this_node, just the one a node verb works on (an
+    empty list for a worker, for proxy mode, for no node), so a stopped sibling is never touched."""
     c = ctx.require_cluster()
-    return c.spec.network.ha != "bgp" or all(configured(ctx, n) for n in c.control_planes)
+    if c.spec.network.ha != "bgp":
+        return []
+    if not only_this_node:
+        return c.control_planes
+    n = next((x for x in c.spec.nodes if x.name == ctx.node), None)
+    return [n] if n is not None and n.role == "control-plane" else []
 
 
-def run(ctx: Context) -> None:
-    for n in ctx.require_cluster().control_planes:
+def _done(ctx: Context, nodes: list[model.Node]) -> bool:
+    return all(configured(ctx, n) for n in nodes)
+
+
+def _run(ctx: Context, nodes: list[model.Node]) -> None:
+    for n in nodes:
         if configured(ctx, n):
             ctx.say(f"  {n.name} already configured")
         else:
             configure(ctx, n)
 
 
-PHASE = Phase("frr", "bgp mode: FRR and the VIP health timer on every control plane", done, run)
-
-
-# ---- one node: what add node / join node run, so a stopped sibling control plane is no concern
-
-
-def _this_node(ctx: Context) -> model.Node | None:
-    """The control plane the node verb works on, or None (a worker, proxy mode, no node)."""
-    c = ctx.require_cluster()
-    if c.spec.network.ha != "bgp" or ctx.node is None:
-        return None
-    n = next((x for x in c.spec.nodes if x.name == ctx.node), None)
-    return n if n is not None and n.role == "control-plane" else None
-
-
-def node_done(ctx: Context) -> bool:
-    n = _this_node(ctx)
-    return n is None or configured(ctx, n)
-
-
-def node_run(ctx: Context) -> None:
-    n = _this_node(ctx)
-    if n is None:
-        return
-    if configured(ctx, n):
-        ctx.say(f"  {n.name} already configured")
-    else:
-        configure(ctx, n)
-
-
+PHASE = Phase(
+    "frr",
+    "bgp mode: FRR and the VIP health timer on every control plane",
+    lambda ctx: _done(ctx, _targets(ctx, only_this_node=False)),
+    lambda ctx: _run(ctx, _targets(ctx, only_this_node=False)),
+)
+# what add node / join node run, so a stopped sibling control plane is no concern
 NODE_PHASE = Phase(
-    "frr", "bgp mode: FRR and the VIP health timer on this control plane", node_done, node_run
+    "frr",
+    "bgp mode: FRR and the VIP health timer on this control plane",
+    lambda ctx: _done(ctx, _targets(ctx, only_this_node=True)),
+    lambda ctx: _run(ctx, _targets(ctx, only_this_node=True)),
 )
