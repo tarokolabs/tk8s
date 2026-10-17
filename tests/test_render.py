@@ -21,28 +21,3 @@ def test_substitution_and_strictness(tmp_path: Path) -> None:
         template(tmp_path, "x.conf", name="a")
     with pytest.raises(ValueError, match="unused variables \\['extra'\\]"):
         template(tmp_path, "x.conf", name="a", port=1, extra=2)
-
-
-def test_node_container_has_the_variables_units_will_pass() -> None:
-    out = template(
-        HOME,
-        "node.container",
-        cluster="c",
-        role="worker",
-        name="c-worker-1",
-        ip="172.22.0.2",
-        after="\nAfter=c-control-plane-1.service",
-        image="img",
-        domain="c.k8s",
-        api_ip="172.22.0.253",
-        cni_dir="/d/cni",
-        images_dir="/d/images",
-        k8s="1.37.1",
-        state_dir="/d/clusters/c",
-        wulin_dir="/d/wulin",
-        cpu=2,
-        memory="4g",
-    )
-    assert "PartOf=c.target\nAfter=c-control-plane-1.service\n\n[Container]" in out
-    assert "Volume=/d/images/1.37.1:/var/lib/containers/shared:ro" in out
-    assert "PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g" in out

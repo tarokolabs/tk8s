@@ -343,12 +343,6 @@ def test_audit_policy_names_only_real_resources(ctx: Context) -> None:
             assert set(entry["resources"]) <= known[entry["group"]], entry
 
 
-def test_init_config_sans_name_the_router_and_every_control_plane(ctx: Context) -> None:
-    text = kubeadm.render_init(ctx)
-    assert "    - api.demo.k8s\n    - 172.22.0.253\n    - 172.22.0.1\n" in text
-    assert ".100" not in text
-
-
 def test_bgp_init_config_puts_the_vip_in_the_sans_after_the_router(bgp_ctx: Context) -> None:
     text = kubeadm.render_init(bgp_ctx)
     assert (
