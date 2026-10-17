@@ -4,12 +4,11 @@ controller); then wait for every node to be Ready.
 The Gateway API CRDs, the cilium chart and the cilium CLI are pinned in versions.yaml; the CRDs
 and the chart are vendored under manifests/, so nothing here fetches from helm.cilium.io."""
 
-import time
 from pathlib import Path
 from typing import Literal
 
 from .. import images, model
-from ..phases import Context, Phase, PhaseFailed
+from ..phases import Context, Phase, PhaseFailed, wait_for
 from .kubeadm import kubectl, kubectl_env
 
 Datapath = Literal["netkit", "veth"]
@@ -172,14 +171,23 @@ def nodes_ready_done(ctx: Context) -> bool:
 def nodes_ready_run(ctx: Context) -> None:
     """Host routes to the pod and service subnets are the <cluster>-routes.service unit, started
     with the cluster target by nodes/up; with the CNI in place the nodes turn Ready."""
-    for i in range(1, 61):
+    pending: list[str] | None = []
+
+    def all_ready() -> bool:
+        nonlocal pending
         pending = not_ready(ctx)
-        if pending == []:
-            break
-        if i == 60:
-            what = " ".join(pending) if pending else "kubectl get nodes failed"
-            raise PhaseFailed(f"nodes are not Ready after 5 minutes: {what}")
-        time.sleep(ctx.options.poll_slow)
+        return pending == []
+
+    wait_for(
+        ctx,
+        all_ready,
+        rounds=60,
+        delay=ctx.options.poll_slow,
+        failure=lambda: (
+            "nodes are not Ready after 5 minutes: "
+            f"{' '.join(pending) if pending else 'kubectl get nodes failed'}"
+        ),
+    )
     r = kubectl(ctx, "get", "nodes", "--no-headers")
     if r.returncode != 0:
         raise PhaseFailed(f"kubectl get nodes failed: {r.stderr.strip()}")

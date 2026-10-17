@@ -446,6 +446,7 @@ def test_delete_control_plane_gives_up_when_the_router_keeps_routing_to_it(tmp_p
     ):
         Runner([node_delete.PHASE], record=False).run(ctx)
     assert ["kubectl", "delete", "node", "demo-control-plane-2"] not in argvs(host)
+    assert sum(1 for x in argvs(host) if x[3:] == [OP, "show", "haproxy"]) == 16  # 30 s / 2 s
 
 
 def test_delete_units_is_not_done_while_the_router_still_lists_the_control_plane(

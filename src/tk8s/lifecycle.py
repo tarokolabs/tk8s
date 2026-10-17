@@ -1,14 +1,13 @@
 """Day-2 verbs on an existing cluster: get clusters, describe, stop, start, use. Plain functions in
 the order a person meets them; nothing here has steps to resume, so there are no phases."""
 
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 from . import model
 from .create import PHASES, router
 from .create.kubeadm import kubectl
-from .phases import Context
+from .phases import Context, poll_until
 
 
 class ClusterError(Exception):
@@ -235,13 +234,14 @@ def start(ctx: Context, c: model.Cluster) -> None:
     Ready heartbeat newer than this start."""
     since = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     ctx.host.run(["systemctl", "start", f"{c.name}.target"], sudo=True)
-    for _ in range(90):
+
+    def all_fresh() -> bool:
         r = kubectl(ctx, "get", "nodes", "-o", f"jsonpath={READY_HEARTBEATS}")
         rows = [line.split() for line in r.stdout.splitlines() if line.strip()]
         fresh = [row for row in rows if len(row) == 3 and row[1] == "True" and row[2] > since]
-        if rows and len(fresh) == len(rows):
-            break
-        time.sleep(ctx.options.poll_slow)
+        return bool(rows) and len(fresh) == len(rows)
+
+    poll_until(all_fresh, rounds=90, delay=ctx.options.poll_slow)
     r = kubectl(ctx, "get", "nodes", "--no-headers")
     for line in r.stdout.splitlines():
         fields = line.split()

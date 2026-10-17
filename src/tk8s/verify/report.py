@@ -1,11 +1,11 @@
 """What every check gets: the Report that counts and prints PASS/FAIL/SKIP lines, runs kubectl
 against the cluster and polls; the namespace the test resources live in."""
 
-import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from ..create import kubeadm
-from ..phases import Context
+from ..phases import Context, poll_until
 
 NS = "tk-verify"
 
@@ -43,10 +43,6 @@ class Report:
         r = kubeadm.kubectl(self.ctx, *args, input=input)
         return r.returncode, r.stdout
 
-    def poll(self, rounds: int, probe: object) -> bool:
+    def poll(self, rounds: int, probe: Callable[[], bool]) -> bool:
         """Call probe() up to rounds times, poll_slow apart, until it returns true."""
-        for _ in range(max(rounds, 1)):
-            if probe():  # type: ignore[operator]
-                return True
-            time.sleep(self.ctx.options.poll_slow)
-        return False
+        return poll_until(probe, rounds=max(rounds, 1), delay=self.ctx.options.poll_slow)

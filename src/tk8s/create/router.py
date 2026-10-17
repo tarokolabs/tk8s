@@ -2,10 +2,9 @@
 and how tkctl waits for it, reads its load balancer status and reloads its configuration."""
 
 import json
-import time
 
 from .. import model, podman, versions
-from ..phases import Context, PhaseFailed
+from ..phases import Context, PhaseFailed, wait_for
 
 OP = "/opt/vyatta/bin/vyatta-op-cmd-wrapper"
 
@@ -178,37 +177,34 @@ def synced(ctx: Context, c: model.Cluster) -> bool:
 def wait_booted(ctx: Context) -> None:
     """The boot-time config load holds VyOS for a few seconds after start; a load alongside it
     fails ("Failed to generate committed config") with exit status 0."""
-    for i in range(1, 31):
-        if booted(ctx):
-            return
-        if i == 30:
-            raise PhaseFailed(
-                f"{name(ctx)} did not finish booting within 60 s (podman logs {name(ctx)}; "
-                f"podman exec {name(ctx)} cat /tmp/vyos-config-status)"
-            )
-        time.sleep(ctx.options.poll)
+    wait_for(
+        ctx,
+        lambda: booted(ctx),
+        rounds=30,
+        delay=ctx.options.poll,
+        failure=lambda: (
+            f"{name(ctx)} did not finish booting within 60 s (podman logs {name(ctx)}; "
+            f"podman exec {name(ctx)} cat /tmp/vyos-config-status)"
+        ),
+    )
 
 
 def wait_synced(ctx: Context, c: model.Cluster) -> None:
     """Every control plane listed as a backend (proxy) or neighbor (bgp), no other: the config
     took. The backends stay DOWN, the sessions short of Established, until kubeadm brings an
     apiserver up (and, in bgp mode, kubeadm/frr starts FRR in the control plane)."""
-    for i in range(1, 31):
-        if synced(ctx, c):
-            got = len(c.control_planes)
-            ctx.say(
-                f"  {name(ctx)}: VyOS up, {got} control plane {kind(c)}(s) at "
-                f"{c.spec.network.router}"
-            )
-            return
-        if i == 30:
-            listed = ", ".join(n for n, _ in members(ctx, c)) or "nothing"
-            want = ", ".join(n.name for n in c.control_planes)
-            raise PhaseFailed(
-                f"{name(ctx)} lists {listed} as {kind(c)}s, cluster.yaml has {want} "
-                f"(podman exec {name(ctx)} {show(c)})"
-            )
-        time.sleep(ctx.options.poll)
+
+    def mismatch() -> str:
+        listed = ", ".join(n for n, _ in members(ctx, c)) or "nothing"
+        want = ", ".join(n.name for n in c.control_planes)
+        return (
+            f"{name(ctx)} lists {listed} as {kind(c)}s, cluster.yaml has {want} "
+            f"(podman exec {name(ctx)} {show(c)})"
+        )
+
+    wait_for(ctx, lambda: synced(ctx, c), rounds=30, delay=ctx.options.poll, failure=mismatch)
+    got = len(c.control_planes)
+    ctx.say(f"  {name(ctx)}: VyOS up, {got} control plane {kind(c)}(s) at {c.spec.network.router}")
 
 
 def wait(ctx: Context) -> None:

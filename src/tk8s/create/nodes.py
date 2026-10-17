@@ -1,11 +1,9 @@
 """nodes: the CNI plugins the nodes mount, then start the cluster target and wait for every
 node's systemd and CRI-O and for the router to boot and list the control planes."""
 
-import time
-
 from .. import podman
 from ..datatree import owner
-from ..phases import Context, Phase, PhaseFailed
+from ..phases import Context, Phase, PhaseFailed, wait_for
 from . import router
 
 # ---- cni-plugins
@@ -74,25 +72,29 @@ def remove_stale_volumes(ctx: Context) -> None:
 def wait_node(ctx: Context, node: str) -> None:
     """systemd inside the node, then CRI-O: kubeadm preflight fails if the CRI socket is not up
     yet (the first start also copies /etc into its volume)."""
-    state = ""
-    for i in range(1, 91):
-        state = systemd_state(ctx, node)
-        if state in ("running", "degraded"):
-            break
-        if i == 90:
-            raise PhaseFailed(
-                f"{node} did not reach a running systemd state (journalctl -u {node})"
-            )
-        time.sleep(ctx.options.poll)
-    for i in range(1, 61):
-        if podman.node_active(ctx, node, "crio"):
-            ctx.say(f"  {node}: systemd {state}, crio active")
-            return
-        if i == 60:
-            raise PhaseFailed(
-                f"{node}: crio did not become active (podman exec {node} journalctl -u crio)"
-            )
-        time.sleep(ctx.options.poll)
+    last: list[str] = []
+
+    def systemd_up() -> bool:
+        last.append(systemd_state(ctx, node))
+        return last[-1] in ("running", "degraded")
+
+    wait_for(
+        ctx,
+        systemd_up,
+        rounds=90,
+        delay=ctx.options.poll,
+        failure=lambda: f"{node} did not reach a running systemd state (journalctl -u {node})",
+    )
+    wait_for(
+        ctx,
+        lambda: podman.node_active(ctx, node, "crio"),
+        rounds=60,
+        delay=ctx.options.poll,
+        failure=lambda: (
+            f"{node}: crio did not become active (podman exec {node} journalctl -u crio)"
+        ),
+    )
+    ctx.say(f"  {node}: systemd {last[-1]}, crio active")
 
 
 def up_run(ctx: Context) -> None:

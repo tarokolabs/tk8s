@@ -4,12 +4,11 @@ Plan 1 ships the render sub-phase; init, join and kubeconfig follow with the sam
 """
 
 import re
-import time
 from pathlib import Path
 
 from .. import model, podman
 from ..host import Result
-from ..phases import Context, Phase, PhaseFailed
+from ..phases import Context, Phase, PhaseFailed, wait_for
 from ..render import template
 from . import frr, router
 
@@ -88,20 +87,25 @@ def wait_router_ready(ctx: Context) -> None:
     uses it."""
     c = ctx.require_cluster()
     endpoint = c.endpoint_ip
-    for i in range(1, 31):
+
+    def ready() -> bool:
         r = ctx.host.run(
             ["curl", "-sk", "--max-time", "3", f"https://{endpoint}:6443/readyz"],
             capture=True,
             check=False,
         )
-        if r.stdout.strip() == "ok":
-            return
-        if i == 30:
-            raise PhaseFailed(
-                f"the apiserver at {endpoint} (via {c.name}-router) answered no readyz within "
-                f"60 s (podman exec {c.name}-router {router.show(c)})"
-            )
-        time.sleep(ctx.options.poll)
+        return r.stdout.strip() == "ok"
+
+    wait_for(
+        ctx,
+        ready,
+        rounds=30,
+        delay=ctx.options.poll,
+        failure=lambda: (
+            f"the apiserver at {endpoint} (via {c.name}-router) answered no readyz within "
+            f"60 s (podman exec {c.name}-router {router.show(c)})"
+        ),
+    )
 
 
 def _initialised(ctx: Context, cp: str) -> bool:

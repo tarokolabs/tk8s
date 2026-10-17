@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 import pytest
@@ -5,7 +6,17 @@ import pytest
 from tk8s import versions
 from tk8s.host import FakeHost, Result
 from tk8s.paths import Paths
-from tk8s.phases import Context, Options, Phase, PhaseFailed, Runner, confirm, tree
+from tk8s.phases import (
+    Context,
+    Options,
+    Phase,
+    PhaseFailed,
+    Runner,
+    confirm,
+    poll_until,
+    tree,
+    wait_for,
+)
 
 HOME = Path(__file__).resolve().parents[1]
 
@@ -208,3 +219,18 @@ def test_confirm_takes_y_refuses_the_rest_and_eof(
         confirm(ctx, "Delete it? [y/N] ", PhaseFailed)
     ctx.options.assume_yes = True
     confirm(ctx, "never asked", PhaseFailed)
+
+
+def test_wait_for_polls_rounds_times_then_fails_with_the_callers_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, _ = make_ctx(tmp_path)
+    slept: list[float] = []
+    monkeypatch.setattr(time, "sleep", slept.append)
+    seen = iter([False, False, True])
+    wait_for(ctx, lambda: next(seen), rounds=5, delay=2.0, failure=lambda: "never")
+    assert slept == [2.0, 2.0]  # no sleep after the probe that held
+    with pytest.raises(PhaseFailed, match="gave up after 3"):
+        wait_for(ctx, lambda: False, rounds=3, delay=0.5, failure=lambda: "gave up after 3")
+    assert slept == [2.0, 2.0, 0.5, 0.5]  # rounds - 1 sleeps, none after the last probe
+    assert poll_until(lambda: False, rounds=0, delay=0) is False
