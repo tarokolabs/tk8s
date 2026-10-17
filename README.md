@@ -47,6 +47,8 @@ tkctl create cluster demo --workers 3                  # 名稱 demo，三台 wo
 tkctl create cluster ha --control-planes 3              # 三台 control plane，HA
 tkctl create cluster ha --control-planes 3 --defer-join # 額外的 control plane 建好但不加入，供 HA 練習
 tkctl create cluster ha --control-planes 3 --ha bgp     # 同樣三台，apiserver 入口改走 BGP + ECMP 的 anycast VIP
+tkctl create cluster ha --preset ha                      # 3 control plane + 3 worker、bgp、兩台 router；[plan] 會印出展開的旗標
+tkctl create cluster demo --routers 2                    # 兩台 VyOS router 跑 VRRP，.253 在兩台之間漂移；停一台叢集照常
 tkctl create cluster sandbox --gvisor                   # 多一個 gvisor 的 RuntimeClass
 tkctl create cluster old --k8s 1.36.5                   # 次新版
 tkctl create cluster big --cpu 4 --memory 8G
@@ -195,7 +197,7 @@ kubectl 風格，動詞在前。全部如下：
 ```
 tkctl create cluster [名稱] [--control-planes N] [--workers N] [--cpu N] [--memory SIZE]
                      [--k8s 版本] [--datapath auto|netkit|veth] [--gvisor] [--ha proxy|bgp] [--defer-join]
-                     [-f cluster.yaml] [--allow-overlap] [--dry-run]
+                     [--routers 1|2] [--preset lab|ha] [-f cluster.yaml] [--allow-overlap] [--dry-run]
                      [--phase P] [--skip-phases P,...] [--list-phases] [--quiet]
 tkctl delete cluster <名稱> [--yes] [--phase P] [--list-phases]
 tkctl get clusters
@@ -217,6 +219,8 @@ tkctl version
 
 - 名稱格式 `^[a-z][a-z0-9-]{0,15}$`，用於節點名稱與叢集 DNS 網域（`<名稱>.k8s`）。
 - `--control-planes` 要是奇數、最多 5；不論幾台，apiserver 的入口都是 `api.<名稱>.k8s:6443`，由 `.253` 的 VyOS router 服務。`--ha bgp` 時入口不是 router 本身而是 VIP `172.23.N.1`：每台 control plane 的 FRR 只在自己的 apiserver ready 時宣告它，router 對宣告中的 control plane 做 ECMP，整台 control plane 消失靠 BFD 約 1 秒收斂；`describe` 的 `Router:` 段列出 peers 與 next hop 數。
+- `--routers 2`：兩台 router `<名稱>-router-1`（.251）與 `-2`（.252）跑 VRRP，節點的閘道與 apiserver 入口仍是 `.253`，在兩台之間漂移（切換約 3 秒）。停一台用 `sudo systemctl stop <名稱>-router-1.service`（`podman stop` 幾秒後會被 systemd 拉回來）；一台停著時 `add node`／`delete node` 只重載跑著的那台，停著的回來時自己拿到新設定。`describe` 的 `Router:` 段列出兩台與 VRRP 狀態，`verify` 的 `[router]` 多一行檢查剛好一台 MASTER、一台 BACKUP。
+- `--preset lab|ha` 是拓樸縮寫，`[plan]` 會印出展開的旗標；不能跟 `--control-planes`、`--workers`、`--ha`、`--routers`、`--defer-join`、`-f` 混用。`ha` = `--control-planes 3 --workers 3 --ha bgp --routers 2`，`lab` = 預設的 `--control-planes 1 --workers 2 --ha proxy --routers 1`。
 - `--gvisor` 需要 veth datapath，會自動選；明確指定 `--datapath netkit` 加 `--gvisor` 會被拒絕。
 - `--memory` 接受 `4G`、`4096M`，`4Gi` 不行。
 - 已完成的叢集再 `create` 會被拒絕；`delete cluster`、`delete node` 也有 `--phase`，中途失敗再執行一次會接續。

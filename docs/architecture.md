@@ -31,9 +31,11 @@ src/tk8s/
   podman.py                 # 問 podman 物件在不在、在節點容器裡跑指令：全 repo 只有這裡拼這些 argv
   model.py                  # cluster.yaml 的型別（pydantic，frozen，extra=forbid）
   paths.py versions.py      # 路徑與 versions.yaml
-  create/                   # create cluster 的 phase，一個 phase 一檔，__init__ 排順序
+  create/                   # create cluster 的 phase，一個 phase 一檔，__init__ 排順序；
+                            # router.py 跟 router 說話、router_config.py 產 tkctl.boot 的區塊、router_state.py 讀容器與 VRRP 狀態
   node/                     # add.py、delete.py 一個動詞一檔，common.py 是兩者共用的函式
   lifecycle.py              # get、describe、stop、start、use
+  describe_router.py        # describe 的 Router: 段（一台或兩台 router、VRRP 狀態）
   delete.py                 # delete cluster
   images.py                 # 共用 image store
   verify/                   # verify cluster 的 15 個檢查，一個檢查一個函式，一個 [section] 一檔
@@ -61,9 +63,10 @@ templates/                  # 寫到主機上的檔，與實際內容只差 $變
 ```
 /opt/taroko/clusters/<名稱>/     # cluster.yaml、kubeconfig、init-config.yaml、storage/、logs/
 /opt/taroko/clusters/<名稱>/router/  # tkctl.boot 與兩個開機腳本，依 cluster.yaml 產生；VyOS 自己寫的 config.boot 與 archive 也在這
+/opt/taroko/clusters/<名稱>/router-1/、router-2/  # --routers 2 時取代 router/，一台一個目錄
 /opt/taroko/cni/                 # CNI plugins，所有叢集共用
 /opt/taroko/images/<K8s 版本>/   # 共用 image store，節點唯讀掛載；<版本>.conf 是它的 storage.conf
-/etc/containers/systemd/<名稱>/  # Quadlet unit：<名稱>.network、<名稱>-router.container、每個節點一個 .container
+/etc/containers/systemd/<名稱>/  # Quadlet unit：<名稱>.network、<名稱>-router.container（--routers 2 時 -router-1 與 -router-2）、每個節點一個 .container
 /etc/systemd/system/<名稱>.target
 /etc/systemd/system/<名稱>-routes.service   # 主機到 pod 與 service 網段的路由，跟 target 一起啟停
 ```
@@ -93,6 +96,16 @@ tkctl 渲染的是 `tkctl.boot`；VyOS 開機前的 `vyos-preconfig-bootup.scrip
 兩種故障、兩種收斂：apiserver 掛但節點活著，timer 連續兩次探測失敗後撤回，約 2 秒（探測掛住不回應時約 3 秒）；整台 control plane 無聲消失，BFD 約 1 秒判定鄰居死亡（只靠 BGP timers 3/9 要 9 秒）；`podman stop` 這種優雅停止 FRR 送 cease，0.3 秒撤回。憑證 SAN 同時含 `.253` 與 VIP。`verify` 的 `[router]` 在這個模式檢查每台已加入的 control plane Established、ECMP 的 next hop 數（也就是正在宣告 VIP 的 control plane 數）等於已加入的 control plane 數、BFD 全 up。router 另有一條 `reject` 的 static route 指向 VIP（distance 254，BGP 的 20 會壓過它）：沒有任何 control plane 宣告時，client 立刻收到 unreachable，而不是封包在 router 與主機之間繞到 TTL 耗盡。
 
 一個 ECMP 固有的代價：control plane 加入、離開或撤回時 next hop 群組重算 hash，既有連到 VIP 的連線有一部分會被送到另一台、收到 RST 重連；kubectl 與各元件的 client 會自己重連，但 bgp 模式不像 proxy 模式那樣保證既有連線不受影響。
+
+### 兩台 router（`--routers 2`）
+
+`spec.network.routers: 2`（旗標 `--routers 2`，`--preset ha` 也是）把 router 變成兩台：`<名稱>-router-1`（`.251`，VRRP priority 200）與 `<名稱>-router-2`（`.252`，priority 100），各自一個 Quadlet 與狀態目錄（`router-1/`、`router-2/`），同一份 `tkctl.boot` 樣板只差自己的位址、host-name 與 VRRP 區塊。`.253` 不再是哪一台的位址，而是 VyOS `high-availability vrrp group tk8s` 的浮動位址（vrid 10、advertise-interval 用預設 1 秒、multicast），所以節點的閘道、`api.<名稱>.k8s` 的解析、主機到 VIP 的路由在一台或兩台時完全相同；`cluster.yaml` 一律寫 `routers:`（單 router 是 `routers: 1`）。
+
+兩種模式都支援。proxy：兩台各自一份完整的 haproxy 設定（server 清單相同，綁 0.0.0.0:6443），誰持有 `.253` 誰在服務，切換時既有連線斷一次、client 重連。bgp：每台 control plane 的 `frr.conf` 對兩台 router 各一個 neighbor 與 BFD peer，兩台各自學到 VIP 的 ECMP，router 之間不需要 iBGP；主機的 `VIP/32 via .253` 走浮動位址，所以 VIP 的可用性也受 VRRP 的切換時間限制。
+
+**切換時間**：VyOS 的 `advertise-interval` 只收整數秒（1–255），1 秒 × 3 就是 VRRP 的地板，MASTER 消失到 BACKUP 接手約 3 秒（spike：host→VIP 與節點→外網各掉 33 個 100 ms 的 ping）；對比之下 bgp 模式的 VIP 撤回在 1 秒內。preempt 開著：router-1 回來就搶回 MASTER，但帶 `preempt-delay 10`，因為剛開機的 router-1 若立刻拿回 `.253`，它的 BGP 還要幾秒才學到 VIP，這段時間 host→VIP 只會撞到 `reject` 那條；延遲 10 秒讓 BGP 先收斂再接手（BGP 已收斂後的搶回量到 0 掉包）。
+
+**停一台**：Quadlet 的 unit 有 `Restart=always`，`podman stop <名稱>-router-1` 幾秒後 systemd 就把它拉回來；要讓它停著是 `sudo systemctl stop <名稱>-router-1.service`，回來是 `systemctl start`（`describe` 的 `stop:` 行寫的就是這個）。一台停著時 `add node`／`delete node` 只重載跑著的那台（`podman container inspect` 說不在跑的跳過，並印一行說它開機時會拿到新的 `tkctl.boot`：開機腳本每次都把 `tkctl.boot` 蓋成 `config.boot`）；兩台都不在跑才失敗。delete control plane 等每一台跑著的 router 都不再送連線給它。`verify` 的 `[router]` 每台一行，另加一行 VRRP：剛好一台 MASTER、一台 BACKUP，誰是 MASTER 不管；停著的那台就是 FAIL。create 的 `nodes/up` 與 `kubeadm/init` 仍等兩台都好。
 
 ## 主機的 sysctl
 
