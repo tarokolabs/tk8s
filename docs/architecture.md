@@ -28,6 +28,7 @@ src/tk8s/
   cli.py args.py verbs.py   # 參數解析、旗標驗證、每個動詞一個 cmd_*
   phases.py                 # Phase、Runner、Context
   host.py                   # 執行指令與寫檔的唯一入口；DryRunHost 只印、FakeHost 給測試
+  podman.py                 # 問 podman 物件在不在、在節點容器裡跑指令：全 repo 只有這裡拼這些 argv
   model.py                  # cluster.yaml 的型別（pydantic，frozen，extra=forbid）
   paths.py versions.py      # 路徑與 versions.yaml
   create/                   # create cluster 的 phase，一個 phase 一檔，__init__ 排順序
@@ -71,7 +72,7 @@ templates/                  # 寫到主機上的檔，與實際內容只差 $變
 
 節點容器由 Quadlet 管理，每次啟停會重建；節點必須保留的 `/var`、`/etc`、`/usr/local/bin` 放在每節點的 named volume（`<節點>-var`、`-etc`、`-usr-local-bin`），`delete` 會一併移除。
 
-`cluster.yaml` 的 `status` 區塊（`phase: Creating|Ready`、`completed:` 每個 phase 的完成時間、`tk8s:` 建立時的 tk8s 版本）由 tkctl 寫，`-f` 的檔不能有。v2026.10.x 建的叢集沒有 `status`，靠 `.create-complete` 標記視為 Ready，首次更新 `cluster.yaml`（新增或刪除節點）時補上並刪掉標記。
+`cluster.yaml` 的 `status` 區塊（`phase: Creating|Ready`、`completed:` 每個 phase 的完成時間、`tk8s:` 建立時的 tk8s 版本）由 tkctl 寫，`-f` 的檔不能有。沒有 `status` 的 `cluster.yaml`（v2026.10.9 之前建的叢集）一律視為 Creating；那些叢集請刪除後重建，tkctl 不再讀 `.create-complete` 標記。
 
 ## router 與 apiserver 的入口
 

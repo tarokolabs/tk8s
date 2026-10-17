@@ -33,6 +33,7 @@ $(sort "$digests"/*.digest | awk '{printf "| `%s` | `%s` |\n", $1, $2}')
 | CNI | cilium $(v cilium)（kube-proxy replacement、LB-IPAM、L2 announcement、netkit/veth）|
 | Gateway API | cilium 內建 controller（Gateway API $(v gateway_api)，experimental channel CRD）|
 | Router | 每叢集一個 VyOS rolling $(v vyos) 容器：節點的預設閘道，也是 apiserver 的入口。\`proxy\`（預設）：\`load-balancing haproxy\`，TCP 檢查；\`--ha bgp\`：每台 control plane 以 FRR 只在 apiserver ready 時宣告 VIP，router 做 ECMP，BFD 300 ms × 3 收斂；image 自本 tag 的配方建置 |
+| 相容 | 叢集由建立時寫下的 \`cluster.yaml\` 描述；v2026.10.9 之前建立的（沒有 \`status\` 區塊）不再視為 Ready，請 \`tkctl delete cluster\` 後重建 |
 | apiserver 入口 | \`api.<叢集>.k8s:6443\` 解析到 router（proxy）或 anycast VIP \`172.23.N.1\`（bgp）；\`--control-planes 3\` 以上多 control plane |
 | RuntimeClass | crun（CRI-O 內建）；gVisor $(v gvisor)（\`--gvisor\`，建叢集時裝進節點）|
 | 監控與儲存 | metrics-server $(v metrics_server)、local-path-provisioner $(v local_path_provisioner) |
