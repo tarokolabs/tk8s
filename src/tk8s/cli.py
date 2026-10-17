@@ -60,6 +60,12 @@ Create flags:
   --datapath MODE        cilium datapath: auto | netkit | veth (default auto)
   --defer-join           create the extra control planes but do not join them (HA exercise);
                          join later with: tkctl join node CLUSTER NODE
+  --routers N            router containers: 1 (default) or 2 (VRRP between them, the nodes'
+                         gateway .253 floats; stop one with systemctl stop NAME-router-1.service)
+  --preset NAME          a named topology, printed expanded under [plan]; cannot be combined
+                         with --control-planes/--workers/--ha/--routers/--defer-join/-f:
+                           lab   --control-planes 1 --workers 2 --ha proxy --routers 1
+                           ha    --control-planes 3 --workers 3 --ha bgp --routers 2
   -f FILE                cluster definition file; cannot be combined with topology flags
   --allow-overlap        allow subnets that overlap an existing cluster
   --dry-run              print the resolved cluster.yaml and generated files without changing

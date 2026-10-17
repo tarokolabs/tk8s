@@ -217,6 +217,8 @@ def done(ctx: Context) -> bool:
 
 def run(ctx: Context) -> None:
     c = ctx.require_cluster()
+    if ctx.options.preset:
+        ctx.say(f"  {ctx.options.preset}")
     n = len(c.control_planes)
     ctx.say(
         f"  cluster {c.name}: {n} control plane{'s' if n > 1 else ''} + "

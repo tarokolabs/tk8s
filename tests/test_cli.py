@@ -127,11 +127,11 @@ def test_workers_zero_builds_a_control_plane_only_cluster(
         (["create", "cluster", "demo", "--control-planes", "7", "--dry-run"], "at most 5"),
         (
             ["create", "cluster", "-f", "x.yaml", "--ha", "bgp", "--dry-run"],
-            "-f cannot be combined with --control-planes/--workers/--cpu/--memory/--ha",
+            "-f cannot be combined with --control-planes/--workers/--cpu/--memory/--ha/--routers",
         ),
         (
             ["create", "cluster", "-f", "x.yaml", "--ha=bgp", "--dry-run"],
-            "-f cannot be combined with --control-planes/--workers/--cpu/--memory/--ha",
+            "-f cannot be combined with --control-planes/--workers/--cpu/--memory/--ha/--routers",
         ),
         (
             ["create", "cluster", "demo", "--k8s", "1.36", "--dry-run"],
@@ -706,3 +706,45 @@ def test_ctrl_c_is_one_line_and_130(
     monkeypatch.setattr(cli, "_main", boom)
     assert main(["create", "cluster"]) == 130
     assert capsys.readouterr().err == "tkctl: interrupted\n"
+
+
+# ---- --routers and --preset
+
+
+def test_preset_ha_expands_and_prints_the_flags(capsys: pytest.CaptureFixture[str]) -> None:
+    rc, out = run(capsys, "create", "cluster", "demo", "--preset", "ha", "--dry-run")
+    assert rc == 0
+    assert "  preset ha: --control-planes 3 --workers 3 --ha bgp --routers 2\n" in out
+    assert "  cluster demo: 3 control planes + 3 workers," in out
+    assert "    ha: bgp\n    routers: 2\n" in out
+
+
+def test_preset_lab_is_todays_default(capsys: pytest.CaptureFixture[str]) -> None:
+    _, plain = run(capsys, "create", "cluster", "--dry-run")
+    _, lab = run(capsys, "create", "cluster", "--preset", "lab", "--dry-run")
+    line = "  preset lab: --control-planes 1 --workers 2 --ha proxy --routers 1\n"
+    assert line in lab and lab.replace(line, "") == plain
+
+
+@pytest.mark.parametrize(
+    ("extra", "flag"),
+    [
+        (["--workers", "1"], "--workers"),
+        (["--control-planes", "3"], "--control-planes"),
+        (["--ha=bgp"], "--ha"),
+        (["--routers", "2"], "--routers"),
+        (["--defer-join"], "--defer-join"),
+        (["-f", "x.yaml"], "-f"),
+    ],
+)
+def test_preset_refuses_a_topology_flag_even_with_the_same_value(
+    capsys: pytest.CaptureFixture[str], extra: list[str], flag: str
+) -> None:
+    rc, out = run(capsys, "create", "cluster", "demo", "--preset", "ha", *extra, "--dry-run")
+    assert rc == 1
+    assert f"--preset ha cannot be combined with {flag}; use the expanded flags instead" in out
+
+
+def test_routers_flag_reaches_cluster_yaml(capsys: pytest.CaptureFixture[str]) -> None:
+    rc, out = run(capsys, "create", "cluster", "demo", "--routers", "2", "--dry-run")
+    assert rc == 0 and "    ha: proxy\n    routers: 2\n" in out
