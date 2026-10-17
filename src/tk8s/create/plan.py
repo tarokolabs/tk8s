@@ -80,6 +80,7 @@ def network(
     want_router: IPv4Address | None,
     ha: Literal["proxy", "bgp"] | None,
     want_vip: IPv4Address | None = None,
+    routers: Literal[1, 2] | None = None,
 ) -> model.Network:
     """Subnet by index: nodes 172.22.N.0/24 (the router at .253, LB-IPAM .200-.219), pods a /21,
     services a /24; the gateway .254 is the host bridge, the router's upstream. bgp mode adds the
@@ -92,6 +93,11 @@ def network(
         raise PlanError(
             f"spec.network.router {want_router} must be 172.22.{index}.220-253 "
             "(the default is .253)"
+        )
+    if routers == 2 and want_router is not None and int(want_router) & 0xFF in (251, 252):
+        raise PlanError(
+            f"spec.network.router {want_router} is a router itself with routers: 2 "
+            f"(.251 and .252); pick another 172.22.{index}.220-253"
         )
     vip_net = IPv4Network(f"172.23.{index}.0/24")
     if want_vip is not None and mode != "bgp":
@@ -110,6 +116,7 @@ def network(
         gateway=IPv4Address(f"172.22.{index}.254"),
         router=want_router or IPv4Address(f"172.22.{index}.253"),
         ha=mode,
+        routers=routers or 1,
         vip=vip,
         lb_range=f"172.22.{index}.200-172.22.{index}.219",
         pods=IPv4Network(f"10.244.{index * 8}.0/21"),
@@ -172,6 +179,7 @@ def resolve(
             s.network.router if s.network else None,
             s.network.ha if s.network else None,
             s.network.vip if s.network else None,
+            routers=s.network.routers if s.network else None,
         ),
         nodes=expand_nodes(u.metadata.name, s.nodes, index),
     )

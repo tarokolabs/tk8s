@@ -32,6 +32,18 @@ def bgp_user() -> model.UserCluster:
     )
 
 
+def two_router_user() -> model.UserCluster:
+    """demo in bgp mode with two routers: 3 control planes (.1 .2 .3) + 1 worker (.4), routers
+    .251/.252 behind the floating .253, VIP 172.23.0.1."""
+    return model.UserCluster(
+        metadata=model.Metadata(name="demo"),
+        spec=model.UserSpec(
+            network=model.UserNetwork(ha="bgp", routers=2),
+            nodes=[model.NodeGroup(role="control-plane", count=3), model.NodeGroup(role="worker")],
+        ),
+    )
+
+
 def ha_user() -> model.UserCluster:
     """demo with 3 control planes (the third deferred) and one worker."""
     return model.UserCluster(
