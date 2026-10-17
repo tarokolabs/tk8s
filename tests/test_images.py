@@ -8,7 +8,7 @@ import pytest
 from tk8s import images, model
 from tk8s.create import images as images_phase
 from tk8s.host import FakeHost, Result
-from tk8s.phases import Context, PhaseFailed, Runner
+from tk8s.phases import Context, Runner
 
 K8S = "1.37.1"
 NODE = f"ghcr.io/tarokolabs/tk8s/node:v{K8S}"
@@ -24,6 +24,7 @@ CILIUM_DRY = (
     '      image: "quay.io/cilium/cilium-envoy:v1.37.6-1@sha256:cccc"\n'
 )
 MISSING = Result(1, "", "")
+PRESENT = Result(0, "", "")
 
 
 def sources(host: FakeHost) -> None:
@@ -85,6 +86,8 @@ def test_ensure_fresh_host_pulls_everything_once_under_the_lock(
     ctx: Context, host: FakeHost
 ) -> None:
     sources(host)
+    # the node image is missing until its pull; everything else (router, store) stays missing
+    host.responses[("podman", "image", "exists", NODE)] = [MISSING, Result(0, "", "")]
     host.responses[("podman", "image", "exists")] = MISSING
     images.ensure(ctx, K8S)
     assert len(store_pulls(host)) == 15
@@ -226,10 +229,11 @@ def test_phase_done_and_run(ctx: Context, host: FakeHost) -> None:
     host.dirs.add(images.store_dir(ctx.paths, K8S))
     host.files[images.conf_path(ctx.paths, K8S)] = images.storage_conf(ctx.paths, K8S)
     assert images_phase.done(ctx)
-    host.responses[("podman", "image", "exists", NODE)] = MISSING
+    # missing for done(), the Runner's done() and the pull's own check; present once pulled
+    host.responses[("podman", "image", "exists", NODE)] = [MISSING, MISSING, MISSING, PRESENT]
     assert not images_phase.done(ctx)
-    with pytest.raises(PhaseFailed, match=r"\[images\] ran but is not done"):
-        Runner([images_phase.PHASE]).run(ctx)  # the fake keeps saying "missing" after the pull
+    Runner([images_phase.PHASE]).run(ctx)
+    assert f"  {NODE} pulled" in host.lines and images_phase.done(ctx)
 
 
 def test_store_conf_is_written_inside_the_lock(
@@ -302,10 +306,10 @@ def test_listing_puts_the_node_and_router_images_before_the_store(
     assert rows[2:] == images.status(ctx, K8S)
 
 
-def test_status_makes_sure_the_router_image_is_on_the_host(ctx: Context, host: FakeHost) -> None:
-    """tkctl pull images / get images pull or build the router image next to the node image."""
+def test_ensure_makes_sure_the_router_image_is_on_the_host(ctx: Context, host: FakeHost) -> None:
+    """tkctl pull images pulls or builds the router image next to the node image."""
     sources(host)
-    images.status(ctx, K8S)
+    images.ensure(ctx, K8S)
     image = f"ghcr.io/tarokolabs/tk8s/router:{ctx.versions.vyos}"
     assert ["podman", "image", "exists", image] in [c.argv for c in host.calls]
 
@@ -322,3 +326,24 @@ def test_prune_aborts_quietly_on_eof(
     monkeypatch.setattr("builtins.input", eof)
     with pytest.raises(images.ImagesError, match="aborted"):
         images.prune(ctx, K8S)
+
+
+def test_get_images_pulls_and_builds_nothing(ctx: Context, host: FakeHost) -> None:
+    """status and listing only look; pull images is what pulls."""
+    sources(host)
+    router_image = f"ghcr.io/tarokolabs/tk8s/router:{ctx.versions.vyos}"
+    host.responses[("podman", "image", "exists", router_image)] = MISSING
+    rows = images.listing(ctx, K8S)
+    assert ("missing", router_image) in rows
+    a = [c.argv for c in host.calls]
+    assert not any(x[:2] in (["podman", "pull"], ["podman", "build"]) for x in a)
+    assert not any(x[:1] == ["curl"] for x in a)
+
+
+def test_get_images_without_the_node_image_says_what_to_run(ctx: Context, host: FakeHost) -> None:
+    host.responses[("podman", "image", "exists", NODE)] = MISSING
+    with pytest.raises(
+        images.ImagesError,
+        match=rf"node image {NODE} is not on this host; run tkctl pull images --k8s {K8S}",
+    ):
+        images.listing(ctx, K8S)

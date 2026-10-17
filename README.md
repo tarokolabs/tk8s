@@ -134,7 +134,7 @@ tkctl delete node demo demo-worker-3                     # drain、停止、移�
 ```bash
 tkctl pull images                               # 預先下載，例如上課前；create 會自動做
 tkctl create cluster --phase nodes/cni-plugins  # 預先安裝 CNI plugins，不建叢集
-tkctl get images                                # 清單與是否已在 store
+tkctl get images                                # 清單與是否已在 store（只看，不拉）
 TK_OFFLINE=1 tkctl create cluster               # 離線環境：缺任何 image 就列出並結束，不嘗試下載
 ```
 
