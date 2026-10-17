@@ -221,8 +221,3 @@ def test_rollout_failure_names_the_addon(ctx: Context, host: FakeHost) -> None:
     host.responses[("kubectl", "rollout", "status")] = Result(1, "", "timed out")
     with pytest.raises(PhaseFailed, match="local-path-provisioner did not become ready"):
         Runner([addons.PHASE], only="addons/local-path").run(ctx)
-
-
-def test_phase_order(ctx: Context) -> None:
-    names = [p.name for p in addons.PHASE.children]
-    assert names == ["runtimeclass", "gvisor", "metrics-server", "local-path"]

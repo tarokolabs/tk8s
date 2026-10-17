@@ -36,11 +36,6 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
         return 0
     if a.k8s:
         validate_k8s(a.k8s)
-    if a.gvisor and a.datapath == "netkit":
-        raise UsageError(
-            "--gvisor requires the veth datapath; gVisor sandboxes have no network under netkit "
-            "(drop --datapath netkit)"
-        )
     if a.gvisor and a.datapath is None:
         a.datapath = "veth"
     flags = ("--control-planes", "--workers", "--cpu", "--memory", "--ha")
@@ -49,6 +44,13 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
     ctx = make_context(dry_run=a.dry_run, quiet=a.quiet)
     name = user.metadata.name
     existing = load_existing(ctx.paths, name)
+    if existing is not None and existing.status is None:
+        # not a create to resume: a tk8s before v2026.10.7 wrote this file, and resuming would
+        # re-resolve the topology from today's flags and overwrite it
+        raise UsageError(
+            f"cluster {name} has a cluster.yaml without status (created by an older tk8s); "
+            f"delete it first: tkctl delete cluster {name}"
+        )
     if existing is not None and existing.status is not None and existing.status.phase == "Ready":
         raise UsageError(f"cluster {name} already exists; delete it first or pick another name")
     ctx.cluster = resolve(
@@ -91,27 +93,19 @@ def cmd_verify(a: argparse.Namespace) -> int:
     if a.list_phases:
         print("\n".join(tree(verify.PHASES)))
         return 0
-    if not a.name:
-        raise UsageError("usage: tkctl verify cluster NAME [--phase P]")
-    name = validate_name(a.name)
-    ctx = make_context()
-    state = ctx.paths.state_dir(name)
-    if not (state / "cluster.yaml").exists():
-        raise UsageError(
-            f"cluster {name} not found under {ctx.paths.clusters_dir} (tkctl get clusters)"
-        )
-    marker = (state / ".create-complete").exists()
-    ctx.cluster = model.load(state / "cluster.yaml", create_complete_marker=marker)
+    ctx = cluster_context(a.name, "verify", usage="usage: tkctl verify cluster NAME [--phase P]")
     return 1 if verify.run(ctx, only=a.phase) else 0
 
 
 # ---- get clusters, describe, stop, start, use
 
 
-def cluster_context(name: str | None, verb: str, *, quiet: bool = False) -> Context:
+def cluster_context(
+    name: str | None, verb: str, *, quiet: bool = False, usage: str | None = None
+) -> Context:
     """The context of an existing cluster, for the verbs that take `cluster NAME`."""
     if not name:
-        raise UsageError(f"usage: tkctl {verb} cluster NAME")
+        raise UsageError(usage or f"usage: tkctl {verb} cluster NAME")
     ctx = make_context(quiet=quiet)
     lifecycle.load_cluster(ctx, validate_name(name))
     return ctx
@@ -147,7 +141,7 @@ def cmd_delete_cluster(a: argparse.Namespace) -> int:
     if not a.name:
         raise UsageError("usage: tkctl delete cluster NAME [--yes]")
     name = validate_name(a.name)
-    ctx = make_context(assume_yes=a.yes or os.environ.get("TK_ASSUME_YES") == "1")
+    ctx = make_context(assume_yes=a.yes)
     ctx.name = name
     try:
         lifecycle.load_cluster(ctx, name)
@@ -160,7 +154,7 @@ def cmd_delete_cluster(a: argparse.Namespace) -> int:
             f"cluster {name} not found: no state under {ctx.paths.clusters_dir}, no units, "
             "no network (tkctl get clusters)"
         )
-    delete.confirm(ctx)
+    delete.confirm_delete(ctx)
     Runner([delete.PHASE], only=a.phase, record=False).run(ctx)
     if a.phase:
         return 0
@@ -196,7 +190,7 @@ def cmd_add_node(a: argparse.Namespace) -> int:
     memory = normalize_memory(a.memory) if a.memory else None
     ctx = make_context()
     c = running_cluster(ctx, a.cluster)
-    ctx.request = model.NodeRequest(role=a.role, cpu=a.cpu, memory=memory, join=not a.no_join)
+    ctx.request = model.NodeRequest(role=a.role, cpu=a.cpu, memory=memory)
     Runner([node_add.add_phase(join=not a.no_join)], record=False).run(ctx)
     print()
     if a.no_join:
@@ -228,7 +222,7 @@ def cmd_delete_node(a: argparse.Namespace) -> int:
     if not a.cluster or not a.node:
         raise UsageError("usage: tkctl delete node CLUSTER NODE [--yes]")
     validate_node_name(a.node)
-    ctx = make_context(assume_yes=a.yes or os.environ.get("TK_ASSUME_YES") == "1")
+    ctx = make_context(assume_yes=a.yes)
     c = running_cluster(ctx, a.cluster)
     ctx.node = a.node
     # entry is the last phase: an interrupted delete still finds the node
@@ -271,7 +265,6 @@ def make_context(
     paths = Paths.from_env(HOME)
     opts = Options(
         dry_run=dry_run,
-        quiet=quiet,
         offline=os.environ.get("TK_OFFLINE") == "1",
         assume_yes=assume_yes or os.environ.get("TK_ASSUME_YES") == "1",
         refresh=refresh,

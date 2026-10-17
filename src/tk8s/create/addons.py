@@ -6,8 +6,9 @@ volumes across restarts and reboots."""
 import hashlib
 from pathlib import Path
 
+from .. import podman
 from ..phases import Context, Phase, PhaseFailed
-from .kubeadm import kubectl_env
+from .kubeadm import kubectl
 
 GVISOR_RC = (
     "apiVersion: node.k8s.io/v1\nkind: RuntimeClass\nmetadata:\n  name: gvisor\nhandler: runsc\n"
@@ -17,25 +18,17 @@ ZSTD_APT = "apt-get update -qq >/dev/null && apt-get install -y -qq zstd >/dev/n
 
 
 def _kubectl(ctx: Context, *args: str, input: str | None = None) -> None:
-    r = ctx.host.run(
-        ["kubectl", *args], env=kubectl_env(ctx), input=input, capture=True, check=False
-    )
+    r = kubectl(ctx, *args, input=input)
     if r.returncode != 0:
         raise PhaseFailed(f"kubectl {' '.join(args)} failed: {r.stderr.strip()}")
 
 
 def _exists(ctx: Context, *args: str) -> bool:
-    r = ctx.host.run(["kubectl", *args], env=kubectl_env(ctx), capture=True, check=False)
-    return r.returncode == 0
+    return kubectl(ctx, *args).returncode == 0
 
 
 def _rollout(ctx: Context, ns: str, deploy: str, what: str, hint: str) -> None:
-    r = ctx.host.run(
-        ["kubectl", "rollout", "status", "-n", ns, f"deploy/{deploy}", "--timeout=300s"],
-        env=kubectl_env(ctx),
-        capture=True,
-        check=False,
-    )
+    r = kubectl(ctx, "rollout", "status", "-n", ns, f"deploy/{deploy}", "--timeout=300s")
     if r.returncode != 0:
         raise PhaseFailed(f"{what} did not become ready ({hint})")
 
@@ -69,18 +62,14 @@ def gvisor_marker(ctx: Context) -> str:
     return f"/usr/local/bin/.gvisor-{ctx.versions.gvisor}"
 
 
-def _node_has(ctx: Context, node: str, path: str, flag: str = "-e") -> bool:
-    r = ctx.host.run(["podman", "exec", node, "test", flag, path], sudo=True, check=False)
-    return r.returncode == 0
-
-
 def gvisor_done(ctx: Context) -> bool:
     c = ctx.require_cluster()
     if not c.spec.gvisor:
         return True
     marker = gvisor_marker(ctx)
     nodes_ok = all(
-        _node_has(ctx, n.name, marker) and _node_has(ctx, n.name, GVISOR_CONF) for n in c.spec.nodes
+        podman.node_has(ctx, n.name, marker) and podman.node_has(ctx, n.name, GVISOR_CONF)
+        for n in c.spec.nodes
     )
     return nodes_ok and _exists(ctx, "get", "runtimeclass", "gvisor")
 
@@ -123,32 +112,21 @@ def install_gvisor_into(ctx: Context, node: str, tarball: Path | None = None) ->
     """The tarball is fetched once per run (gvisor_run passes it); a single-node call fetches it."""
     v = ctx.versions.gvisor
     marker = gvisor_marker(ctx)
-    if not _node_has(ctx, node, marker):
+    if not podman.node_has(ctx, node, marker):
         tarball = tarball or gvisor_tarball(ctx)
         # Node images published before zstd was added to the recipe cannot unpack the tarball.
-        if not _node_has(ctx, node, "/usr/bin/zstd", "-x"):
-            ctx.host.run(["podman", "exec", node, "sh", "-c", ZSTD_APT], sudo=True, capture=True)
+        if not podman.node_has(ctx, node, "/usr/bin/zstd", "-x"):
+            podman.must(ctx, node, "sh", "-c", ZSTD_APT)
         ctx.host.run(["podman", "cp", str(tarball), f"{node}:/tmp/gvisor.tar.zstd"], sudo=True)
-        ctx.host.run(
-            [
-                "podman",
-                "exec",
-                node,
-                "tar",
-                "--zstd",
-                "-xf",
-                "/tmp/gvisor.tar.zstd",
-                "-C",
-                "/usr/local/bin",
-            ],
-            sudo=True,
+        podman.must(
+            ctx, node, "tar", "--zstd", "-xf", "/tmp/gvisor.tar.zstd", "-C", "/usr/local/bin"
         )
-        ctx.host.run(["podman", "exec", node, "rm", "-f", "/tmp/gvisor.tar.zstd"], sudo=True)
-        ctx.host.run(["podman", "exec", node, "touch", marker], sudo=True)
-    if not _node_has(ctx, node, GVISOR_CONF):
+        podman.must(ctx, node, "rm", "-f", "/tmp/gvisor.tar.zstd")
+        podman.must(ctx, node, "touch", marker)
+    if not podman.node_has(ctx, node, GVISOR_CONF):
         src = ctx.paths.home / "templates" / "crio" / "20-gvisor.conf"
         ctx.host.run(["podman", "cp", str(src), f"{node}:{GVISOR_CONF}"], sudo=True)
-        ctx.host.run(["podman", "exec", node, "systemctl", "restart", "crio"], sudo=True)
+        podman.must(ctx, node, "systemctl", "restart", "crio")
         ctx.say(f"  {node}: gVisor {v} handler runsc, crio restarted")
 
 
@@ -156,7 +134,7 @@ def gvisor_run(ctx: Context) -> None:
     c = ctx.require_cluster()
     marker = gvisor_marker(ctx)
     tarball = None
-    if any(not _node_has(ctx, n.name, marker) for n in c.spec.nodes):
+    if any(not podman.node_has(ctx, n.name, marker) for n in c.spec.nodes):
         tarball = gvisor_tarball(ctx)
     for n in c.spec.nodes:
         install_gvisor_into(ctx, n.name, tarball)
@@ -177,20 +155,15 @@ GVISOR = Phase(
 
 
 def _metrics_args(ctx: Context) -> str | None:
-    r = ctx.host.run(
-        [
-            "kubectl",
-            "get",
-            "deploy",
-            "-n",
-            "kube-system",
-            "metrics-server",
-            "-o",
-            "jsonpath={.spec.template.spec.containers[0].args}",
-        ],
-        env=kubectl_env(ctx),
-        capture=True,
-        check=False,
+    r = kubectl(
+        ctx,
+        "get",
+        "deploy",
+        "-n",
+        "kube-system",
+        "metrics-server",
+        "-o",
+        "jsonpath={.spec.template.spec.containers[0].args}",
     )
     return r.stdout if r.returncode == 0 else None
 

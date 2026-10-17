@@ -1,25 +1,30 @@
+import time
 from pathlib import Path
 
 import pytest
 
-from tk8s import versions
+from tests.fixtures import make_ctx as fixture_ctx
 from tk8s.host import FakeHost, Result
-from tk8s.paths import Paths
-from tk8s.phases import Context, Options, Phase, PhaseFailed, Runner, tree
+from tk8s.phases import (
+    Context,
+    Phase,
+    PhaseFailed,
+    Runner,
+    confirm,
+    poll_until,
+    tree,
+    wait_for,
+)
 
 HOME = Path(__file__).resolve().parents[1]
 
 
 def make_ctx(tmp_path: Path, **opts: bool) -> tuple[Context, FakeHost]:
     host = FakeHost()
-    c = Context(
-        host=host,
-        paths=Paths(tmp_path, tmp_path / "wulin", HOME),
-        versions=versions.load(HOME / "versions.yaml"),
-        options=Options(**opts),
-        say=host.lines.append,
-    )
-    return c, host
+    ctx = fixture_ctx(host, tmp_path, user=None)
+    for k, v in opts.items():
+        setattr(ctx.options, k, v)
+    return ctx, host
 
 
 def counter_phase(name: str, needed_runs: int) -> tuple[Phase, dict[str, int]]:
@@ -186,3 +191,40 @@ def test_only_accepts_a_leaf_name_as_well_as_the_full_path(tmp_path: Path) -> No
     assert (sa["runs"], sb["runs"]) == (0, 1)
     Runner([parent], only="p/a").run(ctx)
     assert (sa["runs"], sb["runs"]) == (1, 1)
+
+
+def test_confirm_takes_y_refuses_the_rest_and_eof(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, _ = make_ctx(tmp_path)
+    answers = iter(["y", "n", ""])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    confirm(ctx, "Delete it? [y/N] ", PhaseFailed)
+    with pytest.raises(PhaseFailed, match="aborted"):
+        confirm(ctx, "Delete it? [y/N] ", PhaseFailed)
+    with pytest.raises(PhaseFailed, match="aborted"):
+        confirm(ctx, "Delete it? [y/N] ", PhaseFailed)
+
+    def eof(prompt: str) -> str:
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", eof)
+    with pytest.raises(PhaseFailed, match="aborted"):
+        confirm(ctx, "Delete it? [y/N] ", PhaseFailed)
+    ctx.options.assume_yes = True
+    confirm(ctx, "never asked", PhaseFailed)
+
+
+def test_wait_for_polls_rounds_times_then_fails_with_the_callers_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, _ = make_ctx(tmp_path)
+    slept: list[float] = []
+    monkeypatch.setattr(time, "sleep", slept.append)
+    seen = iter([False, False, True])
+    wait_for(ctx, lambda: next(seen), rounds=5, delay=2.0, failure=lambda: "never")
+    assert slept == [2.0, 2.0]  # no sleep after the probe that held
+    with pytest.raises(PhaseFailed, match="gave up after 3"):
+        wait_for(ctx, lambda: False, rounds=3, delay=0.5, failure=lambda: "gave up after 3")
+    assert slept == [2.0, 2.0, 0.5, 0.5]  # rounds - 1 sleeps, none after the last probe
+    assert poll_until(lambda: False, rounds=0, delay=0) is False

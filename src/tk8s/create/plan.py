@@ -182,10 +182,7 @@ def resolve(
 def load_existing(paths: Paths, name: str) -> model.Cluster | None:
     """The cluster.yaml a previous, interrupted create left behind (resume), if any."""
     p = paths.state_dir(name) / "cluster.yaml"
-    if not p.exists():
-        return None
-    marker = (paths.state_dir(name) / ".create-complete").exists()
-    return model.load(p, create_complete_marker=marker)
+    return model.load(p) if p.exists() else None
 
 
 def used_indices(paths: Paths) -> set[int]:

@@ -1,9 +1,9 @@
 """nodes: the CNI plugins the nodes mount, then start the cluster target and wait for every
 node's systemd and CRI-O and for the router to boot and list the control planes."""
 
-import time
-
-from ..phases import Context, Phase, PhaseFailed
+from .. import podman
+from ..datatree import owner
+from ..phases import Context, Phase, PhaseFailed, wait_for
 from . import router
 
 # ---- cni-plugins
@@ -14,7 +14,7 @@ def cni_plugins_done(ctx: Context) -> bool:
 
 
 def cni_plugins_run(ctx: Context) -> None:
-    """Install or refresh the plugins in CNI_DIR (copied in place, never rm -r)."""
+    """Download the plugins into CNI_DIR (copied in place, never rm -r)."""
     cni = ctx.paths.cni_dir
     if ctx.options.offline:
         raise PhaseFailed(
@@ -22,12 +22,6 @@ def cni_plugins_run(ctx: Context) -> None:
         )
     ctx.host.mkdir(cni)
     bridge = cni / "bridge"
-    if ctx.host.exists(bridge) and not ctx.host.writable(bridge):
-        owner = ctx.host.run(["stat", "-c", "%u", str(bridge)], capture=True).stdout.strip()
-        if owner == "0":  # plugins installed by an earlier root-run tkctl
-            uid = ctx.host.run(["id", "-u"], capture=True).stdout.strip()
-            gid = ctx.host.run(["id", "-g"], capture=True).stdout.strip()
-            ctx.host.run(["chown", "-R", f"{uid}:{gid}", str(cni)], sudo=True)
     v = ctx.versions.cni_plugins
     url = (
         f"https://github.com/containernetworking/plugins/releases/download/{v}/"
@@ -48,13 +42,7 @@ CNI_PLUGINS = Phase(
 
 
 def systemd_state(ctx: Context, node: str) -> str:
-    r = ctx.host.run(
-        ["podman", "exec", node, "systemctl", "is-system-running"],
-        sudo=True,
-        capture=True,
-        check=False,
-    )
-    return r.stdout.strip()
+    return podman.exec_(ctx, node, "systemctl", "is-system-running").stdout.strip()
 
 
 def up_done(ctx: Context) -> bool:
@@ -73,12 +61,10 @@ def remove_stale_volumes(ctx: Context) -> None:
     if ctx.host.exists(ctx.state_dir / "kubeconfig"):
         return
     for n in c.spec.nodes:
-        r = ctx.host.run(["podman", "container", "exists", n.name], sudo=True, check=False)
-        if r.returncode == 0:
+        if podman.exists(ctx, "container", n.name):
             continue
-        for v in (f"{n.name}-var", f"{n.name}-etc", f"{n.name}-usr-local-bin"):
-            have = ctx.host.run(["podman", "volume", "exists", v], sudo=True, check=False)
-            if have.returncode == 0:
+        for v in podman.node_volumes(n.name):
+            if podman.exists(ctx, "volume", v):
                 ctx.host.run(["podman", "volume", "rm", "-f", v], sudo=True, capture=True)
                 ctx.say(f"  removed stale volume {v}")
 
@@ -86,30 +72,29 @@ def remove_stale_volumes(ctx: Context) -> None:
 def wait_node(ctx: Context, node: str) -> None:
     """systemd inside the node, then CRI-O: kubeadm preflight fails if the CRI socket is not up
     yet (the first start also copies /etc into its volume)."""
-    state = ""
-    for i in range(1, 91):
-        state = systemd_state(ctx, node)
-        if state in ("running", "degraded"):
-            break
-        if i == 90:
-            raise PhaseFailed(
-                f"{node} did not reach a running systemd state (journalctl -u {node})"
-            )
-        time.sleep(ctx.options.poll)
-    for i in range(1, 61):
-        r = ctx.host.run(
-            ["podman", "exec", node, "systemctl", "is-active", "--quiet", "crio"],
-            sudo=True,
-            check=False,
-        )
-        if r.returncode == 0:
-            ctx.say(f"  {node}: systemd {state}, crio active")
-            return
-        if i == 60:
-            raise PhaseFailed(
-                f"{node}: crio did not become active (podman exec {node} journalctl -u crio)"
-            )
-        time.sleep(ctx.options.poll)
+    last: list[str] = []
+
+    def systemd_up() -> bool:
+        last.append(systemd_state(ctx, node))
+        return last[-1] in ("running", "degraded")
+
+    wait_for(
+        ctx,
+        systemd_up,
+        rounds=90,
+        delay=ctx.options.poll,
+        failure=lambda: f"{node} did not reach a running systemd state (journalctl -u {node})",
+    )
+    wait_for(
+        ctx,
+        lambda: podman.node_active(ctx, node, "crio"),
+        rounds=60,
+        delay=ctx.options.poll,
+        failure=lambda: (
+            f"{node}: crio did not become active (podman exec {node} journalctl -u crio)"
+        ),
+    )
+    ctx.say(f"  {node}: systemd {last[-1]}, crio active")
 
 
 def up_run(ctx: Context) -> None:
@@ -117,9 +102,7 @@ def up_run(ctx: Context) -> None:
     ctx.host.mkdir(ctx.state_dir / "storage")
     ctx.host.mkdir(ctx.state_dir / "logs")
     if not ctx.host.exists(ctx.paths.wulin_dir):
-        uid = ctx.host.run(["id", "-u"], capture=True).stdout.strip()
-        gid = ctx.host.run(["id", "-g"], capture=True).stdout.strip()
-        ctx.host.mkdir(ctx.paths.wulin_dir, sudo=True, owner=f"{uid}:{gid}")
+        ctx.host.mkdir(ctx.paths.wulin_dir, sudo=True, owner=owner(ctx))
     remove_stale_volumes(ctx)
     ctx.host.run(["systemctl", "daemon-reload"], sudo=True)
     ctx.host.run(["systemctl", "reset-failed", f"{c.name}*"], sudo=True, check=False)

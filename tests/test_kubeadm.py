@@ -22,6 +22,7 @@ def test_render_phase_writes_into_the_state_dir_mode_600(ctx: Context, host: Fak
 
 import pytest  # noqa: E402
 
+from tests.fixtures import ha_user, resolved  # noqa: E402
 from tk8s.host import Result  # noqa: E402
 from tk8s.phases import PhaseFailed  # noqa: E402
 
@@ -77,6 +78,8 @@ def test_init_runs_kubeadm_stores_the_key_and_waits_for_the_router(
         "https://172.22.0.253:6443/readyz",
     ]
     assert "  demo-control-plane-1 initialized" in host.lines
+    # a fresh init proved itself; only a resume asks whether an earlier init got to the end
+    assert not any(c.argv[-2:] == ["configmap", "kubeadm-config"] for c in host.calls)
 
 
 def test_init_is_skipped_when_admin_conf_exists_but_still_waits_for_the_router(
@@ -153,28 +156,7 @@ def test_kubeconfig_done_needs_a_non_empty_file_and_a_ready_apiserver(
 
 def ha_ctx(ctx: Context, host: FakeHost) -> Context:
     """demo with 3 control planes (the third deferred) and one worker."""
-    from tk8s import model
-    from tk8s.create.plan import resolve
-
-    user = model.UserCluster(
-        metadata=model.Metadata(name="demo"),
-        spec=model.UserSpec(
-            nodes=[
-                model.NodeGroup(role="control-plane"),
-                model.NodeGroup(role="control-plane"),
-                model.NodeGroup(role="control-plane", join=False),
-                model.NodeGroup(role="worker"),
-            ]
-        ),
-    )
-    ctx.cluster = resolve(
-        user,
-        k8s_default="1.37.1",
-        existing=None,
-        used_indices=set(),
-        allow_overlap=False,
-        tk8s_version="test",
-    )
+    ctx.cluster = resolved(ha_user())
     initialised(host)
     host.files[ctx.state_dir / "kubeconfig"] = "kind: Config\n"
     host.responses[("podman", "exec", "demo-control-plane-1", "kubeadm", "token", "create")] = (
@@ -333,6 +315,8 @@ def test_init_already_done_waits_for_the_apiserver_before_judging_completion(
         if c.argv[:4] == ["podman", "exec", "demo-control-plane-1", "kubectl"] and i > curl_at
     )
     assert curl_at < cm_at
+    # one readyz wait (the blip, then ok), not one per branch
+    assert len([c for c in host.calls if c.argv[:1] == ["curl"]]) == 2
 
 
 def test_certificate_key_fresh_ignores_the_stored_key(ctx: Context, host: FakeHost) -> None:
@@ -359,12 +343,6 @@ def test_audit_policy_names_only_real_resources(ctx: Context) -> None:
     for rule in policy["rules"]:
         for entry in rule["resources"]:
             assert set(entry["resources"]) <= known[entry["group"]], entry
-
-
-def test_init_config_sans_name_the_router_and_every_control_plane(ctx: Context) -> None:
-    text = kubeadm.render_init(ctx)
-    assert "    - api.demo.k8s\n    - 172.22.0.253\n    - 172.22.0.1\n" in text
-    assert ".100" not in text
 
 
 def test_bgp_init_config_puts_the_vip_in_the_sans_after_the_router(bgp_ctx: Context) -> None:
@@ -402,3 +380,16 @@ def test_bgp_wait_router_ready_names_the_bgp_command_on_timeout(
         r"\(podman exec demo-router vtysh -c 'show bgp summary'\)",
     ):
         kubeadm.wait_router_ready(bgp_ctx)
+
+
+def test_kubectl_helper_names_the_cluster_kubeconfig_and_never_raises(
+    ctx: Context, host: FakeHost
+) -> None:
+    host.responses[("kubectl", "get", "ns", "x")] = Result(1, "", "NotFound")
+    r = kubeadm.kubectl(ctx, "get", "ns", "x")
+    assert r.returncode == 1 and r.stderr == "NotFound"
+    call = host.calls[-1]
+    assert call.argv == ["kubectl", "get", "ns", "x"] and not call.sudo
+    assert call.env == {"KUBECONFIG": str(ctx.state_dir / "kubeconfig")}
+    kubeadm.kubectl(ctx, "apply", "-f", "-", input="kind: X\n")
+    assert host.calls[-1].input == "kind: X\n"

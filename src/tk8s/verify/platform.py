@@ -3,6 +3,7 @@ addons every cluster has."""
 
 from pathlib import Path
 
+from .. import podman
 from ..create.kubeadm import kubectl_env
 from ..render import template
 from .report import NS, Report
@@ -39,11 +40,8 @@ def check_kubelet(r: Report) -> None:
     """A kubelet whose --runtime-cgroups names a cgroup that never exists logs "Failed to get
     system container stats" every few seconds; two minutes of log is enough to tell."""
     cp = r.ctx.require_cluster().first_control_plane.name
-    out = r.ctx.host.run(
-        ["podman", "exec", cp, "journalctl", "-u", "kubelet", "--no-pager", "--since", "-2min"],
-        sudo=True,
-        capture=True,
-        check=False,
+    out = podman.exec_(
+        r.ctx, cp, "journalctl", "-u", "kubelet", "--no-pager", "--since", "-2min"
     ).stdout
     noisy = [ln for ln in out.splitlines() if "Failed to get system container stats" in ln]
     if not noisy:

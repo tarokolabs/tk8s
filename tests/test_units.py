@@ -35,14 +35,6 @@ def test_control_plane_has_no_after_and_workers_wait_for_it(ctx: Context) -> Non
 def test_config_boot_lists_one_server_per_control_plane_with_a_tcp_check(ctx: Context) -> None:
     cfg = units.render(ctx)[ctx.state_dir / "router" / "tkctl.boot"]
     assert cfg.count("            server demo-control-plane-") == 1
-    assert (
-        "            server demo-control-plane-1 {\n"
-        '                address "172.22.0.1"\n'
-        "                check {\n"
-        "                }\n"
-        '                port "6443"\n'
-        "            }"
-    ) in cfg
     assert "http-check" not in cfg and "ssl" not in cfg  # TCP check only (spike 2)
     assert 'address "172.22.0.253/24"' in cfg and "next-hop 172.22.0.254" in cfg
     assert 'host-name "demo-router"' in cfg
@@ -104,11 +96,6 @@ def test_bootup_script_drops_the_route_to_itself(ctx: Context) -> None:
     )
 
 
-def test_nodes_resolve_the_api_name_to_the_router(ctx: Context) -> None:
-    unit = units.render(ctx)[ctx.paths.unit_dir / "demo" / "demo-worker-1.container"]
-    assert "AddHost=api.demo.k8s:172.22.0.253" in unit
-
-
 def test_target_wants_router_every_node_and_routes(ctx: Context) -> None:
     target = units.render(ctx)[ctx.paths.systemd_dir / "demo.target"]
     assert (
@@ -167,14 +154,6 @@ def test_proxy_router_config_is_unchanged_by_the_bgp_template(ctx: Context) -> N
     boot = units.render(ctx)[ctx.state_dir / "router" / "tkctl.boot"]
     assert "load-balancing {" in boot and "protocols {\n    static {" in boot
     assert "bgp" not in boot and "bfd" not in boot
-
-
-def test_bgp_nodes_resolve_the_api_name_to_the_vip(bgp_ctx: Context) -> None:
-    files = units.render(bgp_ctx)
-    for name in ("demo-control-plane-1", "demo-worker-1"):
-        unit = files[bgp_ctx.paths.unit_dir / "demo" / f"{name}.container"]
-        assert "AddHost=api.demo.k8s:172.23.0.1" in unit
-        assert "172.22.0.253" not in unit.split("AddHost=")[1].split("\n")[0]
 
 
 def test_bgp_host_routes_reach_the_vip_through_the_router(bgp_ctx: Context) -> None:

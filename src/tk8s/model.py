@@ -66,7 +66,10 @@ class NodeRequest(Strict):
     role: Role
     cpu: int | None = Field(default=None, ge=1)
     memory: str | None = Field(default=None, pattern=MEMORY)
-    join: bool = True
+
+
+def node_image(k8s: str) -> str:
+    return f"ghcr.io/tarokolabs/tk8s/node:v{k8s}"
 
 
 # ---- what the platform keeps in <state dir>/cluster.yaml
@@ -152,7 +155,7 @@ class Cluster(Strict):
 
     @property
     def node_image(self) -> str:
-        return f"ghcr.io/tarokolabs/tk8s/node:v{self.spec.kubernetes}"
+        return node_image(self.spec.kubernetes)
 
 
 # ---- YAML in
@@ -207,21 +210,15 @@ def load_user_file(path: Path) -> UserCluster:
     return load_user_text(path.read_text(), str(path))
 
 
-def load_text(
-    text: str, where: str = "cluster.yaml", *, create_complete_marker: bool = False
-) -> Cluster:
+def load_text(text: str, where: str = "cluster.yaml") -> Cluster:
     try:
-        c = Cluster.model_validate(_parse(text, where))
+        return Cluster.model_validate(_parse(text, where))
     except ValidationError as err:
         raise ClusterFileError(_first_error(where, err)) from err
-    if c.status is None and create_complete_marker:
-        # A cluster created before status existed: the marker file said "complete".
-        c = c.model_copy(update={"status": Status(phase="Ready", tk8s="pre-status")})
-    return c
 
 
-def load(path: Path, *, create_complete_marker: bool = False) -> Cluster:
-    return load_text(path.read_text(), str(path), create_complete_marker=create_complete_marker)
+def load(path: Path) -> Cluster:
+    return load_text(path.read_text(), str(path))
 
 
 # ---- YAML out
@@ -245,13 +242,6 @@ def dumps(cluster: Cluster) -> str:
     data = cluster.model_dump(mode="json", exclude_none=True)
     data["spec"]["kubernetes"] = _Quoted(data["spec"]["kubernetes"])
     return yaml.dump(data, Dumper=_Dumper, sort_keys=False, default_flow_style=False)
-
-
-def save(cluster: Cluster, path: Path) -> None:
-    """Atomic: a crash mid-write never leaves half a cluster.yaml behind."""
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(dumps(cluster))
-    tmp.replace(path)
 
 
 def peek(path: Path) -> tuple[int | None, str | None]:

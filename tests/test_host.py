@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -174,3 +175,20 @@ def test_fake_host_rm_forgets_files_and_dirs() -> None:
     host.run(["rm", "-f", "/etc/x/a.container"], sudo=True)
     host.run(["rm", "-rf", "/etc/x", "/opt/s"], sudo=True)
     assert not host.exists(Path("/etc/x/a.container")) and not host.exists(Path("/opt/s"))
+
+
+def test_write_keeps_the_old_file_when_the_rename_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    h = Host(lambda _: None)
+    p = tmp_path / "cluster.yaml"
+    p.write_text("old: file\n")
+
+    def boom(src: str, dst: str) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", boom)
+    with pytest.raises(OSError):
+        h.write(p, "new: file\n")
+    assert p.read_text() == "old: file\n"
+    assert list(tmp_path.iterdir()) == [p]  # the temp file is gone too

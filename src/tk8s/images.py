@@ -5,24 +5,21 @@ additional image store, so a create pulls nothing. Only tkctl writes here."""
 import fcntl
 import re
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import model
+from . import model, podman
 from .create import router
 from .datatree import data_dirs
 from .host import HostError
+from .model import node_image
 from .paths import Paths
-from .phases import Context
+from .phases import Context, confirm
 
 
 class ImagesError(Exception):
     pass
-
-
-def node_image(k8s: str) -> str:
-    return f"ghcr.io/tarokolabs/tk8s/node:v{k8s}"
 
 
 def store_dir(paths: Paths, k8s: str) -> Path:
@@ -75,8 +72,13 @@ def init_store(ctx: Context, k8s: str) -> None:
 
 
 def node_image_present(ctx: Context, k8s: str) -> bool:
-    r = ctx.host.run(["podman", "image", "exists", node_image(k8s)], sudo=True, check=False)
-    return r.returncode == 0
+    return podman.exists(ctx, "image", node_image(k8s))
+
+
+def cilium_cli_present(ctx: Context) -> bool:
+    return (
+        ctx.host.run(["cilium", "version", "--client"], capture=True, check=False).returncode == 0
+    )
 
 
 def _digest(ctx: Context, image: str) -> str:
@@ -89,83 +91,94 @@ def _digest(ctx: Context, image: str) -> str:
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
-def ensure_node_image(ctx: Context, k8s: str) -> None:
-    """Pull the tag, or build it locally when it is not published (needs a crio entry for the
-    minor). With refresh, pull again even when the tag is present: a republished tag replaces the
+def _ensure_image(
+    ctx: Context,
+    image: str,
+    *,
+    kind: str,
+    build_dir: str,
+    build_args: Callable[[], list[str]],
+    building: str,
+    report_digest: bool,
+) -> None:
+    """Pull the tag, or build it locally from images/<build_dir> when it is not published.
+    With refresh, pull again even when the tag is present: a republished tag replaces the
     stale local image."""
-    image = node_image(k8s)
-    present = node_image_present(ctx, k8s)
+    present = podman.exists(ctx, "image", image)
     if present and not ctx.options.refresh:
         return
     if ctx.options.offline:
         raise ImagesError(
-            f"node image {image} is not present and TK_OFFLINE=1 forbids pulling or building it"
+            f"{kind} {image} is not present and TK_OFFLINE=1 forbids pulling or building it"
         )
-    before = _digest(ctx, image) if present else ""
+    before = _digest(ctx, image) if present and report_digest else ""
     if ctx.host.run(["podman", "pull", image], sudo=True, check=False).returncode == 0:
-        after = _digest(ctx, image) if present else ""
         if not present:
             ctx.say(f"  {image} pulled")
-        elif before == after:
+        elif not report_digest:
+            ctx.say(f"  {image} refreshed")
+        elif before == _digest(ctx, image):
             ctx.say(f"  {image} is up to date")
         else:
             ctx.say(f"  {image} refreshed (the tag was republished)")
         return
-    crio = ctx.versions.crio_for(k8s)
-    if crio is None:
-        raise ImagesError(
-            f"versions.yaml has no crio entry for Kubernetes minor {k8s.rsplit('.', 1)[0]}; "
-            f"cannot build {image}"
-        )
-    ctx.say(f"  {image} is not published; building locally (the first build takes a few minutes)")
+    args = build_args()
+    ctx.say(f"  {image} is not published; building locally ({building})")
     ctx.host.run(
         [
             "podman",
             "build",
-            "--build-arg",
-            f"VER={k8s}",
-            "--build-arg",
-            f"CRIO={crio}",
+            *args,
             "--force-rm",
             "-t",
             image,
-            str(ctx.paths.home / "images" / "node"),
+            str(ctx.paths.home / "images" / build_dir),
         ],
         sudo=True,
+    )
+
+
+def ensure_node_image(ctx: Context, k8s: str) -> None:
+    """The node image: pulled by tag, or built locally when the tag is not published (needs a
+    crio entry for the minor)."""
+
+    def args() -> list[str]:
+        crio = ctx.versions.crio_for(k8s)
+        if crio is None:
+            raise ImagesError(
+                f"versions.yaml has no crio entry for Kubernetes minor {k8s.rsplit('.', 1)[0]}; "
+                f"cannot build {node_image(k8s)}"
+            )
+        return ["--build-arg", f"VER={k8s}", "--build-arg", f"CRIO={crio}"]
+
+    _ensure_image(
+        ctx,
+        node_image(k8s),
+        kind="node image",
+        build_dir="node",
+        build_args=args,
+        building="the first build takes a few minutes",
+        report_digest=True,
     )
 
 
 def ensure_router_image(ctx: Context) -> None:
     """The router image, pulled by tag or built from images/router/ when the tag is not published
-    (a release that has not pushed yet, or a build number bumped locally). Refresh re-pulls."""
-    image = router.image(ctx.versions)
-    present = (
-        ctx.host.run(["podman", "image", "exists", image], sudo=True, check=False).returncode == 0
-    )
-    if present and not ctx.options.refresh:
-        return
-    if ctx.options.offline:
-        raise ImagesError(
-            f"router image {image} is not present and TK_OFFLINE=1 forbids pulling or building it"
-        )
-    if ctx.host.run(["podman", "pull", image], sudo=True, check=False).returncode == 0:
-        ctx.say(f"  {image} {'refreshed' if present else 'pulled'}")
-        return
-    ctx.say(f"  {image} is not published; building locally (downloads the VyOS ISO, a few minutes)")
-    ctx.host.run(
-        [
-            "podman",
-            "build",
+    (a release that has not pushed yet, or a build number bumped locally)."""
+    v = ctx.versions
+    _ensure_image(
+        ctx,
+        router.image(v),
+        kind="router image",
+        build_dir="router",
+        build_args=lambda: [
             "--build-arg",
-            f"VYOS={ctx.versions.vyos}",
+            f"VYOS={v.vyos}",
             "--build-arg",
-            f"SHA256={ctx.versions.vyos_sha256}",
-            "--force-rm",
-            "-t",
-            image,
-            str(ctx.paths.home / "images" / "router"),
+            f"SHA256={v.vyos_sha256}",
         ],
-        sudo=True,
+        building="downloads the VyOS ISO, a few minutes",
+        report_digest=False,
     )
 
 
@@ -173,7 +186,7 @@ def ensure_router_image(ctx: Context) -> None:
 
 
 def ensure_cilium_cli(ctx: Context) -> None:
-    if ctx.host.run(["cilium", "version", "--client"], capture=True, check=False).returncode == 0:
+    if cilium_cli_present(ctx):
         return
     if ctx.options.offline:
         raise ImagesError("cilium CLI is not installed and TK_OFFLINE=1 forbids downloading it")
@@ -233,20 +246,25 @@ def wanted(ctx: Context, k8s: str) -> list[str]:
 
 def listing(ctx: Context, k8s: str) -> list[tuple[str, str]]:
     """What `get images` prints: the node and router images in the host's podman storage first,
-    then the store's status()."""
+    then the store's status(). Only looks: status() needs the node image and the cilium CLI to
+    compute the list, and this names tkctl pull images when either is missing."""
+    if not node_image_present(ctx, k8s):
+        raise ImagesError(
+            f"node image {node_image(k8s)} is not on this host; run tkctl pull images --k8s {k8s}"
+        )
+    if not cilium_cli_present(ctx):
+        raise ImagesError(f"cilium CLI is not installed; run tkctl pull images --k8s {k8s}")
     rows = status(ctx, k8s)
     out: list[tuple[str, str]] = []
     for img in (node_image(k8s), router.image(ctx.versions)):
-        on_host = ctx.host.run(["podman", "image", "exists", img], sudo=True, check=False)
-        out.append(("present" if on_host.returncode == 0 else "missing", img))
+        out.append(("present" if podman.exists(ctx, "image", img) else "missing", img))
     return out + rows
 
 
 def status(ctx: Context, k8s: str) -> list[tuple[str, str]]:
-    """("present" | "missing", image) for every wanted image of the store, in list order."""
-    ensure_node_image(ctx, k8s)
-    ensure_router_image(ctx)
-    ensure_cilium_cli(ctx)
+    """("present" | "missing", image) for every wanted image of the store, in list order. Only
+    looks; the caller makes sure the node image and the cilium CLI, which wanted() runs, are on
+    the host."""
     env = _store_env(ctx.paths, k8s)
     have_store = ctx.host.exists(conf_path(ctx.paths, k8s)) and ctx.host.exists(
         store_dir(ctx.paths, k8s)
@@ -287,6 +305,9 @@ def ensure(ctx: Context, k8s: str) -> None:
     with with_lock(ctx.paths.images_dir / f"{k8s}.lock"):
         init_store(ctx, k8s)
         start = time.monotonic()
+        ensure_node_image(ctx, k8s)
+        ensure_router_image(ctx)
+        ensure_cilium_cli(ctx)
         rows = status(ctx, k8s)
         present = [i for s, i in rows if s == "present"]
         missing = [i for s, i in rows if s == "missing"]
@@ -322,13 +343,11 @@ def prune(ctx: Context, k8s: str) -> None:
         raise ImagesError(
             f"no image store for Kubernetes {k8s} under {ctx.paths.images_dir} (tkctl get images)"
         )
-    if not ctx.options.assume_yes:
-        answer = input(
-            f"Delete the shared image store for Kubernetes {k8s} under {ctx.paths.images_dir}? "
-            "[y/N] "
-        )
-        if answer.strip().lower() != "y":
-            raise ImagesError("aborted")
+    confirm(
+        ctx,
+        f"Delete the shared image store for Kubernetes {k8s} under {ctx.paths.images_dir}? [y/N] ",
+        ImagesError,
+    )
     with with_lock(ctx.paths.images_dir / f"{k8s}.lock"):
         using = clusters_using(ctx.paths, k8s)
         if using:

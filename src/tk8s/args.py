@@ -69,14 +69,9 @@ def add_create_flags(p: argparse.ArgumentParser) -> None:
 
 
 def user_cluster_from_flags(a: argparse.Namespace) -> model.UserCluster:
+    """argparse-level checks only; what a -f file and the flags share is plan.validate's."""
     if a.control_planes < 1:
         raise UsageError("--control-planes must be a positive integer")
-    if a.control_planes % 2 == 0:
-        raise UsageError("--control-planes must be odd (1, 3, 5) for etcd quorum")
-    if a.control_planes > 5:
-        raise UsageError(
-            "--control-planes must be at most 5 (the apiserver LB has five backend slots)"
-        )
     if a.defer_join and a.control_planes == 1:
         raise UsageError("--defer-join needs --control-planes 3 or more")
     if a.workers < 0:

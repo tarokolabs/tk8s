@@ -1,11 +1,11 @@
 """What every check gets: the Report that counts and prints PASS/FAIL/SKIP lines, runs kubectl
 against the cluster and polls; the namespace the test resources live in."""
 
-import time
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 
-from ..create.kubeadm import kubectl_env
-from ..phases import Context
+from ..create import kubeadm
+from ..phases import Context, poll_until
 
 NS = "tk-verify"
 
@@ -21,7 +21,7 @@ class Report:
     failed: int = 0
     skipped: int = 0
     gateway_ip: str = ""
-    checked: dict[str, bool] = field(default_factory=dict)
+    gvisor_out: bool | None = None  # what the gvisor pod printed, for check_gvisor_network
 
     def ok(self, msg: str) -> None:
         self.passed += 1
@@ -40,15 +40,9 @@ class Report:
         return self.ctx.options.verify_timeout
 
     def kubectl(self, *args: str, input: str | None = None) -> tuple[int, str]:
-        r = self.ctx.host.run(
-            ["kubectl", *args], env=kubectl_env(self.ctx), input=input, capture=True, check=False
-        )
+        r = kubeadm.kubectl(self.ctx, *args, input=input)
         return r.returncode, r.stdout
 
-    def poll(self, rounds: int, probe: object) -> bool:
+    def poll(self, rounds: int, probe: Callable[[], bool]) -> bool:
         """Call probe() up to rounds times, poll_slow apart, until it returns true."""
-        for _ in range(max(rounds, 1)):
-            if probe():  # type: ignore[operator]
-                return True
-            time.sleep(self.ctx.options.poll_slow)
-        return False
+        return poll_until(probe, rounds=max(rounds, 1), delay=self.ctx.options.poll_slow)

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.fixtures import argvs
 from tk8s.create import preflight
 from tk8s.host import FakeHost, Result
 from tk8s.phases import Context, PhaseFailed, Runner
@@ -19,14 +20,10 @@ def good_host(host: FakeHost, uid: str = "1000") -> None:
     host.dirs.add(Path("/run/systemd/system"))
 
 
-def argvs(host: FakeHost) -> list[str]:
-    return [" ".join(c.argv) for c in host.calls]
-
-
 def test_good_host_passes_and_persists_sysctls(ctx: Context, host: FakeHost) -> None:
     good_host(host)
     Runner([preflight.PHASE]).run(ctx)
-    a = argvs(host)
+    a = [" ".join(x) for x in argvs(host)]
     assert (
         "sysctl -qw net.bridge.bridge-nf-call-iptables=0 net.bridge.bridge-nf-call-ip6tables=0"
     ) in a
@@ -63,7 +60,7 @@ def test_root_owned_dir_is_taken_over_another_users_is_refused(
     host.unwritable.add(d)
     host.responses[("stat", "-c", "%u", str(d))] = Result(0, "0\n", "")
     preflight.data_dirs(ctx)
-    assert f"chown 1000:1000 {d}" in argvs(host)
+    assert ["chown", "1000:1000", str(d)] in argvs(host)
     host.calls.clear()
     host.responses[("stat", "-c", "%u", str(d))] = Result(0, "999\n", "")
     host.responses[("stat", "-c", "%U", str(d))] = Result(0, "someone\n", "")
@@ -117,4 +114,4 @@ def test_missing_br_netfilter_is_loaded(ctx: Context, host: FakeHost) -> None:
     good_host(host)
     host.responses[("lsmod",)] = Result(0, "overlay 1 0\n", "")
     Runner([preflight.PHASE]).run(ctx)
-    assert "modprobe br_netfilter" in argvs(host)
+    assert ["modprobe", "br_netfilter"] in argvs(host)

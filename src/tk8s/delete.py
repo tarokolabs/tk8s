@@ -5,8 +5,10 @@ cluster.yaml (an interrupted create, a cleanup by hand) is deleted from what is 
 
 from pathlib import Path
 
+from . import podman
 from .lifecycle import ClusterError
-from .phases import Context, Phase
+from .phases import Context, Phase, confirm
+from .podman import node_volumes
 
 
 def found(ctx: Context) -> bool:
@@ -15,22 +17,17 @@ def found(ctx: Context) -> bool:
         ctx.host.exists(ctx.state_dir)
         or ctx.host.exists(ctx.paths.unit_dir / name)
         or ctx.host.exists(ctx.paths.systemd_dir / f"{name}.target")
-        or network_exists(ctx)
+        or podman.exists(ctx, "network", ctx.cluster_name)
     )
 
 
-def confirm(ctx: Context) -> None:
-    if ctx.options.assume_yes:
-        return
-    try:
-        answer = input(
-            f"Delete cluster {ctx.cluster_name} including its PVC data under "
-            f"{ctx.state_dir}/storage? [y/N] "
-        )
-    except EOFError:
-        answer = ""
-    if answer.strip().lower() != "y":
-        raise ClusterError("aborted")
+def confirm_delete(ctx: Context) -> None:
+    confirm(
+        ctx,
+        f"Delete cluster {ctx.cluster_name} including its PVC data under "
+        f"{ctx.state_dir}/storage? [y/N] ",
+        ClusterError,
+    )
 
 
 def node_names(ctx: Context) -> list[str]:
@@ -47,38 +44,19 @@ def node_names(ctx: Context) -> list[str]:
     ]
 
 
-def node_volumes(node: str) -> list[str]:
-    return [f"{node}-var", f"{node}-etc", f"{node}-usr-local-bin"]
-
-
-# ---- podman questions and removals, shared with delete node
-
-
-def container_exists(ctx: Context, name: str) -> bool:
-    r = ctx.host.run(["podman", "container", "exists", name], sudo=True, check=False)
-    return r.returncode == 0
-
-
-def volume_exists(ctx: Context, name: str) -> bool:
-    r = ctx.host.run(["podman", "volume", "exists", name], sudo=True, check=False)
-    return r.returncode == 0
-
-
-def network_exists(ctx: Context) -> bool:
-    r = ctx.host.run(["podman", "network", "exists", ctx.cluster_name], sudo=True, check=False)
-    return r.returncode == 0
+# ---- removals, shared with delete node
 
 
 def remove_containers(ctx: Context, names: list[str]) -> None:
     for n in names:
-        if container_exists(ctx, n):
+        if podman.exists(ctx, "container", n):
             ctx.host.run(["podman", "rm", "-f", n], sudo=True, capture=True)
             ctx.say(f"  removed container {n}")
 
 
 def remove_volumes(ctx: Context, names: list[str]) -> None:
     for v in names:
-        if volume_exists(ctx, v):
+        if podman.exists(ctx, "volume", v):
             ctx.host.run(["podman", "volume", "rm", "-f", v], sudo=True, capture=True)
             ctx.say(f"  removed volume {v}")
 
@@ -140,7 +118,7 @@ def containers(ctx: Context) -> list[str]:
 
 
 def containers_done(ctx: Context) -> bool:
-    return not any(container_exists(ctx, n) for n in containers(ctx))
+    return not any(podman.exists(ctx, "container", n) for n in containers(ctx))
 
 
 def containers_run(ctx: Context) -> None:
@@ -160,7 +138,7 @@ def volumes(ctx: Context) -> list[str]:
 
 
 def volumes_done(ctx: Context) -> bool:
-    return not any(volume_exists(ctx, v) for v in volumes(ctx))
+    return not any(podman.exists(ctx, "volume", v) for v in volumes(ctx))
 
 
 def volumes_run(ctx: Context) -> None:
@@ -179,7 +157,7 @@ VOLUMES = Phase(
 
 
 def network_done(ctx: Context) -> bool:
-    return not network_exists(ctx)
+    return not podman.exists(ctx, "network", ctx.cluster_name)
 
 
 def network_run(ctx: Context) -> None:

@@ -9,6 +9,7 @@ host would make the version an empty string under --dry-run.
 """
 
 import subprocess
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -23,7 +24,6 @@ from .versions import Versions
 @dataclass
 class Options:
     dry_run: bool = False
-    quiet: bool = False
     offline: bool = False  # TK_OFFLINE=1: never download
     assume_yes: bool = False  # TK_ASSUME_YES=1 or --yes
     refresh: bool = False  # pull images --refresh
@@ -146,6 +146,43 @@ def tree(phases: list[Phase], indent: str = "") -> list[str]:
         out.append(f"{indent}{p.name:<18} {p.summary}")
         out += tree(list(p.children), indent + "  ")
     return out
+
+
+def poll_until(probe: Callable[[], bool], *, rounds: int, delay: float) -> bool:
+    """probe() up to `rounds` times, `delay` apart (no sleep after the last one); whether it
+    ever held."""
+    for i in range(rounds):
+        if probe():
+            return True
+        if i < rounds - 1:
+            time.sleep(delay)
+    return False
+
+
+def wait_for(
+    ctx: Context,
+    probe: Callable[[], bool],
+    *,
+    rounds: int,
+    delay: float,
+    failure: Callable[[], str],
+) -> None:
+    """poll_until, and PhaseFailed with the caller's message when the probe never held."""
+    if not poll_until(probe, rounds=rounds, delay=delay):
+        raise PhaseFailed(failure())
+
+
+def confirm(ctx: Context, question: str, aborted: type[Exception]) -> None:
+    """A [y/N] prompt, skipped under --yes / TK_ASSUME_YES; anything but y (EOF included) aborts
+    with the caller's exception type."""
+    if ctx.options.assume_yes:
+        return
+    try:
+        answer = input(question)
+    except EOFError:
+        answer = ""
+    if answer.strip().lower() != "y":
+        raise aborted("aborted")
 
 
 def tk8s_version(home: Path) -> str:

@@ -72,7 +72,7 @@ def test_lb_pool_manifest_uses_the_cluster_range(ctx: Context) -> None:
 
 def test_healthy_cilium_path(ctx: Context, host: FakeHost) -> None:
     healthy(host, ctx)
-    cni.install_run(ctx)
+    cni.install_cilium(ctx)
     a = [c.argv for c in host.calls]
     assert ["kubectl", "-n", "kube-system", "delete", "ds", "kube-proxy", "--ignore-not-found"] in a
     gw = ctx.versions.gateway_api.lstrip("v")
@@ -139,7 +139,7 @@ def test_rerun_after_timeout_upgrades_and_applies_the_pool(ctx: Context, host: F
         0, "sh.helm.release.v1.cilium.v1 helm.sh/release.v1 1 1m\n", ""
     )
     assert not cni.install_done(ctx)  # DaemonSet present, pool missing: not done
-    cni.install_run(ctx)
+    cni.install_cilium(ctx)
     assert installs(host)[0][1] == "upgrade"
     assert f"  cilium {ctx.versions.cilium} ok (upgrade)" in host.lines
     host.responses[("kubectl", "get", "ciliumloadbalancerippool")] = Result(0, "default-pool", "")
@@ -148,8 +148,8 @@ def test_rerun_after_timeout_upgrades_and_applies_the_pool(ctx: Context, host: F
 
 def test_datapath_resolved_is_written_once(ctx: Context, host: FakeHost) -> None:
     healthy(host, ctx)
-    cni.install_run(ctx)
-    cni.install_run(ctx)
+    cni.install_cilium(ctx)
+    cni.install_cilium(ctx)
     assert host.files[ctx.state_dir / "cluster.yaml"].count("datapath_resolved") == 1
 
 

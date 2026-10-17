@@ -2,10 +2,9 @@
 and how tkctl waits for it, reads its load balancer status and reloads its configuration."""
 
 import json
-import time
 
-from .. import model, versions
-from ..phases import Context, PhaseFailed
+from .. import model, podman, versions
+from ..phases import Context, PhaseFailed, wait_for
 
 OP = "/opt/vyatta/bin/vyatta-op-cmd-wrapper"
 
@@ -70,20 +69,13 @@ def name(ctx: Context) -> str:
 def booted(ctx: Context) -> bool:
     """VyOS writes /tmp/vyos-config-status (0 = applied) when the boot-time config load ends;
     vyos-router.service is active long before that."""
-    r = ctx.host.run(
-        ["podman", "exec", name(ctx), "cat", "/tmp/vyos-config-status"],
-        sudo=True,
-        capture=True,
-        check=False,
-    )
+    r = podman.exec_(ctx, name(ctx), "cat", "/tmp/vyos-config-status")
     return r.returncode == 0 and r.stdout.strip() == "0"
 
 
 def backends(ctx: Context) -> list[tuple[str, str]]:
     """(server, status) for every control plane in the api backend, from `show haproxy`."""
-    r = ctx.host.run(
-        ["podman", "exec", name(ctx), OP, "show", "haproxy"], sudo=True, capture=True, check=False
-    )
+    r = podman.exec_(ctx, name(ctx), OP, "show", "haproxy")
     if r.returncode != 0:
         return []
     rows = (line.split() for line in r.stdout.splitlines())
@@ -96,12 +88,7 @@ def backends(ctx: Context) -> list[tuple[str, str]]:
 
 def _vtysh(ctx: Context, command: str) -> object | None:
     """One op-mode query as JSON, or None when the router or FRR does not answer."""
-    r = ctx.host.run(
-        ["podman", "exec", name(ctx), "vtysh", "-c", f"{command} json"],
-        sudo=True,
-        capture=True,
-        check=False,
-    )
+    r = podman.exec_(ctx, name(ctx), "vtysh", "-c", f"{command} json")
     if r.returncode != 0 or not r.stdout.strip():
         return None
     try:
@@ -190,37 +177,34 @@ def synced(ctx: Context, c: model.Cluster) -> bool:
 def wait_booted(ctx: Context) -> None:
     """The boot-time config load holds VyOS for a few seconds after start; a load alongside it
     fails ("Failed to generate committed config") with exit status 0."""
-    for i in range(1, 31):
-        if booted(ctx):
-            return
-        if i == 30:
-            raise PhaseFailed(
-                f"{name(ctx)} did not finish booting within 60 s (podman logs {name(ctx)}; "
-                f"podman exec {name(ctx)} cat /tmp/vyos-config-status)"
-            )
-        time.sleep(ctx.options.poll)
+    wait_for(
+        ctx,
+        lambda: booted(ctx),
+        rounds=30,
+        delay=ctx.options.poll,
+        failure=lambda: (
+            f"{name(ctx)} did not finish booting within 60 s (podman logs {name(ctx)}; "
+            f"podman exec {name(ctx)} cat /tmp/vyos-config-status)"
+        ),
+    )
 
 
 def wait_synced(ctx: Context, c: model.Cluster) -> None:
     """Every control plane listed as a backend (proxy) or neighbor (bgp), no other: the config
     took. The backends stay DOWN, the sessions short of Established, until kubeadm brings an
     apiserver up (and, in bgp mode, kubeadm/frr starts FRR in the control plane)."""
-    for i in range(1, 31):
-        if synced(ctx, c):
-            got = len(c.control_planes)
-            ctx.say(
-                f"  {name(ctx)}: VyOS up, {got} control plane {kind(c)}(s) at "
-                f"{c.spec.network.router}"
-            )
-            return
-        if i == 30:
-            listed = ", ".join(n for n, _ in members(ctx, c)) or "nothing"
-            want = ", ".join(n.name for n in c.control_planes)
-            raise PhaseFailed(
-                f"{name(ctx)} lists {listed} as {kind(c)}s, cluster.yaml has {want} "
-                f"(podman exec {name(ctx)} {show(c)})"
-            )
-        time.sleep(ctx.options.poll)
+
+    def mismatch() -> str:
+        listed = ", ".join(n for n, _ in members(ctx, c)) or "nothing"
+        want = ", ".join(n.name for n in c.control_planes)
+        return (
+            f"{name(ctx)} lists {listed} as {kind(c)}s, cluster.yaml has {want} "
+            f"(podman exec {name(ctx)} {show(c)})"
+        )
+
+    wait_for(ctx, lambda: synced(ctx, c), rounds=30, delay=ctx.options.poll, failure=mismatch)
+    got = len(c.control_planes)
+    ctx.say(f"  {name(ctx)}: VyOS up, {got} control plane {kind(c)}(s) at {c.spec.network.router}")
 
 
 def wait(ctx: Context) -> None:
@@ -250,13 +234,7 @@ def reload(ctx: Context, c: model.Cluster) -> None:
     runs in the vyattacfg group, as VyOS requires of configuration scripts: what it leaves under
     /opt/vyatta/config must stay writable to that group, not become root's."""
     wait_booted(ctx)
-    r = ctx.host.run(
-        ["podman", "exec", "-i", name(ctx), "sg", "vyattacfg", "-c", "/bin/vbash -s"],
-        sudo=True,
-        input=RELOAD,
-        capture=True,
-        check=False,
-    )
+    r = podman.exec_(ctx, name(ctx), "sg", "vyattacfg", "-c", "/bin/vbash -s", input=RELOAD)
     out = r.stdout + r.stderr
     if r.returncode != 0 or "Commit failed" in out:
         raise PhaseFailed(f"{name(ctx)} did not accept config.boot: {out.strip()[-300:]}")

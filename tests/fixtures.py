@@ -1,6 +1,7 @@
 """A fake host on which every create phase is already done, for whole-command tests."""
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 from tk8s import model, versions
@@ -11,6 +12,123 @@ from tk8s.paths import Paths
 from tk8s.phases import Context, Options
 
 HOME = Path(__file__).resolve().parents[1]
+
+DEMO_USER = model.UserCluster(
+    metadata=model.Metadata(name="demo"),
+    spec=model.UserSpec(
+        nodes=[model.NodeGroup(role="control-plane"), model.NodeGroup(role="worker", count=2)]
+    ),
+)
+
+
+def bgp_user() -> model.UserCluster:
+    """demo in bgp mode: 3 control planes (.1 .2 .3) + 1 worker (.4), VIP 172.23.0.1."""
+    return model.UserCluster(
+        metadata=model.Metadata(name="demo"),
+        spec=model.UserSpec(
+            network=model.UserNetwork(ha="bgp"),
+            nodes=[model.NodeGroup(role="control-plane", count=3), model.NodeGroup(role="worker")],
+        ),
+    )
+
+
+def ha_user() -> model.UserCluster:
+    """demo with 3 control planes (the third deferred) and one worker."""
+    return model.UserCluster(
+        metadata=model.Metadata(name="demo"),
+        spec=model.UserSpec(
+            nodes=[
+                model.NodeGroup(role="control-plane"),
+                model.NodeGroup(role="control-plane"),
+                model.NodeGroup(role="control-plane", join=False),
+                model.NodeGroup(role="worker"),
+            ]
+        ),
+    )
+
+
+def resolved(
+    user: model.UserCluster,
+    *,
+    existing: model.Cluster | None = None,
+    used_indices: set[int] | None = None,
+    allow_overlap: bool = False,
+) -> model.Cluster:
+    return resolve(
+        user,
+        k8s_default=versions.load(HOME / "versions.yaml").kubernetes.default,
+        existing=existing,
+        used_indices=used_indices or set(),
+        allow_overlap=allow_overlap,
+        tk8s_version="test",
+    )
+
+
+def make_ctx(
+    host: FakeHost,
+    data_dir: Path,
+    *,
+    user: model.UserCluster | None = DEMO_USER,
+    say: Callable[[str], None] | None = None,
+    **opts: object,
+) -> Context:
+    """A Context on the fake host with no waiting; `user` None leaves ctx.cluster unset."""
+    options = Options(retry_delay=0, poll=0, poll_slow=0)
+    for k, v in opts.items():
+        setattr(options, k, v)
+    ctx = Context(
+        host=host,
+        paths=Paths(data_dir=data_dir, wulin_dir=data_dir / "wulin", home=HOME),
+        versions=versions.load(HOME / "versions.yaml"),
+        options=options,
+        say=say or host.lines.append,
+    )
+    if user is not None:
+        ctx.cluster = resolved(user)
+    return ctx
+
+
+def argvs(host: FakeHost) -> list[list[str]]:
+    return [c.argv for c in host.calls]
+
+
+def phases_of(host: FakeHost) -> list[str]:
+    return [line.split("]")[0][1:] for line in host.lines if line.startswith("[")]
+
+
+def new_node_answers(host: FakeHost, name: str, *, ready_after: int) -> None:
+    """The new node boots, is not a Node object until kubeadm join ran, then turns Ready.
+    Specific prefixes go first: FakeHost takes the first matching prefix."""
+    host.responses = {
+        ("kubectl", "get", "node", name, "-o"): [
+            *([Result(0, "False", "")] * ready_after),
+            Result(0, "True", ""),
+        ],
+        ("kubectl", "get", "node", name): [Result(1, "", "not found"), Result(0, name, "")],
+        ("podman", "exec", name, "systemctl", "is-system-running"): Result(0, "running\n", ""),
+        **host.responses,
+    }
+
+
+def running_cluster_answers(host: FakeHost, ctx: Context) -> None:
+    """demo's target is up, every node's systemd is running, the router booted and lists the
+    control plane, the CNI plugins are installed: what nodes/up and nodes/cni-plugins find done."""
+    host.responses[("id", "-u")] = Result(0, "1000\n", "")
+    host.responses[("id", "-g")] = Result(0, "1000\n", "")
+    host.responses[("podman", "exec", "demo-router", "cat", "/tmp/vyos-config-status")] = Result(
+        0, "0\n", ""
+    )
+    host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(
+        0, SHOW_HAPROXY, ""
+    )
+    for n in ("demo-control-plane-1", "demo-worker-1", "demo-worker-2"):
+        host.responses[("podman", "exec", n, "systemctl", "is-system-running")] = Result(
+            0, "running\n", ""
+        )
+    host.active.add("demo.target")
+    host.files[ctx.paths.cni_dir / "bridge"] = "elf"
+
+
 SHOW_HAPROXY = (
     "Proxy name            Role       Status    Req rate    Resp time    Last change\n"
     "--------------------  ---------  --------  ----------  -----------  -------------\n"
@@ -76,24 +194,9 @@ VBASH = ("podman", "exec", "-i", "demo-router", "sg", "vyattacfg", "-c", "/bin/v
 
 def ready_host(host: FakeHost, data_dir: Path, name: str = "demo") -> model.Cluster:
     """demo (1 control plane + 2 workers) exists and is Ready here: every done() says yes."""
-    paths = Paths(data_dir=data_dir, wulin_dir=data_dir / "wulin", home=HOME)
-    vers = versions.load(HOME / "versions.yaml")
-    user = model.UserCluster(
-        metadata=model.Metadata(name=name),
-        spec=model.UserSpec(
-            nodes=[model.NodeGroup(role="control-plane"), model.NodeGroup(role="worker", count=2)]
-        ),
-    )
-    c = resolve(
-        user,
-        k8s_default=vers.kubernetes.default,
-        existing=None,
-        used_indices=set(),
-        allow_overlap=False,
-        tk8s_version="test",
-    )
-    ctx = Context(host=host, paths=paths, versions=vers, options=Options(), say=host.lines.append)
-    ctx.cluster = c
+    user = DEMO_USER.model_copy(update={"metadata": model.Metadata(name=name)})
+    ctx = make_ctx(host, data_dir, user=user)
+    c, paths = ctx.require_cluster(), ctx.paths
     state = paths.state_dir(name)
     host.files[state / "cluster.yaml"] = model.dumps(c)
     host.files[state / "init-config.yaml"] = kubeadm.render_init(ctx)

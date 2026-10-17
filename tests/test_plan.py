@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.fixtures import resolved
 from tk8s import model
 from tk8s.create.plan import (
     PlanError,
     expand_nodes,
     load_existing,
     pick_index,
-    resolve,
     used_indices,
     validate,
 )
@@ -30,14 +30,7 @@ def res(
     used: set[int] | None = None,
     allow_overlap: bool = False,
 ) -> model.Cluster:
-    return resolve(
-        u,
-        k8s_default=K8S,
-        existing=existing,
-        used_indices=used or set(),
-        allow_overlap=allow_overlap,
-        tk8s_version="test",
-    )
+    return resolved(u, existing=existing, used_indices=used, allow_overlap=allow_overlap)
 
 
 DEMO = (
@@ -217,7 +210,7 @@ def test_index_and_existing_come_from_the_clusters_dir(tmp_path: Path) -> None:
     paths = Paths(tmp_path, tmp_path / "wulin", HOME)
     (tmp_path / "clusters" / "a").mkdir(parents=True)
     a = res(user("metadata: {name: a}\nspec:\n  nodes: [{role: control-plane}]\n"), used={1})
-    model.save(a, tmp_path / "clusters" / "a" / "cluster.yaml")
+    (tmp_path / "clusters" / "a" / "cluster.yaml").write_text(model.dumps(a))
     assert used_indices(paths) == {0}
     assert load_existing(paths, "a") is not None and load_existing(paths, "b") is None
     assert pick_index(user(DEMO), None, used_indices(paths)) == 1
@@ -255,3 +248,14 @@ def test_used_indices_tolerates_a_file_from_an_older_tk8s(tmp_path: Path) -> Non
     (tmp_path / "clusters" / "junk").mkdir()
     (tmp_path / "clusters" / "junk" / "cluster.yaml").write_text("not: [valid")
     assert used_indices(paths) == {3}
+
+
+def test_a_creating_cluster_is_resumed(tmp_path: Path) -> None:
+    paths = Paths(tmp_path, tmp_path / "wulin", HOME)
+    c = res(user(DEMO))  # status Creating
+    state = paths.state_dir("demo")
+    state.mkdir(parents=True)
+    (state / "cluster.yaml").write_text(model.dumps(c))
+    existing = load_existing(paths, "demo")
+    assert existing is not None and existing.status is not None
+    assert existing.status.phase == "Creating" and existing.spec.network.index == 0

@@ -2,12 +2,10 @@
 image store, the units, the per-node addons), so a node added later looks exactly like one created
 with the cluster. join node runs the same tail to finish a node that an add left unjoined."""
 
-import time
-
 from ..create import addons, frr, kubeadm, nodes, router, units
 from ..create import images as create_images
 from ..lifecycle import save_cluster
-from ..phases import Context, Phase, PhaseFailed
+from ..phases import Context, Phase, PhaseFailed, wait_for
 from .common import (
     find,
     marked_joined,
@@ -86,14 +84,13 @@ def ready_done(ctx: Context) -> bool:
 
 def ready_run(ctx: Context) -> None:
     n = node_of(ctx)
-    for i in range(1, 61):
-        if node_ready(ctx, n.name):
-            break
-        if i == 60:
-            raise PhaseFailed(
-                f"{n.name} is not Ready after 5 minutes (kubectl describe node {n.name})"
-            )
-        time.sleep(ctx.options.poll_slow)
+    wait_for(
+        ctx,
+        lambda: node_ready(ctx, n.name),
+        rounds=60,
+        delay=ctx.options.poll_slow,
+        failure=lambda: f"{n.name} is not Ready after 5 minutes (kubectl describe node {n.name})",
+    )
     if n.role == "control-plane":
         kubeadm.untaint_control_planes(ctx)
     ctx.say(f"  {n.name} Ready ({n.role})")

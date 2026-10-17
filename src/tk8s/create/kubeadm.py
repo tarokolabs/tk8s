@@ -4,11 +4,11 @@ Plan 1 ships the render sub-phase; init, join and kubeconfig follow with the sam
 """
 
 import re
-import time
 from pathlib import Path
 
-from .. import model
-from ..phases import Context, Phase, PhaseFailed
+from .. import model, podman
+from ..host import Result
+from ..phases import Context, Phase, PhaseFailed, wait_for
 from ..render import template
 from . import frr, router
 
@@ -18,6 +18,13 @@ KEY_RE = re.compile(r"--certificate-key ([0-9a-f]+)")
 def kubectl_env(ctx: Context) -> dict[str, str]:
     """kubectl never sees the caller's KUBECONFIG; every call names the cluster's own."""
     return {"KUBECONFIG": str(ctx.state_dir / "kubeconfig")}
+
+
+def kubectl(ctx: Context, *args: str, input: str | None = None) -> Result:
+    """kubectl against this cluster's kubeconfig; never raises, the caller reads the Result."""
+    return ctx.host.run(
+        ["kubectl", *args], env=kubectl_env(ctx), input=input, capture=True, check=False
+    )
 
 
 def render_init(ctx: Context) -> str:
@@ -80,50 +87,46 @@ def wait_router_ready(ctx: Context) -> None:
     uses it."""
     c = ctx.require_cluster()
     endpoint = c.endpoint_ip
-    for i in range(1, 31):
+
+    def ready() -> bool:
         r = ctx.host.run(
             ["curl", "-sk", "--max-time", "3", f"https://{endpoint}:6443/readyz"],
             capture=True,
             check=False,
         )
-        if r.stdout.strip() == "ok":
-            return
-        if i == 30:
-            raise PhaseFailed(
-                f"the apiserver at {endpoint} (via {c.name}-router) answered no readyz within "
-                f"60 s (podman exec {c.name}-router {router.show(c)})"
-            )
-        time.sleep(ctx.options.poll)
+        return r.stdout.strip() == "ok"
+
+    wait_for(
+        ctx,
+        ready,
+        rounds=30,
+        delay=ctx.options.poll,
+        failure=lambda: (
+            f"the apiserver at {endpoint} (via {c.name}-router) answered no readyz within "
+            f"60 s (podman exec {c.name}-router {router.show(c)})"
+        ),
+    )
 
 
 def _initialised(ctx: Context, cp: str) -> bool:
-    r = ctx.host.run(
-        ["podman", "exec", cp, "test", "-f", "/etc/kubernetes/admin.conf"], sudo=True, check=False
-    )
-    return r.returncode == 0
+    return podman.node_has(ctx, cp, "/etc/kubernetes/admin.conf", "-f")
 
 
 def _completed(ctx: Context, cp: str) -> bool:
     """kubeadm init got to the end: it uploaded its configuration (after the apiserver answered
     and the admin user was bootstrapped). A kubeadm init that died waiting for the control plane
     leaves admin.conf behind but none of this."""
-    r = ctx.host.run(
-        [
-            "podman",
-            "exec",
-            cp,
-            "kubectl",
-            "--kubeconfig",
-            "/etc/kubernetes/admin.conf",
-            "-n",
-            "kube-system",
-            "get",
-            "configmap",
-            "kubeadm-config",
-        ],
-        sudo=True,
-        capture=True,
-        check=False,
+    r = podman.exec_(
+        ctx,
+        cp,
+        "kubectl",
+        "--kubeconfig",
+        "/etc/kubernetes/admin.conf",
+        "-n",
+        "kube-system",
+        "get",
+        "configmap",
+        "kubeadm-config",
     )
     return r.returncode == 0
 
@@ -135,34 +138,22 @@ def init_done(ctx: Context) -> bool:
 
 def init_run(ctx: Context) -> None:
     """kubeadm init on the first control plane; keep the certificate key for the other control
-    planes; wait until the router sees the apiserver."""
+    planes; wait until the router sees the apiserver (a resume right after a restart: the
+    apiserver may still be coming up) before judging whether init completed."""
     cp = ctx.require_cluster().first_control_plane.name
-    if _initialised(ctx, cp):
-        wait_router_ready(
-            ctx
-        )  # a resume right after a restart: the apiserver may still be coming up
-        if not _completed(ctx, cp):
-            raise PhaseFailed(
-                f"kubeadm init on {cp} did not complete (admin.conf exists but the cluster was "
-                "never bootstrapped); delete the cluster and create it again"
-            )
+    resumed = _initialised(ctx, cp)
+    if resumed:
         ctx.say(f"  {cp} already initialized")
     else:
         ctx.say(f"  kubeadm init on {cp} ...")
-        out = ctx.host.run(
-            [
-                "podman",
-                "exec",
-                cp,
-                "kubeadm",
-                "init",
-                "--config=/opt/taroko/init-config.yaml",
-                "--upload-certs",
-                "--ignore-preflight-errors=SystemVerification",
-            ],
-            sudo=True,
-            capture=True,
-            check=False,
+        out = podman.exec_(
+            ctx,
+            cp,
+            "kubeadm",
+            "init",
+            "--config=/opt/taroko/init-config.yaml",
+            "--upload-certs",
+            "--ignore-preflight-errors=SystemVerification",
         )
         if out.returncode != 0:
             tail = "\n".join((out.stdout + out.stderr).splitlines()[-30:])
@@ -173,6 +164,11 @@ def init_run(ctx: Context) -> None:
         save_certificate_key(ctx, m.group(1))
         ctx.say(f"  {cp} initialized")
     wait_router_ready(ctx)
+    if resumed and not _completed(ctx, cp):
+        raise PhaseFailed(
+            f"kubeadm init on {cp} did not complete (admin.conf exists but the cluster was "
+            "never bootstrapped); delete the cluster and create it again"
+        )
 
 
 INIT = Phase("init", "kubeadm init on the first control plane", init_done, init_run)
@@ -185,10 +181,7 @@ def kubeconfig_done(ctx: Context) -> bool:
     text = ctx.host.read(ctx.state_dir / "kubeconfig")
     if not text:
         return False
-    r = ctx.host.run(
-        ["kubectl", "get", "--raw", "/readyz"], env=kubectl_env(ctx), capture=True, check=False
-    )
-    return r.returncode == 0
+    return kubectl(ctx, "get", "--raw", "/readyz").returncode == 0
 
 
 def kubeconfig_run(ctx: Context) -> None:
@@ -196,15 +189,10 @@ def kubeconfig_run(ctx: Context) -> None:
     means: the router, or the VIP in bgp mode (routes.service gives the host a route to it)."""
     c = ctx.require_cluster()
     cp = c.first_control_plane.name
-    r = ctx.host.run(
-        ["podman", "exec", cp, "cat", "/etc/kubernetes/admin.conf"],
-        sudo=True,
-        capture=True,
-        check=False,
-    )
-    if r.returncode != 0 or not r.stdout.strip():
+    admin = podman.node_read(ctx, cp, "/etc/kubernetes/admin.conf")
+    if not admin or not admin.strip():
         raise PhaseFailed(f"could not read /etc/kubernetes/admin.conf from {cp}")
-    text = r.stdout.replace(
+    text = admin.replace(
         f"server: https://api.{c.domain}:6443", f"server: https://{c.endpoint_ip}:6443"
     )
     ctx.host.write(ctx.state_dir / "kubeconfig", text, mode=0o600)
@@ -223,19 +211,14 @@ KUBECONFIG = Phase(
 
 
 def joined(ctx: Context, name: str) -> bool:
-    r = ctx.host.run(
-        ["kubectl", "get", "node", name], env=kubectl_env(ctx), capture=True, check=False
-    )
-    return r.returncode == 0
+    return kubectl(ctx, "get", "node", name).returncode == 0
 
 
 def join_command(ctx: Context) -> str:
     cp = ctx.require_cluster().first_control_plane.name
-    r = ctx.host.run(
-        ["podman", "exec", cp, "kubeadm", "token", "create", "--print-join-command"],
-        sudo=True,
-        capture=True,
-    )
+    r = podman.exec_(ctx, cp, "kubeadm", "token", "create", "--print-join-command")
+    if r.returncode != 0:
+        raise PhaseFailed(f"kubeadm token create on {cp} failed: {r.stderr.strip()}")
     return r.stdout.replace("\r", "").strip()
 
 
@@ -246,12 +229,7 @@ def certificate_key(ctx: Context, *, fresh: bool = False) -> str:
     if stored and stored.strip():
         return stored.strip()
     cp = ctx.require_cluster().first_control_plane.name
-    r = ctx.host.run(
-        ["podman", "exec", cp, "kubeadm", "init", "phase", "upload-certs", "--upload-certs"],
-        sudo=True,
-        capture=True,
-        check=False,
-    )
+    r = podman.exec_(ctx, cp, "kubeadm", "init", "phase", "upload-certs", "--upload-certs")
     lines = r.stdout.strip().splitlines()
     if r.returncode != 0 or not lines:
         raise PhaseFailed(f"could not obtain a certificate key from {cp}")
@@ -267,9 +245,7 @@ def join_node(ctx: Context, node: model.Node, join: str, key: str) -> None:
         else ""
     )
     cmd = f"{join}{extra} --ignore-preflight-errors=SystemVerification"
-    r = ctx.host.run(
-        ["podman", "exec", node.name, "bash", "-c", cmd], sudo=True, capture=True, check=False
-    )
+    r = podman.exec_(ctx, node.name, "bash", "-c", cmd)
     if r.returncode != 0:
         tail = "\n".join((r.stdout + r.stderr).splitlines()[-20:])
         raise PhaseFailed(f"kubeadm join on {node.name} failed:\n{tail}")
@@ -279,18 +255,7 @@ def join_node(ctx: Context, node: model.Node, join: str, key: str) -> None:
 def untaint_control_planes(ctx: Context) -> None:
     """Control planes schedule workloads too (a teaching cluster is small)."""
     for n in ctx.require_cluster().control_planes:
-        ctx.host.run(
-            [
-                "kubectl",
-                "taint",
-                "node",
-                n.name,
-                "node-role.kubernetes.io/control-plane:NoSchedule-",
-            ],
-            env=kubectl_env(ctx),
-            capture=True,
-            check=False,
-        )
+        kubectl(ctx, "taint", "node", n.name, "node-role.kubernetes.io/control-plane:NoSchedule-")
 
 
 def _joining(ctx: Context) -> list[model.Node]:

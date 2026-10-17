@@ -64,7 +64,6 @@ class Host:
         env: Mapping[str, str] | None = None,
         input: str | None = None,
         capture: bool = False,
-        timeout: int | None = None,
         check: bool = True,
     ) -> Result:
         self._show(argv, sudo, env)
@@ -75,7 +74,6 @@ class Host:
                 input=input,
                 text=True,
                 env=_base_env(),
-                timeout=timeout,
                 capture_output=capture,
                 check=False,
             )
@@ -173,7 +171,6 @@ class DryRunHost(Host):
         env: Mapping[str, str] | None = None,
         input: str | None = None,
         capture: bool = False,
-        timeout: int | None = None,
         check: bool = True,
     ) -> Result:
         self._show(argv, sudo, env)
@@ -288,7 +285,6 @@ class FakeHost(Host):
         env: Mapping[str, str] | None = None,
         input: str | None = None,
         capture: bool = False,
-        timeout: int | None = None,
         check: bool = True,
     ) -> Result:
         self._show(argv, sudo, env)

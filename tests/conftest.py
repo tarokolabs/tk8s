@@ -4,13 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from tk8s import model, versions
-from tk8s.create.plan import resolve
+from tests.fixtures import HOME, bgp_user, make_ctx
 from tk8s.host import FakeHost
 from tk8s.paths import Paths
-from tk8s.phases import Context, Options
-
-HOME = Path(__file__).resolve().parents[1]
+from tk8s.phases import Context
 
 
 @pytest.fixture
@@ -26,58 +23,10 @@ def host() -> FakeHost:
 @pytest.fixture
 def ctx(paths: Paths, host: FakeHost) -> Context:
     """demo: 1 control plane + 2 workers, index 0, the default Kubernetes version."""
-    vers = versions.load(HOME / "versions.yaml")
-    user = model.UserCluster(
-        metadata=model.Metadata(name="demo"),
-        spec=model.UserSpec(
-            nodes=[model.NodeGroup(role="control-plane"), model.NodeGroup(role="worker", count=2)]
-        ),
-    )
-    c = Context(
-        host=host,
-        paths=paths,
-        versions=vers,
-        options=Options(retry_delay=0, poll=0, poll_slow=0),
-        say=host.lines.append,
-    )
-    c.cluster = resolve(
-        user,
-        k8s_default=vers.kubernetes.default,
-        existing=None,
-        used_indices=set(),
-        allow_overlap=False,
-        tk8s_version="test",
-    )
-    return c
+    return make_ctx(host, paths.data_dir)
 
 
 @pytest.fixture
 def bgp_ctx(paths: Paths, host: FakeHost) -> Context:
     """demo in bgp mode: 3 control planes (.1 .2 .3) + 1 worker (.4), index 0, VIP 172.23.0.1."""
-    vers = versions.load(HOME / "versions.yaml")
-    user = model.UserCluster(
-        metadata=model.Metadata(name="demo"),
-        spec=model.UserSpec(
-            network=model.UserNetwork(ha="bgp"),
-            nodes=[
-                model.NodeGroup(role="control-plane", count=3),
-                model.NodeGroup(role="worker"),
-            ],
-        ),
-    )
-    c = Context(
-        host=host,
-        paths=paths,
-        versions=vers,
-        options=Options(retry_delay=0, poll=0, poll_slow=0),
-        say=host.lines.append,
-    )
-    c.cluster = resolve(
-        user,
-        k8s_default=vers.kubernetes.default,
-        existing=None,
-        used_indices=set(),
-        allow_overlap=False,
-        tk8s_version="test",
-    )
-    return c
+    return make_ctx(host, paths.data_dir, user=bgp_user())

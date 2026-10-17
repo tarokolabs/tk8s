@@ -4,13 +4,12 @@ controller); then wait for every node to be Ready.
 The Gateway API CRDs, the cilium chart and the cilium CLI are pinned in versions.yaml; the CRDs
 and the chart are vendored under manifests/, so nothing here fetches from helm.cilium.io."""
 
-import time
 from pathlib import Path
 from typing import Literal
 
 from .. import images, model
-from ..phases import Context, Phase, PhaseFailed
-from .kubeadm import kubectl_env
+from ..phases import Context, Phase, PhaseFailed, wait_for
+from .kubeadm import kubectl, kubectl_env
 
 Datapath = Literal["netkit", "veth"]
 
@@ -69,9 +68,7 @@ def record_datapath(ctx: Context, datapath: Datapath) -> None:
 
 
 def _kubectl(ctx: Context, *args: str, input: str | None = None, check: bool = True) -> int:
-    r = ctx.host.run(
-        ["kubectl", *args], env=kubectl_env(ctx), input=input, capture=True, check=False
-    )
+    r = kubectl(ctx, *args, input=input)
     if check and r.returncode != 0:
         raise PhaseFailed(f"kubectl {' '.join(args)} failed: {r.stderr.strip()}")
     return r.returncode
@@ -101,20 +98,8 @@ def install_cilium(ctx: Context) -> None:
     )
     ctx.say(f"  cilium datapath: {datapath}{note if datapath == 'netkit' else ''}")
     # A partially installed release (interrupted create) is upgraded in place instead of failing.
-    secrets = ctx.host.run(
-        [
-            "kubectl",
-            "-n",
-            "kube-system",
-            "get",
-            "secret",
-            "-l",
-            "owner=helm,name=cilium",
-            "--no-headers",
-        ],
-        env=kubectl_env(ctx),
-        capture=True,
-        check=False,
+    secrets = kubectl(
+        ctx, "-n", "kube-system", "get", "secret", "-l", "owner=helm,name=cilium", "--no-headers"
     )
     action = "upgrade" if secrets.stdout.strip() else "install"
     r = ctx.host.run(
@@ -160,15 +145,11 @@ def install_cilium(ctx: Context) -> None:
     record_datapath(ctx, datapath)
 
 
-def install_run(ctx: Context) -> None:
-    install_cilium(ctx)
-
-
 INSTALL = Phase(
     "install",
     "install the CNI (cilium: kube-proxy replacement, LB-IPAM, Gateway API)",
     install_done,
-    install_run,
+    install_cilium,
 )
 
 
@@ -177,12 +158,7 @@ INSTALL = Phase(
 
 def not_ready(ctx: Context) -> list[str] | None:
     """Names of the nodes that are not Ready; None when kubectl itself failed."""
-    r = ctx.host.run(
-        ["kubectl", "get", "nodes", "--no-headers"],
-        env=kubectl_env(ctx),
-        capture=True,
-        check=False,
-    )
+    r = kubectl(ctx, "get", "nodes", "--no-headers")
     if r.returncode != 0:
         return None
     return [line.split()[0] for line in r.stdout.splitlines() if line.split()[1:2] != ["Ready"]]
@@ -195,17 +171,26 @@ def nodes_ready_done(ctx: Context) -> bool:
 def nodes_ready_run(ctx: Context) -> None:
     """Host routes to the pod and service subnets are the <cluster>-routes.service unit, started
     with the cluster target by nodes/up; with the CNI in place the nodes turn Ready."""
-    for i in range(1, 61):
+    pending: list[str] | None = []
+
+    def all_ready() -> bool:
+        nonlocal pending
         pending = not_ready(ctx)
-        if pending == []:
-            break
-        if i == 60:
-            what = " ".join(pending) if pending else "kubectl get nodes failed"
-            raise PhaseFailed(f"nodes are not Ready after 5 minutes: {what}")
-        time.sleep(ctx.options.poll_slow)
-    r = ctx.host.run(
-        ["kubectl", "get", "nodes", "--no-headers"], env=kubectl_env(ctx), capture=True
+        return pending == []
+
+    wait_for(
+        ctx,
+        all_ready,
+        rounds=60,
+        delay=ctx.options.poll_slow,
+        failure=lambda: (
+            "nodes are not Ready after 5 minutes: "
+            f"{' '.join(pending) if pending else 'kubectl get nodes failed'}"
+        ),
     )
+    r = kubectl(ctx, "get", "nodes", "--no-headers")
+    if r.returncode != 0:
+        raise PhaseFailed(f"kubectl get nodes failed: {r.stderr.strip()}")
     for line in r.stdout.splitlines():
         f = line.split()
         ctx.say(f"  {f[0]} {f[1]}")

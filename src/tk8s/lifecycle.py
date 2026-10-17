@@ -1,14 +1,13 @@
 """Day-2 verbs on an existing cluster: get clusters, describe, stop, start, use. Plain functions in
 the order a person meets them; nothing here has steps to resume, so there are no phases."""
 
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 from . import model
 from .create import PHASES, router
-from .create.kubeadm import kubectl_env
-from .phases import Context
+from .create.kubeadm import kubectl
+from .phases import Context, poll_until
 
 
 class ClusterError(Exception):
@@ -19,23 +18,20 @@ class ClusterError(Exception):
 
 
 def load_cluster(ctx: Context, name: str) -> model.Cluster:
-    """cluster.yaml of an existing cluster. A cluster created before `status` existed is Ready
-    while its .create-complete marker is there; the first write back retires the marker."""
-    state = ctx.paths.state_dir(name)
-    path = state / "cluster.yaml"
+    """cluster.yaml of an existing cluster."""
+    path = ctx.paths.state_dir(name) / "cluster.yaml"
     if not path.exists():
         raise ClusterError(
             f"cluster {name} not found under {ctx.paths.clusters_dir} (tkctl get clusters)"
         )
     ctx.name = name
-    ctx.cluster = model.load(path, create_complete_marker=(state / ".create-complete").exists())
+    ctx.cluster = model.load(path)
     return ctx.cluster
 
 
 def save_cluster(ctx: Context, cluster: model.Cluster) -> None:
     ctx.cluster = cluster
     ctx.host.write(ctx.state_dir / "cluster.yaml", model.dumps(cluster))
-    ctx.host.remove(ctx.state_dir / ".create-complete")
 
 
 def state_of(ctx: Context, c: model.Cluster) -> str:
@@ -65,7 +61,7 @@ def list_clusters(ctx: Context) -> None:
             )
             continue
         try:
-            c = model.load(path, create_complete_marker=(path.parent / ".create-complete").exists())
+            c = model.load(path)
         except model.ClusterFileError as err:
             ctx.say(f"{name:<12} {err}")  # one bad file must not hide the other clusters
             continue
@@ -188,12 +184,7 @@ def describe_addons(ctx: Context, c: model.Cluster, state: str) -> None:
         return
 
     def ask(*args: str) -> str:
-        r = ctx.host.run(
-            ["kubectl", "--request-timeout=5s", *args],
-            env=kubectl_env(ctx),
-            capture=True,
-            check=False,
-        )
+        r = kubectl(ctx, "--request-timeout=5s", *args)
         return r.stdout.strip() if r.returncode == 0 else ""
 
     image = "jsonpath={.spec.template.spec.containers[0].image}"
@@ -243,21 +234,15 @@ def start(ctx: Context, c: model.Cluster) -> None:
     Ready heartbeat newer than this start."""
     since = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     ctx.host.run(["systemctl", "start", f"{c.name}.target"], sudo=True)
-    for _ in range(90):
-        r = ctx.host.run(
-            ["kubectl", "get", "nodes", "-o", f"jsonpath={READY_HEARTBEATS}"],
-            env=kubectl_env(ctx),
-            capture=True,
-            check=False,
-        )
+
+    def all_fresh() -> bool:
+        r = kubectl(ctx, "get", "nodes", "-o", f"jsonpath={READY_HEARTBEATS}")
         rows = [line.split() for line in r.stdout.splitlines() if line.strip()]
         fresh = [row for row in rows if len(row) == 3 and row[1] == "True" and row[2] > since]
-        if rows and len(fresh) == len(rows):
-            break
-        time.sleep(ctx.options.poll_slow)
-    r = ctx.host.run(
-        ["kubectl", "get", "nodes", "--no-headers"], env=kubectl_env(ctx), capture=True, check=False
-    )
+        return bool(rows) and len(fresh) == len(rows)
+
+    poll_until(all_fresh, rounds=90, delay=ctx.options.poll_slow)
+    r = kubectl(ctx, "get", "nodes", "--no-headers")
     for line in r.stdout.splitlines():
         fields = line.split()
         if len(fields) >= 2:

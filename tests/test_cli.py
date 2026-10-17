@@ -22,19 +22,21 @@ def run(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str]:
 
 def fake_context(host: object, **kw: object) -> object:
     """verbs.make_context with a FakeHost and no waiting; assume_yes follows --yes."""
-    from tk8s import verbs, versions
+    from tests.fixtures import make_ctx
+    from tk8s import verbs
     from tk8s.host import FakeHost
     from tk8s.paths import Paths
-    from tk8s.phases import Context, Options
 
     assert isinstance(host, FakeHost)
-    return Context(
-        host=host,
-        paths=Paths.from_env(verbs.HOME),
-        versions=versions.load(verbs.HOME / "versions.yaml"),
-        options=Options(poll=0, poll_slow=0, retry_delay=0, assume_yes=bool(kw.get("assume_yes"))),
+    ctx = make_ctx(
+        host,
+        Path(os.environ["TK_DATA_DIR"]),
+        user=None,
         say=print,
+        assume_yes=bool(kw.get("assume_yes")),
     )
+    ctx.paths = Paths.from_env(verbs.HOME)  # what the real make_context reads
+    return ctx
 
 
 def test_default_dry_run(capsys: pytest.CaptureFixture[str], data_dir: Path) -> None:
@@ -91,6 +93,7 @@ def test_workers_zero_builds_a_control_plane_only_cluster(
     assert rc == 0
     assert "name: demo-control-plane-1" in out and "demo-worker" not in out
     assert "cluster demo: 1 control plane + 0 workers" in out
+    assert "Wants=demo-router.service demo-control-plane-1.service demo-routes.service" in out
 
 
 @pytest.mark.parametrize(
@@ -115,7 +118,11 @@ def test_workers_zero_builds_a_control_plane_only_cluster(
         ),
         (
             ["create", "cluster", "demo", "--control-planes", "2", "--dry-run"],
-            "--control-planes must be odd",
+            "control-plane count 2 must be odd (1, 3, 5) for etcd quorum",
+        ),
+        (
+            ["create", "cluster", "demo", "--workers", "-1", "--dry-run"],
+            "--workers must be an integer",
         ),
         (["create", "cluster", "demo", "--control-planes", "7", "--dry-run"], "at most 5"),
         (
@@ -155,6 +162,7 @@ TAKEN = (
     "lb_range: 172.22.0.200-172.22.0.219, pods: 10.244.0.0/21, services: 10.98.0.0/24}\n"
     "  nodes: [{role: control-plane, name: taken-control-plane-1, ip: 172.22.0.1, cpu: 2, "
     "memory: 4g, join: true}]\n"
+    "status: {phase: Ready, tk8s: test}\n"
 )
 
 
@@ -163,7 +171,6 @@ def test_existing_cluster_is_refused_and_indices_come_from_the_real_dir(
 ) -> None:
     taken = data_dir / "clusters" / "taken"
     taken.mkdir(parents=True)
-    (taken / ".create-complete").touch()
     (taken / "cluster.yaml").write_text(TAKEN)
     rc, out = run(capsys, "create", "cluster", "taken", "--dry-run")
     assert rc == 1 and "cluster taken already exists; delete it first or pick another name" in out
@@ -175,6 +182,24 @@ def test_existing_cluster_is_refused_and_indices_come_from_the_real_dir(
     )
     rc, out = run(capsys, "create", "cluster", "-f", str(data_dir / "clash.yaml"), "--dry-run")
     assert rc == 1 and "already used" in out
+
+
+def test_create_refuses_a_cluster_yaml_without_status(
+    capsys: pytest.CaptureFixture[str], data_dir: Path
+) -> None:
+    """A cluster.yaml this tkctl did not write (no status: a tk8s before v2026.10.7) is neither
+    Ready nor a create to resume; resuming would re-resolve the topology from the flags and
+    overwrite the file. create refuses and names the way out."""
+    taken = data_dir / "clusters" / "taken"
+    taken.mkdir(parents=True)
+    legacy = TAKEN.replace("status: {phase: Ready, tk8s: test}\n", "")
+    assert "status:" not in legacy
+    (taken / "cluster.yaml").write_text(legacy)
+    rc, out = run(capsys, "create", "cluster", "taken", "--control-planes", "3", "--dry-run")
+    assert rc == 1
+    assert "cluster taken has a cluster.yaml without status" in out
+    assert "tkctl delete cluster taken" in out
+    assert (taken / "cluster.yaml").read_text() == legacy
 
 
 def test_file_input(capsys: pytest.CaptureFixture[str], data_dir: Path) -> None:
@@ -354,6 +379,8 @@ def test_verify_cluster_verb(
 ) -> None:
     from tk8s import verify
 
+    rc, out = run(capsys, "verify", "cluster")
+    assert rc == 1 and "usage: tkctl verify cluster NAME [--phase P]" in out
     rc, out = run(capsys, "verify", "cluster", "nope")
     assert rc == 1
     assert f"cluster nope not found under {data_dir}/clusters (tkctl get clusters)" in out
@@ -495,20 +522,28 @@ def test_delete_cluster_verb(
     assert rc == 1 and "cluster nothing not found: no state under" in out and "no network" in out
     rc, out = run(capsys, "delete", "cluster")
     assert rc == 1 and "usage: tkctl delete cluster NAME [--yes]" in out
-    monkeypatch.setenv("TK_ASSUME_YES", "1")
     (state / "cluster.yaml").write_text("metadata: {name: demo}\nspec: {runtime: crio}\n")
     host.dirs.add(state)
-    rc, out = run(capsys, "delete", "cluster", "demo")
+    rc, out = run(capsys, "delete", "cluster", "demo", "--yes")
     assert (
         rc == 0 and "cluster.yaml" in out and "cluster demo deleted" in out
     )  # reported, not fatal
 
 
+def test_tk_assume_yes_is_read_once_in_make_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tk8s import verbs
+
+    monkeypatch.delenv("TK_ASSUME_YES", raising=False)
+    assert not verbs.make_context().options.assume_yes
+    assert verbs.make_context(assume_yes=True).options.assume_yes
+    monkeypatch.setenv("TK_ASSUME_YES", "1")
+    assert verbs.make_context().options.assume_yes
+
+
 def test_node_verbs(
     capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from tests.fixtures import ready_host
-    from tests.test_node import new_node_answers
+    from tests.fixtures import new_node_answers, ready_host
     from tk8s import model, verbs
     from tk8s.host import FakeHost, Result
 
