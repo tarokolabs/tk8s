@@ -3,7 +3,7 @@ the router exactly while its own apiserver answers /readyz (tk8s-apiserver-healt
 on lo). tkctl writes the FRR configuration and the VIP into the node and turns on the units the
 node image ships disabled. proxy mode has nothing to do here."""
 
-from .. import model
+from .. import model, podman
 from ..phases import Context, Phase, PhaseFailed
 from ..render import template
 
@@ -25,89 +25,59 @@ def config(ctx: Context, n: model.Node) -> str:
     )
 
 
-def _read(ctx: Context, node: str, path: str) -> str | None:
-    r = ctx.host.run(["podman", "exec", node, "cat", path], sudo=True, capture=True, check=False)
-    return r.stdout if r.returncode == 0 else None
-
-
 def configured(ctx: Context, n: model.Node) -> bool:
     """The VIP file, the very configuration this tkctl renders, and both units active: anything
     less (an interrupted run, a changed router address) is configured again."""
-    vip = _read(ctx, n.name, "/etc/tk8s/vip")
+    vip = podman.node_read(ctx, n.name, "/etc/tk8s/vip")
     if vip is None or vip.strip() != str(ctx.require_cluster().spec.network.vip):
         return False
-    if _read(ctx, n.name, "/etc/frr/frr.conf") != config(ctx, n):
+    if podman.node_read(ctx, n.name, "/etc/frr/frr.conf") != config(ctx, n):
         return False
-    return all(
-        ctx.host.run(
-            ["podman", "exec", n.name, "systemctl", "is-active", "--quiet", u],
-            sudo=True,
-            check=False,
-        ).returncode
-        == 0
-        for u in UNITS
-    )
+    return all(podman.node_active(ctx, n.name, u) for u in UNITS)
 
 
 def configure(ctx: Context, n: model.Node) -> None:
     c = ctx.require_cluster()
     net = c.spec.network
-    has_frr = ctx.host.run(
-        ["podman", "exec", n.name, "test", "-f", "/etc/frr/daemons"], sudo=True, check=False
-    )
-    if has_frr.returncode != 0:
+    if not podman.node_has(ctx, n.name, "/etc/frr/daemons", "-f"):
         # a host that cached the node tag from before FRR was in the recipe
         raise PhaseFailed(
             f"{n.name} has no FRR: its node image predates bgp mode; run tkctl pull images "
             f"--refresh --k8s {c.spec.kubernetes} and create the cluster again"
         )
-    previous = (_read(ctx, n.name, "/etc/tk8s/vip") or "").strip()
-    ctx.host.run(["podman", "exec", n.name, "sed", "-i", DAEMONS, "/etc/frr/daemons"], sudo=True)
-    ctx.host.run(
-        [
-            "podman",
-            "exec",
-            "-i",
-            n.name,
-            "install",
-            "-m",
-            "640",
-            "-o",
-            "frr",
-            "-g",
-            "frr",
-            "/dev/stdin",
-            "/etc/frr/frr.conf",
-        ],
-        sudo=True,
+    previous = (podman.node_read(ctx, n.name, "/etc/tk8s/vip") or "").strip()
+    podman.must(ctx, n.name, "sed", "-i", DAEMONS, "/etc/frr/daemons")
+    podman.must(
+        ctx,
+        n.name,
+        "install",
+        "-m",
+        "640",
+        "-o",
+        "frr",
+        "-g",
+        "frr",
+        "/dev/stdin",
+        "/etc/frr/frr.conf",
         input=config(ctx, n),
     )
-    ctx.host.run(
-        [
-            "podman",
-            "exec",
-            "-i",
-            n.name,
-            "install",
-            "-D",
-            "-m",
-            "644",
-            "/dev/stdin",
-            "/etc/tk8s/vip",
-        ],
-        sudo=True,
+    podman.must(
+        ctx,
+        n.name,
+        "install",
+        "-D",
+        "-m",
+        "644",
+        "/dev/stdin",
+        "/etc/tk8s/vip",
         input=f"{net.vip}\n",
     )
     if previous and previous != str(net.vip):
         # the health script only moves the current VIP; a changed one would leave the old /32 on lo
-        ctx.host.run(
-            ["podman", "exec", n.name, "ip", "addr", "del", f"{previous}/32", "dev", "lo"],
-            sudo=True,
-            check=False,
-        )
-    ctx.host.run(["podman", "exec", n.name, "systemctl", "enable", "--quiet", *UNITS], sudo=True)
+        podman.exec_(ctx, n.name, "ip", "addr", "del", f"{previous}/32", "dev", "lo")
+    podman.must(ctx, n.name, "systemctl", "enable", "--quiet", *UNITS)
     # restart, not start: a rerun with a changed frr.conf must load it
-    ctx.host.run(["podman", "exec", n.name, "systemctl", "restart", *UNITS], sudo=True)
+    podman.must(ctx, n.name, "systemctl", "restart", *UNITS)
     ctx.say(f"  {n.name}: FRR announces {net.vip} to {net.router} while its apiserver is ready")
 
 

@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import model
+from . import model, podman
 from .create import router
 from .datatree import data_dirs
 from .host import HostError
@@ -72,8 +72,7 @@ def init_store(ctx: Context, k8s: str) -> None:
 
 
 def node_image_present(ctx: Context, k8s: str) -> bool:
-    r = ctx.host.run(["podman", "image", "exists", node_image(k8s)], sudo=True, check=False)
-    return r.returncode == 0
+    return podman.exists(ctx, "image", node_image(k8s))
 
 
 def _digest(ctx: Context, image: str) -> str:
@@ -136,9 +135,7 @@ def ensure_router_image(ctx: Context) -> None:
     """The router image, pulled by tag or built from images/router/ when the tag is not published
     (a release that has not pushed yet, or a build number bumped locally). Refresh re-pulls."""
     image = router.image(ctx.versions)
-    present = (
-        ctx.host.run(["podman", "image", "exists", image], sudo=True, check=False).returncode == 0
-    )
+    present = podman.exists(ctx, "image", image)
     if present and not ctx.options.refresh:
         return
     if ctx.options.offline:
@@ -234,8 +231,7 @@ def listing(ctx: Context, k8s: str) -> list[tuple[str, str]]:
     rows = status(ctx, k8s)
     out: list[tuple[str, str]] = []
     for img in (node_image(k8s), router.image(ctx.versions)):
-        on_host = ctx.host.run(["podman", "image", "exists", img], sudo=True, check=False)
-        out.append(("present" if on_host.returncode == 0 else "missing", img))
+        out.append(("present" if podman.exists(ctx, "image", img) else "missing", img))
     return out + rows
 
 

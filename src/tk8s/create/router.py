@@ -4,7 +4,7 @@ and how tkctl waits for it, reads its load balancer status and reloads its confi
 import json
 import time
 
-from .. import model, versions
+from .. import model, podman, versions
 from ..phases import Context, PhaseFailed
 
 OP = "/opt/vyatta/bin/vyatta-op-cmd-wrapper"
@@ -70,20 +70,13 @@ def name(ctx: Context) -> str:
 def booted(ctx: Context) -> bool:
     """VyOS writes /tmp/vyos-config-status (0 = applied) when the boot-time config load ends;
     vyos-router.service is active long before that."""
-    r = ctx.host.run(
-        ["podman", "exec", name(ctx), "cat", "/tmp/vyos-config-status"],
-        sudo=True,
-        capture=True,
-        check=False,
-    )
+    r = podman.exec_(ctx, name(ctx), "cat", "/tmp/vyos-config-status")
     return r.returncode == 0 and r.stdout.strip() == "0"
 
 
 def backends(ctx: Context) -> list[tuple[str, str]]:
     """(server, status) for every control plane in the api backend, from `show haproxy`."""
-    r = ctx.host.run(
-        ["podman", "exec", name(ctx), OP, "show", "haproxy"], sudo=True, capture=True, check=False
-    )
+    r = podman.exec_(ctx, name(ctx), OP, "show", "haproxy")
     if r.returncode != 0:
         return []
     rows = (line.split() for line in r.stdout.splitlines())
@@ -96,12 +89,7 @@ def backends(ctx: Context) -> list[tuple[str, str]]:
 
 def _vtysh(ctx: Context, command: str) -> object | None:
     """One op-mode query as JSON, or None when the router or FRR does not answer."""
-    r = ctx.host.run(
-        ["podman", "exec", name(ctx), "vtysh", "-c", f"{command} json"],
-        sudo=True,
-        capture=True,
-        check=False,
-    )
+    r = podman.exec_(ctx, name(ctx), "vtysh", "-c", f"{command} json")
     if r.returncode != 0 or not r.stdout.strip():
         return None
     try:
@@ -250,13 +238,7 @@ def reload(ctx: Context, c: model.Cluster) -> None:
     runs in the vyattacfg group, as VyOS requires of configuration scripts: what it leaves under
     /opt/vyatta/config must stay writable to that group, not become root's."""
     wait_booted(ctx)
-    r = ctx.host.run(
-        ["podman", "exec", "-i", name(ctx), "sg", "vyattacfg", "-c", "/bin/vbash -s"],
-        sudo=True,
-        input=RELOAD,
-        capture=True,
-        check=False,
-    )
+    r = podman.exec_(ctx, name(ctx), "sg", "vyattacfg", "-c", "/bin/vbash -s", input=RELOAD)
     out = r.stdout + r.stderr
     if r.returncode != 0 or "Commit failed" in out:
         raise PhaseFailed(f"{name(ctx)} did not accept config.boot: {out.strip()[-300:]}")

@@ -6,6 +6,7 @@ volumes across restarts and reboots."""
 import hashlib
 from pathlib import Path
 
+from .. import podman
 from ..phases import Context, Phase, PhaseFailed
 from .kubeadm import kubectl
 
@@ -61,18 +62,14 @@ def gvisor_marker(ctx: Context) -> str:
     return f"/usr/local/bin/.gvisor-{ctx.versions.gvisor}"
 
 
-def _node_has(ctx: Context, node: str, path: str, flag: str = "-e") -> bool:
-    r = ctx.host.run(["podman", "exec", node, "test", flag, path], sudo=True, check=False)
-    return r.returncode == 0
-
-
 def gvisor_done(ctx: Context) -> bool:
     c = ctx.require_cluster()
     if not c.spec.gvisor:
         return True
     marker = gvisor_marker(ctx)
     nodes_ok = all(
-        _node_has(ctx, n.name, marker) and _node_has(ctx, n.name, GVISOR_CONF) for n in c.spec.nodes
+        podman.node_has(ctx, n.name, marker) and podman.node_has(ctx, n.name, GVISOR_CONF)
+        for n in c.spec.nodes
     )
     return nodes_ok and _exists(ctx, "get", "runtimeclass", "gvisor")
 
@@ -115,32 +112,21 @@ def install_gvisor_into(ctx: Context, node: str, tarball: Path | None = None) ->
     """The tarball is fetched once per run (gvisor_run passes it); a single-node call fetches it."""
     v = ctx.versions.gvisor
     marker = gvisor_marker(ctx)
-    if not _node_has(ctx, node, marker):
+    if not podman.node_has(ctx, node, marker):
         tarball = tarball or gvisor_tarball(ctx)
         # Node images published before zstd was added to the recipe cannot unpack the tarball.
-        if not _node_has(ctx, node, "/usr/bin/zstd", "-x"):
-            ctx.host.run(["podman", "exec", node, "sh", "-c", ZSTD_APT], sudo=True, capture=True)
+        if not podman.node_has(ctx, node, "/usr/bin/zstd", "-x"):
+            podman.must(ctx, node, "sh", "-c", ZSTD_APT)
         ctx.host.run(["podman", "cp", str(tarball), f"{node}:/tmp/gvisor.tar.zstd"], sudo=True)
-        ctx.host.run(
-            [
-                "podman",
-                "exec",
-                node,
-                "tar",
-                "--zstd",
-                "-xf",
-                "/tmp/gvisor.tar.zstd",
-                "-C",
-                "/usr/local/bin",
-            ],
-            sudo=True,
+        podman.must(
+            ctx, node, "tar", "--zstd", "-xf", "/tmp/gvisor.tar.zstd", "-C", "/usr/local/bin"
         )
-        ctx.host.run(["podman", "exec", node, "rm", "-f", "/tmp/gvisor.tar.zstd"], sudo=True)
-        ctx.host.run(["podman", "exec", node, "touch", marker], sudo=True)
-    if not _node_has(ctx, node, GVISOR_CONF):
+        podman.must(ctx, node, "rm", "-f", "/tmp/gvisor.tar.zstd")
+        podman.must(ctx, node, "touch", marker)
+    if not podman.node_has(ctx, node, GVISOR_CONF):
         src = ctx.paths.home / "templates" / "crio" / "20-gvisor.conf"
         ctx.host.run(["podman", "cp", str(src), f"{node}:{GVISOR_CONF}"], sudo=True)
-        ctx.host.run(["podman", "exec", node, "systemctl", "restart", "crio"], sudo=True)
+        podman.must(ctx, node, "systemctl", "restart", "crio")
         ctx.say(f"  {node}: gVisor {v} handler runsc, crio restarted")
 
 
@@ -148,7 +134,7 @@ def gvisor_run(ctx: Context) -> None:
     c = ctx.require_cluster()
     marker = gvisor_marker(ctx)
     tarball = None
-    if any(not _node_has(ctx, n.name, marker) for n in c.spec.nodes):
+    if any(not podman.node_has(ctx, n.name, marker) for n in c.spec.nodes):
         tarball = gvisor_tarball(ctx)
     for n in c.spec.nodes:
         install_gvisor_into(ctx, n.name, tarball)

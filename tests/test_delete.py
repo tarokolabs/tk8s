@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tk8s import delete, lifecycle
+from tk8s import delete, lifecycle, podman
 from tk8s.host import FakeHost, HostError, Result
 from tk8s.phases import Context, PhaseFailed, Runner
 
@@ -18,7 +18,7 @@ def everything_there(ctx: Context, host: FakeHost) -> None:
     host.files[p.systemd_dir / "demo-routes.service"] = "x"
     host.active.update({"demo.target", "demo-network.service"})
     host.podman.update(f"container:{n}" for n in (*NODES, "demo-router"))
-    host.podman.update(f"volume:{v}" for n in NODES for v in delete.node_volumes(n))
+    host.podman.update(f"volume:{v}" for n in NODES for v in podman.node_volumes(n))
     host.podman.add("network:demo")
     # done looks once (there), run looks twice (there, there), done looks again (gone, repeats)
     there = Result(0, f"{c.spec.network.pods} via 172.22.0.1\n", "")
@@ -48,7 +48,7 @@ def test_a_full_delete_removes_everything_in_order(ctx: Context, host: FakeHost)
     for n in (*NODES, "demo-router"):
         assert ["podman", "rm", "-f", n] in a
     for n in NODES:
-        for v in delete.node_volumes(n):
+        for v in podman.node_volumes(n):
             assert ["podman", "volume", "rm", "-f", v] in a
     assert ["podman", "network", "rm", "-f", "demo"] in a
     assert ["ip", "route", "del", "10.244.0.0/21"] in a

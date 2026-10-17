@@ -4,15 +4,9 @@ part is already gone", so a delete that stopped halfway is finished by running i
 
 import time
 
-from .. import model
+from .. import model, podman
 from ..create import kubeadm, router, units
-from ..delete import (
-    container_exists,
-    node_volumes,
-    remove_containers,
-    remove_volumes,
-    volume_exists,
-)
+from ..delete import remove_containers, remove_volumes
 from ..lifecycle import ClusterError, save_cluster
 from ..phases import Context, Phase, PhaseFailed, confirm
 from .common import find, require_node, unit_file, without_node
@@ -55,9 +49,7 @@ def drain_run(ctx: Context) -> None:
     if r.returncode != 0:
         why = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "unknown"
         ctx.say(f"  drain of {n} did not finish: {why}; removing it anyway")
-    ctx.host.run(
-        ["podman", "exec", n, "kubeadm", "reset", "-f"], sudo=True, capture=True, check=False
-    )
+    podman.exec_(ctx, n, "kubeadm", "reset", "-f")
     node = find(ctx.require_cluster(), n)
     if node is not None and node.role == "control-plane":
         _wait_router_forgot(ctx, node)
@@ -100,7 +92,7 @@ STOP = Phase("stop", "stop the node's unit", stop_done, stop_run)
 
 
 def container_done(ctx: Context) -> bool:
-    return not container_exists(ctx, require_node(ctx))
+    return not podman.exists(ctx, "container", require_node(ctx))
 
 
 def container_run(ctx: Context) -> None:
@@ -111,11 +103,11 @@ CONTAINER = Phase("container", "remove the node container", container_done, cont
 
 
 def volumes_done(ctx: Context) -> bool:
-    return not any(volume_exists(ctx, v) for v in node_volumes(require_node(ctx)))
+    return not any(podman.exists(ctx, "volume", v) for v in podman.node_volumes(require_node(ctx)))
 
 
 def volumes_run(ctx: Context) -> None:
-    remove_volumes(ctx, node_volumes(require_node(ctx)))
+    remove_volumes(ctx, podman.node_volumes(require_node(ctx)))
 
 
 VOLUMES = Phase("volumes", "remove the node's volumes", volumes_done, volumes_run)

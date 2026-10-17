@@ -3,6 +3,7 @@ node's systemd and CRI-O and for the router to boot and list the control planes.
 
 import time
 
+from .. import podman
 from ..datatree import owner
 from ..phases import Context, Phase, PhaseFailed
 from . import router
@@ -43,13 +44,7 @@ CNI_PLUGINS = Phase(
 
 
 def systemd_state(ctx: Context, node: str) -> str:
-    r = ctx.host.run(
-        ["podman", "exec", node, "systemctl", "is-system-running"],
-        sudo=True,
-        capture=True,
-        check=False,
-    )
-    return r.stdout.strip()
+    return podman.exec_(ctx, node, "systemctl", "is-system-running").stdout.strip()
 
 
 def up_done(ctx: Context) -> bool:
@@ -68,12 +63,10 @@ def remove_stale_volumes(ctx: Context) -> None:
     if ctx.host.exists(ctx.state_dir / "kubeconfig"):
         return
     for n in c.spec.nodes:
-        r = ctx.host.run(["podman", "container", "exists", n.name], sudo=True, check=False)
-        if r.returncode == 0:
+        if podman.exists(ctx, "container", n.name):
             continue
-        for v in (f"{n.name}-var", f"{n.name}-etc", f"{n.name}-usr-local-bin"):
-            have = ctx.host.run(["podman", "volume", "exists", v], sudo=True, check=False)
-            if have.returncode == 0:
+        for v in podman.node_volumes(n.name):
+            if podman.exists(ctx, "volume", v):
                 ctx.host.run(["podman", "volume", "rm", "-f", v], sudo=True, capture=True)
                 ctx.say(f"  removed stale volume {v}")
 
@@ -92,12 +85,7 @@ def wait_node(ctx: Context, node: str) -> None:
             )
         time.sleep(ctx.options.poll)
     for i in range(1, 61):
-        r = ctx.host.run(
-            ["podman", "exec", node, "systemctl", "is-active", "--quiet", "crio"],
-            sudo=True,
-            check=False,
-        )
-        if r.returncode == 0:
+        if podman.node_active(ctx, node, "crio"):
             ctx.say(f"  {node}: systemd {state}, crio active")
             return
         if i == 60:

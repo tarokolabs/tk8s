@@ -6,13 +6,13 @@ import pytest
 from tests.fixtures import HOME, OP, SHOW_HAPROXY, VBASH, ready_host
 from tk8s import lifecycle, model, versions
 from tk8s.create import units
-from tk8s.delete import node_volumes
 from tk8s.host import FakeHost, Result
 from tk8s.node import add as node_add
 from tk8s.node import common as node_common
 from tk8s.node import delete as node_delete
 from tk8s.paths import Paths
 from tk8s.phases import Context, Options, PhaseFailed, Runner
+from tk8s.podman import node_volumes
 
 
 def worker(n: int, ip: str, join: bool = True) -> model.Node:
