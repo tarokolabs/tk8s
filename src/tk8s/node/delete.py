@@ -64,7 +64,7 @@ def _wait_router_forgot(ctx: Context, n: model.Node) -> None:
     c = ctx.require_cluster()
     wait_for(
         ctx,
-        lambda: not router.routes_to(ctx, c, n),
+        lambda: not router.any_routes_to(ctx, c, n),
         rounds=16,
         delay=ctx.options.poll,
         failure=lambda: (
@@ -121,7 +121,7 @@ def trimmed(ctx: Context) -> model.Cluster:
 
 def units_done(ctx: Context) -> bool:
     c = trimmed(ctx)
-    return not ctx.host.exists(unit_file(ctx)) and units.done(ctx, c) and router.synced(ctx, c)
+    return not ctx.host.exists(unit_file(ctx)) and units.done(ctx, c) and router.all_synced(ctx, c)
 
 
 def units_run(ctx: Context) -> None:
@@ -134,7 +134,7 @@ def units_run(ctx: Context) -> None:
     ctx.host.run(
         ["systemctl", "reset-failed", f"{n}.service"], sudo=True, capture=True, check=False
     )
-    router.reload(ctx, trimmed(ctx))
+    router.reload_all(ctx, trimmed(ctx))
 
 
 UNITS = Phase(

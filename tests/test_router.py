@@ -8,12 +8,25 @@ from tests.fixtures import (
     VBASH,
     VTYSH_ROUTE,
     VTYSH_SUMMARY,
+    argvs,
     bgp_router_answers,
 )
 from tk8s import model
-from tk8s.create import router
+from tk8s.create import router, router_config
 from tk8s.host import FakeHost, Result
 from tk8s.phases import Context, PhaseFailed
+
+
+def r0(ctx: Context) -> model.Router:
+    return ctx.require_cluster().routers[0]
+
+
+def booted_two(host: FakeHost, name: str) -> None:
+    """One router of the two-router demo finished booting and lists the three control planes."""
+    host.responses[("podman", "exec", name, "cat", "/tmp/vyos-config-status")] = Result(
+        0, "0\n", ""
+    )
+    bgp_router_answers(host, router=name)
 
 
 def booted(host: FakeHost, haproxy: str = SHOW_HAPROXY) -> None:
@@ -29,7 +42,7 @@ def booted(host: FakeHost, haproxy: str = SHOW_HAPROXY) -> None:
 def test_backends_reads_the_server_rows_of_the_api_backend(ctx: Context, host: FakeHost) -> None:
     two = SHOW_HAPROXY + "api                   demo-control-plane-2  DOWN       0 ms         4s\n"
     host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(0, two, "")
-    assert router.backends(ctx) == [
+    assert router.backends(ctx, r0(ctx)) == [
         ("demo-control-plane-1", "UP"),
         ("demo-control-plane-2", "DOWN"),
     ]
@@ -37,7 +50,7 @@ def test_backends_reads_the_server_rows_of_the_api_backend(ctx: Context, host: F
 
 def test_backends_is_empty_before_vyos_answers(ctx: Context, host: FakeHost) -> None:
     host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(1, "", "")
-    assert router.backends(ctx) == []
+    assert router.backends(ctx, r0(ctx)) == []
 
 
 def test_wait_needs_the_boot_marker_and_every_control_plane_listed(
@@ -67,7 +80,7 @@ def test_wait_names_the_router_logs_when_vyos_never_finishes(ctx: Context, host:
 def test_reload_feeds_vyos_a_load_and_commit_script(ctx: Context, host: FakeHost) -> None:
     booted(host)
     host.responses[VBASH] = Result(0, "", "")
-    router.reload(ctx, ctx.require_cluster())
+    router.reload(ctx, r0(ctx), ctx.require_cluster())
     call = next(c for c in host.calls if c.argv[:3] == ["podman", "exec", "-i"])
     # the configuration session must run in the vyattacfg group (VyOS's own rule for scripts),
     # or the files it leaves under /opt/vyatta/config belong to root and later sessions fail
@@ -95,7 +108,7 @@ def test_reload_waits_for_the_boot_commit_to_finish_first(ctx: Context, host: Fa
         Result(0, "0\n", ""),
     ]
     host.responses[VBASH] = Result(0, "", "")
-    router.reload(ctx, ctx.require_cluster())
+    router.reload(ctx, r0(ctx), ctx.require_cluster())
     a = [c.argv for c in host.calls]
     status = [i for i, x in enumerate(a) if x[-1:] == ["/tmp/vyos-config-status"]]
     assert len(status) == 2 and status[-1] < a.index(list(VBASH))
@@ -109,7 +122,7 @@ def test_reload_fails_when_vyos_says_commit_failed_with_exit_0(
     with pytest.raises(
         PhaseFailed, match=r"demo-router did not accept config\.boot: (?s:.*)Commit failed"
     ):
-        router.reload(ctx, ctx.require_cluster())
+        router.reload(ctx, r0(ctx), ctx.require_cluster())
 
 
 def test_reload_fails_when_the_backends_do_not_follow(ctx: Context, host: FakeHost) -> None:
@@ -124,7 +137,7 @@ def test_reload_fails_when_the_backends_do_not_follow(ctx: Context, host: FakeHo
         match=r"demo-router lists demo-control-plane-1, demo-control-plane-9 as backends, "
         r"cluster\.yaml has demo-control-plane-1 \(podman exec demo-router .* show haproxy\)",
     ):
-        router.reload(ctx, ctx.require_cluster())
+        router.reload(ctx, r0(ctx), ctx.require_cluster())
 
 
 def test_synced_compares_backend_names_with_the_control_planes(
@@ -134,21 +147,21 @@ def test_synced_compares_backend_names_with_the_control_planes(
     host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(
         0, SHOW_HAPROXY, ""
     )
-    assert router.synced(ctx, c)
+    assert router.synced(ctx, r0(ctx), c)
     host.responses[("podman", "exec", "demo-router", OP, "show", "haproxy")] = Result(1, "", "")
-    assert not router.synced(ctx, c)
+    assert not router.synced(ctx, r0(ctx), c)
 
 
 def test_reload_fails_by_name_when_commit_fails(ctx: Context, host: FakeHost) -> None:
     booted(host)
     host.responses[VBASH] = Result(1, "", "Commit failed")
     with pytest.raises(PhaseFailed, match=r"demo-router did not accept config\.boot"):
-        router.reload(ctx, ctx.require_cluster())
+        router.reload(ctx, r0(ctx), ctx.require_cluster())
 
 
 def test_neighbors_and_bfd_peers_render_one_block_per_control_plane(bgp_ctx: Context) -> None:
     c = bgp_ctx.require_cluster()
-    n = router.neighbors(c)
+    n = router_config.neighbors(c)
     assert n.count("        neighbor 172.22.0.") == 3 and "neighbor 172.22.0.4 " not in n
     assert n.startswith(
         "        neighbor 172.22.0.1 {\n"
@@ -166,7 +179,7 @@ def test_neighbors_and_bfd_peers_render_one_block_per_control_plane(bgp_ctx: Con
         "        }\n"
         "        neighbor 172.22.0.2 {"
     )
-    b = router.bfd_peers(c)
+    b = router_config.bfd_peers(c)
     assert b.count("        peer 172.22.0.") == 3
     assert b.startswith(
         "        peer 172.22.0.1 {\n"
@@ -181,7 +194,7 @@ def test_neighbors_and_bfd_peers_render_one_block_per_control_plane(bgp_ctx: Con
 
 def test_peers_maps_vtysh_summary_to_control_plane_names(bgp_ctx: Context, host: FakeHost) -> None:
     bgp_router_answers(host, established=2)
-    assert router.peers(bgp_ctx, bgp_ctx.require_cluster()) == [
+    assert router.peers(bgp_ctx, r0(bgp_ctx), bgp_ctx.require_cluster()) == [
         ("demo-control-plane-1", "Established"),
         ("demo-control-plane-2", "Established"),
         ("demo-control-plane-3", "Active"),
@@ -197,16 +210,16 @@ def test_peers_lists_a_neighbor_cluster_yaml_does_not_know_by_address(
     extra = json.loads(answer.stdout)
     extra["peers"]["172.22.0.9"] = {"state": "Active"}
     host.responses[VTYSH_SUMMARY] = Result(0, json.dumps(extra), "")
-    assert ("172.22.0.9", "Active") in router.peers(bgp_ctx, bgp_ctx.require_cluster())
+    assert ("172.22.0.9", "Active") in router.peers(bgp_ctx, r0(bgp_ctx), bgp_ctx.require_cluster())
 
 
 def test_peers_is_empty_when_vtysh_fails_or_answers_garbage(
     bgp_ctx: Context, host: FakeHost
 ) -> None:
     host.responses[VTYSH_SUMMARY] = Result(1, "", "bgpd is not running")
-    assert router.peers(bgp_ctx, bgp_ctx.require_cluster()) == []
+    assert router.peers(bgp_ctx, r0(bgp_ctx), bgp_ctx.require_cluster()) == []
     host.responses[VTYSH_SUMMARY] = Result(0, "not json", "")
-    assert router.peers(bgp_ctx, bgp_ctx.require_cluster()) == []
+    assert router.peers(bgp_ctx, r0(bgp_ctx), bgp_ctx.require_cluster()) == []
 
 
 def test_nexthops_counts_the_ecmp_width_and_zero_without_a_route(
@@ -214,34 +227,34 @@ def test_nexthops_counts_the_ecmp_width_and_zero_without_a_route(
 ) -> None:
     c = bgp_ctx.require_cluster()
     bgp_router_answers(host, hops=2)
-    assert router.nexthops(bgp_ctx, c) == 2
+    assert router.nexthops(bgp_ctx, r0(bgp_ctx), c) == 2
     bgp_router_answers(host, hops=0)
-    assert router.nexthops(bgp_ctx, c) == 0
+    assert router.nexthops(bgp_ctx, r0(bgp_ctx), c) == 0
 
 
 def test_routes_to_is_an_up_backend_in_proxy_mode(ctx: Context, host: FakeHost) -> None:
     c = ctx.require_cluster()
     key = ("podman", "exec", "demo-router", OP, "show", "haproxy")
     host.responses[key] = Result(0, SHOW_HAPROXY, "")
-    assert router.routes_to(ctx, c, c.control_planes[0])
+    assert router.routes_to(ctx, r0(ctx), c, c.control_planes[0])
     gone = model.Node(
         role="control-plane", name="demo-control-plane-2", ip="172.22.0.4", cpu=2, memory="4g"
     )
     host.responses[key] = Result(
         0, SHOW_HAPROXY + "api                   demo-control-plane-2  DOWN       0 ms   4s\n", ""
     )
-    assert not router.routes_to(ctx, c, gone)
+    assert not router.routes_to(ctx, r0(ctx), c, gone)
     host.responses[key] = Result(0, SHOW_HAPROXY, "")
-    assert not router.routes_to(ctx, c, gone)  # not listed at all
+    assert not router.routes_to(ctx, r0(ctx), c, gone)  # not listed at all
 
 
 def test_routes_to_is_an_active_next_hop_in_bgp_mode(bgp_ctx: Context, host: FakeHost) -> None:
     c = bgp_ctx.require_cluster()
     bgp_router_answers(host, hops=2)
-    assert router.routes_to(bgp_ctx, c, c.control_planes[0])
-    assert not router.routes_to(bgp_ctx, c, c.control_planes[2])
+    assert router.routes_to(bgp_ctx, r0(bgp_ctx), c, c.control_planes[0])
+    assert not router.routes_to(bgp_ctx, r0(bgp_ctx), c, c.control_planes[2])
     bgp_router_answers(host, hops=0)
-    assert not router.routes_to(bgp_ctx, c, c.control_planes[0])
+    assert not router.routes_to(bgp_ctx, r0(bgp_ctx), c, c.control_planes[0])
 
 
 def test_show_path_names_the_haproxy_or_the_vip_route(ctx: Context, bgp_ctx: Context) -> None:
@@ -253,7 +266,7 @@ def test_bfd_down_names_the_control_planes_whose_session_is_not_up(
     bgp_ctx: Context, host: FakeHost
 ) -> None:
     bgp_router_answers(host, bfd_up=1)
-    assert router.bfd_down(bgp_ctx, bgp_ctx.require_cluster()) == [
+    assert router.bfd_down(bgp_ctx, r0(bgp_ctx), bgp_ctx.require_cluster()) == [
         "demo-control-plane-2",
         "demo-control-plane-3",
     ]
@@ -264,11 +277,11 @@ def test_synced_in_bgp_mode_compares_peers_with_the_control_planes(
 ) -> None:
     c = bgp_ctx.require_cluster()
     bgp_router_answers(host, established=0)  # configured is enough; sessions come up later
-    assert router.synced(bgp_ctx, c)
-    assert router.members(bgp_ctx, c)[0] == ("demo-control-plane-1", "Active")
+    assert router.synced(bgp_ctx, r0(bgp_ctx), c)
+    assert router.members(bgp_ctx, r0(bgp_ctx), c)[0] == ("demo-control-plane-1", "Active")
     one = {"peers": {"172.22.0.1": {"state": "Active"}}}
     host.responses[VTYSH_SUMMARY] = Result(0, json.dumps(one), "")
-    assert not router.synced(bgp_ctx, c)
+    assert not router.synced(bgp_ctx, r0(bgp_ctx), c)
 
 
 def test_wait_synced_in_bgp_mode_names_peers(bgp_ctx: Context, host: FakeHost) -> None:
@@ -295,6 +308,54 @@ def test_nexthops_counts_only_active_next_hops_and_survives_odd_json(
     data = json.loads(answer.stdout)
     data["172.23.0.1/32"][0]["nexthops"][2]["active"] = False
     host.responses[VTYSH_ROUTE] = Result(0, json.dumps(data), "")
-    assert router.nexthops(bgp_ctx, c) == 2
+    assert router.nexthops(bgp_ctx, r0(bgp_ctx), c) == 2
     host.responses[VTYSH_ROUTE] = Result(0, json.dumps({"172.23.0.1/32": ["garbage"]}), "")
-    assert router.nexthops(bgp_ctx, c) == 0
+    assert router.nexthops(bgp_ctx, r0(bgp_ctx), c) == 0
+
+
+# ---- two routers
+
+
+def test_vrrp_block_is_empty_with_one_router_and_differs_per_router_with_two(
+    ctx: Context, two_router_ctx: Context
+) -> None:
+    assert router_config.vrrp_block(ctx.require_cluster(), r0(ctx)) == ""
+    c = two_router_ctx.require_cluster()
+    b1, b2 = (router_config.vrrp_block(c, r) for r in c.routers)
+    for b in (b1, b2):
+        assert b.startswith("high-availability {\n") and 'vrid "10"' in b
+        assert 'interface "eth0"' in b and "address 172.22.0.253/24 {" in b
+    assert 'priority "200"' in b1 and 'preempt-delay "10"' in b1
+    assert 'priority "100"' in b2 and "preempt-delay" not in b2
+
+
+def test_reload_all_skips_a_router_whose_container_is_not_running_and_says_so(
+    two_router_ctx: Context, host: FakeHost
+) -> None:
+    c = two_router_ctx.require_cluster()
+    host.podman.add("stopped:demo-router-2")
+    booted_two(host, "demo-router-1")
+    host.responses[("podman", "exec", "-i", "demo-router-1")] = Result(0, "", "")
+    router.reload_all(two_router_ctx, c)
+    assert (
+        "  demo-router-2 is not running; it loads the new tkctl.boot when it starts" in host.lines
+    )
+    targets = [a[2] for a in argvs(host) if a[:2] == ["podman", "exec"] and a[2] != "-i"]
+    targets += [a[3] for a in argvs(host) if a[:3] == ["podman", "exec", "-i"]]
+    assert "demo-router-2" not in targets and "demo-router-1" in targets
+
+
+def test_reload_all_fails_when_no_router_is_running(
+    two_router_ctx: Context, host: FakeHost
+) -> None:
+    host.podman.update({"stopped:demo-router-1", "stopped:demo-router-2"})
+    with pytest.raises(PhaseFailed, match=r"^no router of cluster demo is running$"):
+        router.reload_all(two_router_ctx, two_router_ctx.require_cluster())
+
+
+def test_wait_waits_for_every_router(two_router_ctx: Context, host: FakeHost) -> None:
+    for name in ("demo-router-1", "demo-router-2"):
+        booted_two(host, name)
+    router.wait(two_router_ctx)
+    assert "  demo-router-1: VyOS up, 3 control plane peer(s) at 172.22.0.251" in host.lines
+    assert "  demo-router-2: VyOS up, 3 control plane peer(s) at 172.22.0.252" in host.lines

@@ -148,10 +148,11 @@ def describe_router(ctx: Context, c: model.Cluster, state: str) -> None:
     if state != "Running":
         ctx.say(f"  {label:<10}unavailable (cluster is not running)")
     else:
-        rows = router.members(ctx, c)
+        rows = router.members(ctx, c.routers[0], c)
         ctx.say(f"  {label:<10}" + (", ".join(f"{n} {s}" for n, s in rows) or "none listed"))
         if net.ha == "bgp":
-            ctx.say(f"  nexthops: {router.nexthops(ctx, c)} to {net.vip} (show ip route {net.vip})")
+            hops = router.nexthops(ctx, c.routers[0], c)
+            ctx.say(f"  nexthops: {hops} to {net.vip} (show ip route {net.vip})")
     if net.ha == "bgp" and len(c.control_planes) == 1:
         ctx.say("  note:     one control plane: nothing to spread; --control-planes 3 shows ECMP")
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from .. import model
 from ..phases import Context, Phase
 from ..render import template
-from . import router
+from . import router, router_config
 
 
 def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str]:
@@ -28,15 +28,15 @@ def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str
     )
     blocks: dict[str, object]
     if net.ha == "proxy":
-        boot, blocks = "router/tkctl-proxy.boot", {"servers": router.servers(c)}
+        boot, blocks = "router/tkctl-proxy.boot", {"servers": router_config.servers(c)}
     else:
         # the reject route at distance 254 loses to any BGP-learned VIP (distance 20); with no
         # control plane announcing, the router refuses at once instead of looping the packet
         # back to the host, whose VIP/32 route points here
         boot = "router/tkctl-bgp.boot"
         blocks = {
-            "neighbors": router.neighbors(c),
-            "bfd_peers": router.bfd_peers(c),
+            "neighbors": router_config.neighbors(c),
+            "bfd_peers": router_config.bfd_peers(c),
             "vip": net.vip,
         }
     files[state / "router" / "tkctl.boot"] = template(

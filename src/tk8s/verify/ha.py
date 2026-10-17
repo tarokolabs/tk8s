@@ -17,7 +17,7 @@ def _readyz(r: Report, endpoint: str) -> str:
 def _check_router_proxy(r: Report, c: model.Cluster, ready: str) -> None:
     endpoint = c.spec.network.router
     joined = sum(1 for n in c.control_planes if n.join)
-    listed = router.backends(r.ctx)
+    listed = router.backends(r.ctx, c.routers[0])
     up = sum(1 for _, status in listed if status.startswith("UP"))  # "UP 1/2" too
     stale = {n for n, _ in listed} != {n.name for n in c.control_planes}
     if ready == "ok" and up == joined and not stale:
@@ -36,12 +36,12 @@ def _check_router_bgp(r: Report, c: model.Cluster, ready: str) -> None:
     net = c.spec.network
     joined_names = {n.name for n in c.control_planes if n.join}
     joined = len(joined_names)
-    peers = router.peers(r.ctx, c)
+    peers = router.peers(r.ctx, c.routers[0], c)
     # a --defer-join / --no-join control plane runs FRR (session up) but announces nothing
     up = sum(1 for n, s in peers if s == "Established" and n in joined_names)
     stale = {n for n, _ in peers} != {n.name for n in c.control_planes}
-    hops = router.nexthops(r.ctx, c)
-    down = router.bfd_down(r.ctx, c)
+    hops = router.nexthops(r.ctx, c.routers[0], c)
+    down = router.bfd_down(r.ctx, c.routers[0], c)
     if ready == "ok" and up == joined and not stale and hops == joined and not down:
         r.ok(
             f"apiserver router {net.router} healthy ({up}/{joined} control planes Established, "

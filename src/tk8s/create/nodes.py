@@ -51,7 +51,7 @@ def up_done(ctx: Context) -> bool:
         return False
     if any(systemd_state(ctx, n.name) not in ("running", "degraded") for n in c.spec.nodes):
         return False
-    return router.booted(ctx) and router.synced(ctx, c)
+    return router.all_booted_and_synced(ctx, c)
 
 
 def remove_stale_volumes(ctx: Context) -> None:
