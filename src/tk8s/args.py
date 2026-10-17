@@ -39,7 +39,10 @@ def apply_preset(a: argparse.Namespace, raw: list[str]) -> str | None:
     if a.preset is None:
         return None
     for flag in PRESET_FLAGS:
-        if any(x == flag or x.startswith(flag + "=") for x in raw):
+        glued = flag == "-f"  # -fFILE is how argparse also spells -f FILE
+        if any(
+            x == flag or x.startswith(flag + "=") or (glued and x.startswith("-f")) for x in raw
+        ):
             raise UsageError(
                 f"--preset {a.preset} cannot be combined with {flag}; "
                 "use the expanded flags instead"

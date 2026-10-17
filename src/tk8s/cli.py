@@ -148,7 +148,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="tkctl", add_help=False)
     sub = ap.add_subparsers(dest="verb")
     create = sub.add_parser("create", add_help=False).add_subparsers(dest="noun")
-    add_create_flags(create.add_parser("cluster", add_help=False))
+    # no abbreviations: --work for --workers would slip past the --preset and -f no-mixing rules
+    add_create_flags(create.add_parser("cluster", add_help=False, allow_abbrev=False))
     v = sub.add_parser("verify", add_help=False).add_subparsers(dest="noun")
     vc = v.add_parser("cluster", add_help=False)
     vc.add_argument("name", nargs="?")

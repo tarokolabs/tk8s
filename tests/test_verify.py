@@ -391,3 +391,13 @@ def test_router_check_with_two_routers_fails_the_one_that_is_down(
         line.startswith("FAIL  apiserver router demo-router-2 (172.22.0.252) — ")
         for line in host.lines
     )
+
+
+def test_router_vrrp_check_fails_on_a_fault_state(two_router_ctx: Context, host: FakeHost) -> None:
+    two_routers_healthy(two_router_ctx, host)
+    vrrp_answers(host, {"demo-router-1": "FAULT", "demo-router-2": "MASTER"})
+    assert verify.run(two_router_ctx, only="router") == 1
+    assert any(
+        line.startswith("FAIL  router VRRP — demo-router-1 FAULT, demo-router-2 MASTER;")
+        for line in host.lines
+    )

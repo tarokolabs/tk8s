@@ -168,6 +168,15 @@ def resolve(
             "pass --allow-overlap to force"
         )
     s = u.spec
+    want_routers = (s.network.routers if s.network else None) or 1
+    if existing is not None and want_routers != existing.spec.network.routers:
+        # a resume re-renders the units but removes none: the old router's unit would stay next
+        # to the new ones, two claimants of the floating address
+        raise PlanError(
+            f"cluster {u.metadata.name} is being created with routers: "
+            f"{existing.spec.network.routers}; rerun with the same --routers (or --preset), "
+            f"or delete it first: tkctl delete cluster {u.metadata.name}"
+        )
     spec = model.Spec(
         kubernetes=s.kubernetes or k8s_default,
         cni=s.cni,

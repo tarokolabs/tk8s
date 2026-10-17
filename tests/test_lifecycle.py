@@ -404,3 +404,12 @@ def test_describe_one_router_cluster_has_no_routers_or_stop_line(
     bgp_router_answers(host)
     lifecycle.describe(bgp_ctx, c, None)
     assert not any(line.startswith(("  routers:", "  stop:")) for line in host.lines)
+
+
+def test_stop_names_both_router_units(two_router_ctx: Context, host: FakeHost) -> None:
+    """systemctl waits only for the units it is given: with two routers both must be named, and
+    the single-router name (which does not exist) must not be."""
+    lifecycle.stop(two_router_ctx, two_router_ctx.require_cluster())
+    stops = [k for k in host.calls if k.argv[:2] == ["systemctl", "stop"]]
+    assert stops[0].argv[2:5] == ["demo.target", "demo-router-1.service", "demo-router-2.service"]
+    assert "demo-router.service" not in stops[0].argv

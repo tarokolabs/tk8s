@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.fixtures import DEMO_USER, resolved, two_router_user
+from tests.fixtures import DEMO_USER, bgp_user, resolved, two_router_user
 from tk8s import model
 from tk8s.create.plan import (
     PlanError,
@@ -308,3 +308,15 @@ def test_cluster_yaml_writes_routers_right_after_ha() -> None:
     assert "    ha: bgp\n    routers: 2\n    vip: 172.23.0.1\n" in model.dumps(
         resolved(two_router_user())
     )
+
+
+def test_resume_refuses_a_different_router_count() -> None:
+    """An interrupted create resumed with another --routers would render the new routers next to
+    the old one's unit, two claimants of the floating address: refuse, point at delete."""
+    recorded = resolved(bgp_user())
+    with pytest.raises(
+        PlanError,
+        match=r"cluster demo is being created with routers: 1; rerun with the same --routers "
+        r"\(or --preset\), or delete it first: tkctl delete cluster demo",
+    ):
+        resolved(two_router_user(), existing=recorded)

@@ -748,3 +748,14 @@ def test_preset_refuses_a_topology_flag_even_with_the_same_value(
 def test_routers_flag_reaches_cluster_yaml(capsys: pytest.CaptureFixture[str]) -> None:
     rc, out = run(capsys, "create", "cluster", "demo", "--routers", "2", "--dry-run")
     assert rc == 0 and "    ha: proxy\n    routers: 2\n" in out
+
+
+def test_preset_cannot_be_bypassed_by_an_abbreviated_or_glued_flag(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """argparse would accept --work for --workers and -fx.yaml for -f x.yaml; neither may slip
+    past the no-mixing rule (the first is refused outright, the second is seen as -f)."""
+    rc, out = run(capsys, "create", "cluster", "demo", "--preset", "ha", "--work", "5", "--dry-run")
+    assert rc == 2 and "unrecognized arguments: --work 5" in out
+    rc, out = run(capsys, "create", "cluster", "demo", "--preset", "ha", "-fx.yaml", "--dry-run")
+    assert rc == 1 and "--preset ha cannot be combined with -f" in out
