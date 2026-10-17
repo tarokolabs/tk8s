@@ -102,8 +102,8 @@ def wait_router_ready(ctx: Context) -> None:
         rounds=30,
         delay=ctx.options.poll,
         failure=lambda: (
-            f"the apiserver at {endpoint} (via {c.name}-router) answered no readyz within "
-            f"60 s (podman exec {c.name}-router {router.show(c)})"
+            f"the apiserver at {endpoint} (via {' or '.join(r.name for r in c.routers)}) "
+            f"answered no readyz within 60 s (podman exec {c.routers[0].name} {router.show(c)})"
         ),
     )
 

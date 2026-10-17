@@ -60,18 +60,23 @@ def drain_run(ctx: Context) -> None:
 def _wait_router_forgot(ctx: Context, n: model.Node) -> None:
     """kubeadm reset took this control plane's apiserver down, but the router keeps sending it
     connections for a few seconds (haproxy's check in proxy mode, the health timer's withdrawal
-    in bgp mode); a kubectl delete node in that window can land on the dead one."""
+    in bgp mode); a kubectl delete node in that window can land on the dead one. Every running
+    router has to let go (a stopped one has no say and gets the new config at its next boot)."""
     c = ctx.require_cluster()
-    wait_for(
-        ctx,
-        lambda: not router.any_routes_to(ctx, c, n),
-        rounds=16,
-        delay=ctx.options.poll,
-        failure=lambda: (
-            f"{c.name}-router still sends apiserver connections to {n.name} after 30 s "
-            f"(podman exec {c.name}-router {router.show_path(c)})"
-        ),
-    )
+    last: list[str] = []
+
+    def forgotten() -> bool:
+        last[:] = router.any_routes_to(ctx, c, n)
+        return not last
+
+    def still() -> str:
+        verb = "sends" if len(last) == 1 else "send"
+        return (
+            f"{', '.join(last)} still {verb} apiserver connections to {n.name} after 30 s "
+            f"(podman exec {last[0]} {router.show_path(c)})"
+        )
+
+    wait_for(ctx, forgotten, rounds=16, delay=ctx.options.poll, failure=still)
 
 
 DRAIN = Phase(
