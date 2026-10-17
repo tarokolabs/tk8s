@@ -75,6 +75,12 @@ def node_image_present(ctx: Context, k8s: str) -> bool:
     return podman.exists(ctx, "image", node_image(k8s))
 
 
+def cilium_cli_present(ctx: Context) -> bool:
+    return (
+        ctx.host.run(["cilium", "version", "--client"], capture=True, check=False).returncode == 0
+    )
+
+
 def _digest(ctx: Context, image: str) -> str:
     r = ctx.host.run(
         ["podman", "image", "inspect", "--format", "{{.Digest}}", image],
@@ -180,7 +186,7 @@ def ensure_router_image(ctx: Context) -> None:
 
 
 def ensure_cilium_cli(ctx: Context) -> None:
-    if ctx.host.run(["cilium", "version", "--client"], capture=True, check=False).returncode == 0:
+    if cilium_cli_present(ctx):
         return
     if ctx.options.offline:
         raise ImagesError("cilium CLI is not installed and TK_OFFLINE=1 forbids downloading it")
@@ -240,7 +246,14 @@ def wanted(ctx: Context, k8s: str) -> list[str]:
 
 def listing(ctx: Context, k8s: str) -> list[tuple[str, str]]:
     """What `get images` prints: the node and router images in the host's podman storage first,
-    then the store's status()."""
+    then the store's status(). Only looks: status() needs the node image and the cilium CLI to
+    compute the list, and this names tkctl pull images when either is missing."""
+    if not node_image_present(ctx, k8s):
+        raise ImagesError(
+            f"node image {node_image(k8s)} is not on this host; run tkctl pull images --k8s {k8s}"
+        )
+    if not cilium_cli_present(ctx):
+        raise ImagesError(f"cilium CLI is not installed; run tkctl pull images --k8s {k8s}")
     rows = status(ctx, k8s)
     out: list[tuple[str, str]] = []
     for img in (node_image(k8s), router.image(ctx.versions)):
@@ -250,14 +263,8 @@ def listing(ctx: Context, k8s: str) -> list[tuple[str, str]]:
 
 def status(ctx: Context, k8s: str) -> list[tuple[str, str]]:
     """("present" | "missing", image) for every wanted image of the store, in list order. Only
-    looks: wanted() needs the node image and the cilium CLI, and names tkctl pull images when
-    either is missing."""
-    if not node_image_present(ctx, k8s):
-        raise ImagesError(
-            f"node image {node_image(k8s)} is not on this host; run tkctl pull images --k8s {k8s}"
-        )
-    if ctx.host.run(["cilium", "version", "--client"], capture=True, check=False).returncode != 0:
-        raise ImagesError(f"cilium CLI is not installed; run tkctl pull images --k8s {k8s}")
+    looks; the caller makes sure the node image and the cilium CLI, which wanted() runs, are on
+    the host."""
     env = _store_env(ctx.paths, k8s)
     have_store = ctx.host.exists(conf_path(ctx.paths, k8s)) and ctx.host.exists(
         store_dir(ctx.paths, k8s)

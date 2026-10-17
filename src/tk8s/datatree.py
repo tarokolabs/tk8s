@@ -21,14 +21,14 @@ def owner(ctx: Context) -> str:
 
 def data_dirs(ctx: Context) -> None:
     p = ctx.paths
-    me = owner(ctx)
+    mine = owner(ctx)
     for d in (p.data_dir, p.clusters_dir, p.cni_dir, p.images_dir, p.cache_dir):
         if not ctx.host.exists(d):
-            ctx.host.mkdir(d, sudo=True, owner=me)
+            ctx.host.mkdir(d, sudo=True, owner=mine)
         elif not ctx.host.writable(d):
             uid = ctx.host.run(["stat", "-c", "%u", str(d)], capture=True).stdout.strip()
             if uid == "0":
-                ctx.host.run(["chown", me, str(d)], sudo=True)
+                ctx.host.run(["chown", mine, str(d)], sudo=True)
             else:
                 name = ctx.host.run(["stat", "-c", "%U", str(d)], capture=True).stdout.strip()
                 me = ctx.host.run(["id", "-un"], capture=True).stdout.strip()

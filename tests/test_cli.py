@@ -379,6 +379,8 @@ def test_verify_cluster_verb(
 ) -> None:
     from tk8s import verify
 
+    rc, out = run(capsys, "verify", "cluster")
+    assert rc == 1 and "usage: tkctl verify cluster NAME [--phase P]" in out
     rc, out = run(capsys, "verify", "cluster", "nope")
     assert rc == 1
     assert f"cluster nope not found under {data_dir}/clusters (tkctl get clusters)" in out

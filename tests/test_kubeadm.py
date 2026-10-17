@@ -78,6 +78,8 @@ def test_init_runs_kubeadm_stores_the_key_and_waits_for_the_router(
         "https://172.22.0.253:6443/readyz",
     ]
     assert "  demo-control-plane-1 initialized" in host.lines
+    # a fresh init proved itself; only a resume asks whether an earlier init got to the end
+    assert not any(c.argv[-2:] == ["configmap", "kubeadm-config"] for c in host.calls)
 
 
 def test_init_is_skipped_when_admin_conf_exists_but_still_waits_for_the_router(

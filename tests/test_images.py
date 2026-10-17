@@ -347,3 +347,27 @@ def test_get_images_without_the_node_image_says_what_to_run(ctx: Context, host: 
         match=rf"node image {NODE} is not on this host; run tkctl pull images --k8s {K8S}",
     ):
         images.listing(ctx, K8S)
+
+
+def test_images_phase_is_not_done_without_the_router_image(ctx: Context, host: FakeHost) -> None:
+    """The store can be complete while the router image is not on the host (a bumped VyOS build);
+    the phase must run and pull it, not say already done."""
+    sources(host)
+    host.dirs.add(images.store_dir(ctx.paths, K8S))
+    host.files[images.conf_path(ctx.paths, K8S)] = images.storage_conf(ctx.paths, K8S)
+    router_image = f"ghcr.io/tarokolabs/tk8s/router:{ctx.versions.vyos}"
+    host.responses[("podman", "image", "exists", router_image)] = [MISSING, MISSING, PRESENT]
+    assert not images_phase.done(ctx)
+    images_phase.run(ctx)
+    assert ["podman", "pull", router_image] in [c.argv for c in host.calls]
+    assert images_phase.done(ctx)
+
+
+def test_images_phase_is_not_done_without_the_cilium_cli(ctx: Context, host: FakeHost) -> None:
+    """An ensure that died between the node image and the cilium CLI leaves a host the phase
+    must repair on the next create, not abort from inside done()."""
+    sources(host)
+    host.dirs.add(images.store_dir(ctx.paths, K8S))
+    host.files[images.conf_path(ctx.paths, K8S)] = images.storage_conf(ctx.paths, K8S)
+    host.responses[("cilium", "version", "--client")] = MISSING
+    assert not images_phase.done(ctx)
