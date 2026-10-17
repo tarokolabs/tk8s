@@ -147,6 +147,19 @@ def tree(phases: list[Phase], indent: str = "") -> list[str]:
     return out
 
 
+def confirm(ctx: Context, question: str, aborted: type[Exception]) -> None:
+    """A [y/N] prompt, skipped under --yes / TK_ASSUME_YES; anything but y (EOF included) aborts
+    with the caller's exception type."""
+    if ctx.options.assume_yes:
+        return
+    try:
+        answer = input(question)
+    except EOFError:
+        answer = ""
+    if answer.strip().lower() != "y":
+        raise aborted("aborted")
+
+
 def tk8s_version(home: Path) -> str:
     """The checkout's version, for status.tk8s and `tkctl version`."""
     try:

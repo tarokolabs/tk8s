@@ -5,7 +5,7 @@ import pytest
 from tk8s import versions
 from tk8s.host import FakeHost, Result
 from tk8s.paths import Paths
-from tk8s.phases import Context, Options, Phase, PhaseFailed, Runner, tree
+from tk8s.phases import Context, Options, Phase, PhaseFailed, Runner, confirm, tree
 
 HOME = Path(__file__).resolve().parents[1]
 
@@ -186,3 +186,25 @@ def test_only_accepts_a_leaf_name_as_well_as_the_full_path(tmp_path: Path) -> No
     assert (sa["runs"], sb["runs"]) == (0, 1)
     Runner([parent], only="p/a").run(ctx)
     assert (sa["runs"], sb["runs"]) == (1, 1)
+
+
+def test_confirm_takes_y_refuses_the_rest_and_eof(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, _ = make_ctx(tmp_path)
+    answers = iter(["y", "n", ""])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    confirm(ctx, "Delete it? [y/N] ", PhaseFailed)
+    with pytest.raises(PhaseFailed, match="aborted"):
+        confirm(ctx, "Delete it? [y/N] ", PhaseFailed)
+    with pytest.raises(PhaseFailed, match="aborted"):
+        confirm(ctx, "Delete it? [y/N] ", PhaseFailed)
+
+    def eof(prompt: str) -> str:
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", eof)
+    with pytest.raises(PhaseFailed, match="aborted"):
+        confirm(ctx, "Delete it? [y/N] ", PhaseFailed)
+    ctx.options.assume_yes = True
+    confirm(ctx, "never asked", PhaseFailed)

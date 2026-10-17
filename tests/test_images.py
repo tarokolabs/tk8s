@@ -308,3 +308,17 @@ def test_status_makes_sure_the_router_image_is_on_the_host(ctx: Context, host: F
     images.status(ctx, K8S)
     image = f"ghcr.io/tarokolabs/tk8s/router:{ctx.versions.vyos}"
     assert ["podman", "image", "exists", image] in [c.argv for c in host.calls]
+
+
+def test_prune_aborts_quietly_on_eof(
+    ctx: Context, host: FakeHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host.dirs.add(images.store_dir(ctx.paths, K8S))
+    (ctx.paths.images_dir / K8S).mkdir(parents=True)
+
+    def eof(prompt: str) -> str:
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", eof)
+    with pytest.raises(images.ImagesError, match="aborted"):
+        images.prune(ctx, K8S)

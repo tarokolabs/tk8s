@@ -131,19 +131,19 @@ def test_not_found_when_nothing_is_there(tmp_path: Path) -> None:
 def test_confirm_aborts_on_anything_but_y(ctx: Context, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("builtins.input", lambda prompt: "n")
     with pytest.raises(lifecycle.ClusterError, match=r"^aborted$"):
-        delete.confirm(ctx)
+        delete.confirm_delete(ctx)
 
     def eof(prompt: str) -> str:
         raise EOFError
 
     monkeypatch.setattr("builtins.input", eof)  # stdin closed (a script): never a yes
     with pytest.raises(lifecycle.ClusterError, match=r"^aborted$"):
-        delete.confirm(ctx)
+        delete.confirm_delete(ctx)
     monkeypatch.setattr("builtins.input", lambda prompt: "Y")
-    delete.confirm(ctx)
+    delete.confirm_delete(ctx)
     ctx.options.assume_yes = True
     monkeypatch.setattr("builtins.input", eof)
-    delete.confirm(ctx)  # never asks
+    delete.confirm_delete(ctx)  # never asks
 
 
 def test_fallback_removes_a_v2026_10_lb_container_like_a_node(tmp_path: Path) -> None:

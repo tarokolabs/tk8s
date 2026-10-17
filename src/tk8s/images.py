@@ -13,16 +13,13 @@ from . import model
 from .create import router
 from .datatree import data_dirs
 from .host import HostError
+from .model import node_image
 from .paths import Paths
-from .phases import Context
+from .phases import Context, confirm
 
 
 class ImagesError(Exception):
     pass
-
-
-def node_image(k8s: str) -> str:
-    return f"ghcr.io/tarokolabs/tk8s/node:v{k8s}"
 
 
 def store_dir(paths: Paths, k8s: str) -> Path:
@@ -322,13 +319,11 @@ def prune(ctx: Context, k8s: str) -> None:
         raise ImagesError(
             f"no image store for Kubernetes {k8s} under {ctx.paths.images_dir} (tkctl get images)"
         )
-    if not ctx.options.assume_yes:
-        answer = input(
-            f"Delete the shared image store for Kubernetes {k8s} under {ctx.paths.images_dir}? "
-            "[y/N] "
-        )
-        if answer.strip().lower() != "y":
-            raise ImagesError("aborted")
+    confirm(
+        ctx,
+        f"Delete the shared image store for Kubernetes {k8s} under {ctx.paths.images_dir}? [y/N] ",
+        ImagesError,
+    )
     with with_lock(ctx.paths.images_dir / f"{k8s}.lock"):
         using = clusters_using(ctx.paths, k8s)
         if using:

@@ -500,13 +500,22 @@ def test_delete_cluster_verb(
     assert rc == 1 and "cluster nothing not found: no state under" in out and "no network" in out
     rc, out = run(capsys, "delete", "cluster")
     assert rc == 1 and "usage: tkctl delete cluster NAME [--yes]" in out
-    monkeypatch.setenv("TK_ASSUME_YES", "1")
     (state / "cluster.yaml").write_text("metadata: {name: demo}\nspec: {runtime: crio}\n")
     host.dirs.add(state)
-    rc, out = run(capsys, "delete", "cluster", "demo")
+    rc, out = run(capsys, "delete", "cluster", "demo", "--yes")
     assert (
         rc == 0 and "cluster.yaml" in out and "cluster demo deleted" in out
     )  # reported, not fatal
+
+
+def test_tk_assume_yes_is_read_once_in_make_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tk8s import verbs
+
+    monkeypatch.delenv("TK_ASSUME_YES", raising=False)
+    assert not verbs.make_context().options.assume_yes
+    assert verbs.make_context(assume_yes=True).options.assume_yes
+    monkeypatch.setenv("TK_ASSUME_YES", "1")
+    assert verbs.make_context().options.assume_yes
 
 
 def test_node_verbs(

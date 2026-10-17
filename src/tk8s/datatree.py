@@ -12,17 +12,23 @@ class PreflightError(Exception):
     pass
 
 
-def data_dirs(ctx: Context) -> None:
-    p = ctx.paths
+def owner(ctx: Context) -> str:
+    """uid:gid of the user running tkctl, for directories root creates on their behalf."""
     uid = ctx.host.run(["id", "-u"], capture=True).stdout.strip()
     gid = ctx.host.run(["id", "-g"], capture=True).stdout.strip()
+    return f"{uid}:{gid}"
+
+
+def data_dirs(ctx: Context) -> None:
+    p = ctx.paths
+    me = owner(ctx)
     for d in (p.data_dir, p.clusters_dir, p.cni_dir, p.images_dir, p.cache_dir):
         if not ctx.host.exists(d):
-            ctx.host.mkdir(d, sudo=True, owner=f"{uid}:{gid}")
+            ctx.host.mkdir(d, sudo=True, owner=me)
         elif not ctx.host.writable(d):
-            owner = ctx.host.run(["stat", "-c", "%u", str(d)], capture=True).stdout.strip()
-            if owner == "0":
-                ctx.host.run(["chown", f"{uid}:{gid}", str(d)], sudo=True)
+            uid = ctx.host.run(["stat", "-c", "%u", str(d)], capture=True).stdout.strip()
+            if uid == "0":
+                ctx.host.run(["chown", me, str(d)], sudo=True)
             else:
                 name = ctx.host.run(["stat", "-c", "%U", str(d)], capture=True).stdout.strip()
                 me = ctx.host.run(["id", "-un"], capture=True).stdout.strip()

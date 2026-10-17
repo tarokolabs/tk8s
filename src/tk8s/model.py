@@ -68,6 +68,10 @@ class NodeRequest(Strict):
     memory: str | None = Field(default=None, pattern=MEMORY)
 
 
+def node_image(k8s: str) -> str:
+    return f"ghcr.io/tarokolabs/tk8s/node:v{k8s}"
+
+
 # ---- what the platform keeps in <state dir>/cluster.yaml
 
 
@@ -151,7 +155,7 @@ class Cluster(Strict):
 
     @property
     def node_image(self) -> str:
-        return f"ghcr.io/tarokolabs/tk8s/node:v{self.spec.kubernetes}"
+        return node_image(self.spec.kubernetes)
 
 
 # ---- YAML in

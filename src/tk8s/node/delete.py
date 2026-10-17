@@ -15,19 +15,16 @@ from ..delete import (
     volume_exists,
 )
 from ..lifecycle import ClusterError, save_cluster
-from ..phases import Context, Phase, PhaseFailed
+from ..phases import Context, Phase, PhaseFailed, confirm
 from .common import find, require_node, unit_file, without_node
 
 
 def confirm_delete(ctx: Context) -> None:
-    if ctx.options.assume_yes:
-        return
-    try:
-        answer = input(f"Delete node {require_node(ctx)} from cluster {ctx.cluster_name}? [y/N] ")
-    except EOFError:
-        answer = ""
-    if answer.strip().lower() != "y":
-        raise ClusterError("aborted")
+    confirm(
+        ctx,
+        f"Delete node {require_node(ctx)} from cluster {ctx.cluster_name}? [y/N] ",
+        ClusterError,
+    )
 
 
 def node_object_exists(ctx: Context, name: str) -> bool:

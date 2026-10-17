@@ -3,6 +3,7 @@ node's systemd and CRI-O and for the router to boot and list the control planes.
 
 import time
 
+from ..datatree import owner
 from ..phases import Context, Phase, PhaseFailed
 from . import router
 
@@ -111,9 +112,7 @@ def up_run(ctx: Context) -> None:
     ctx.host.mkdir(ctx.state_dir / "storage")
     ctx.host.mkdir(ctx.state_dir / "logs")
     if not ctx.host.exists(ctx.paths.wulin_dir):
-        uid = ctx.host.run(["id", "-u"], capture=True).stdout.strip()
-        gid = ctx.host.run(["id", "-g"], capture=True).stdout.strip()
-        ctx.host.mkdir(ctx.paths.wulin_dir, sudo=True, owner=f"{uid}:{gid}")
+        ctx.host.mkdir(ctx.paths.wulin_dir, sudo=True, owner=owner(ctx))
     remove_stale_volumes(ctx)
     ctx.host.run(["systemctl", "daemon-reload"], sudo=True)
     ctx.host.run(["systemctl", "reset-failed", f"{c.name}*"], sudo=True, check=False)

@@ -135,17 +135,10 @@ def init_done(ctx: Context) -> bool:
 
 def init_run(ctx: Context) -> None:
     """kubeadm init on the first control plane; keep the certificate key for the other control
-    planes; wait until the router sees the apiserver."""
+    planes; wait until the router sees the apiserver (a resume right after a restart: the
+    apiserver may still be coming up) before judging whether init completed."""
     cp = ctx.require_cluster().first_control_plane.name
     if _initialised(ctx, cp):
-        wait_router_ready(
-            ctx
-        )  # a resume right after a restart: the apiserver may still be coming up
-        if not _completed(ctx, cp):
-            raise PhaseFailed(
-                f"kubeadm init on {cp} did not complete (admin.conf exists but the cluster was "
-                "never bootstrapped); delete the cluster and create it again"
-            )
         ctx.say(f"  {cp} already initialized")
     else:
         ctx.say(f"  kubeadm init on {cp} ...")
@@ -173,6 +166,11 @@ def init_run(ctx: Context) -> None:
         save_certificate_key(ctx, m.group(1))
         ctx.say(f"  {cp} initialized")
     wait_router_ready(ctx)
+    if not _completed(ctx, cp):
+        raise PhaseFailed(
+            f"kubeadm init on {cp} did not complete (admin.conf exists but the cluster was "
+            "never bootstrapped); delete the cluster and create it again"
+        )
 
 
 INIT = Phase("init", "kubeadm init on the first control plane", init_done, init_run)

@@ -333,6 +333,8 @@ def test_init_already_done_waits_for_the_apiserver_before_judging_completion(
         if c.argv[:4] == ["podman", "exec", "demo-control-plane-1", "kubectl"] and i > curl_at
     )
     assert curl_at < cm_at
+    # one readyz wait (the blip, then ok), not one per branch
+    assert len([c for c in host.calls if c.argv[:1] == ["curl"]]) == 2
 
 
 def test_certificate_key_fresh_ignores_the_stored_key(ctx: Context, host: FakeHost) -> None:

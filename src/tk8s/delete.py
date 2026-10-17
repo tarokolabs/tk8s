@@ -6,7 +6,7 @@ cluster.yaml (an interrupted create, a cleanup by hand) is deleted from what is 
 from pathlib import Path
 
 from .lifecycle import ClusterError
-from .phases import Context, Phase
+from .phases import Context, Phase, confirm
 
 
 def found(ctx: Context) -> bool:
@@ -19,18 +19,13 @@ def found(ctx: Context) -> bool:
     )
 
 
-def confirm(ctx: Context) -> None:
-    if ctx.options.assume_yes:
-        return
-    try:
-        answer = input(
-            f"Delete cluster {ctx.cluster_name} including its PVC data under "
-            f"{ctx.state_dir}/storage? [y/N] "
-        )
-    except EOFError:
-        answer = ""
-    if answer.strip().lower() != "y":
-        raise ClusterError("aborted")
+def confirm_delete(ctx: Context) -> None:
+    confirm(
+        ctx,
+        f"Delete cluster {ctx.cluster_name} including its PVC data under "
+        f"{ctx.state_dir}/storage? [y/N] ",
+        ClusterError,
+    )
 
 
 def node_names(ctx: Context) -> list[str]:

@@ -134,7 +134,7 @@ def cmd_delete_cluster(a: argparse.Namespace) -> int:
     if not a.name:
         raise UsageError("usage: tkctl delete cluster NAME [--yes]")
     name = validate_name(a.name)
-    ctx = make_context(assume_yes=a.yes or os.environ.get("TK_ASSUME_YES") == "1")
+    ctx = make_context(assume_yes=a.yes)
     ctx.name = name
     try:
         lifecycle.load_cluster(ctx, name)
@@ -147,7 +147,7 @@ def cmd_delete_cluster(a: argparse.Namespace) -> int:
             f"cluster {name} not found: no state under {ctx.paths.clusters_dir}, no units, "
             "no network (tkctl get clusters)"
         )
-    delete.confirm(ctx)
+    delete.confirm_delete(ctx)
     Runner([delete.PHASE], only=a.phase, record=False).run(ctx)
     if a.phase:
         return 0
@@ -215,7 +215,7 @@ def cmd_delete_node(a: argparse.Namespace) -> int:
     if not a.cluster or not a.node:
         raise UsageError("usage: tkctl delete node CLUSTER NODE [--yes]")
     validate_node_name(a.node)
-    ctx = make_context(assume_yes=a.yes or os.environ.get("TK_ASSUME_YES") == "1")
+    ctx = make_context(assume_yes=a.yes)
     c = running_cluster(ctx, a.cluster)
     ctx.node = a.node
     # entry is the last phase: an interrupted delete still finds the node
