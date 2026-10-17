@@ -206,21 +206,15 @@ def load_user_file(path: Path) -> UserCluster:
     return load_user_text(path.read_text(), str(path))
 
 
-def load_text(
-    text: str, where: str = "cluster.yaml", *, create_complete_marker: bool = False
-) -> Cluster:
+def load_text(text: str, where: str = "cluster.yaml") -> Cluster:
     try:
-        c = Cluster.model_validate(_parse(text, where))
+        return Cluster.model_validate(_parse(text, where))
     except ValidationError as err:
         raise ClusterFileError(_first_error(where, err)) from err
-    if c.status is None and create_complete_marker:
-        # A cluster created before status existed: the marker file said "complete".
-        c = c.model_copy(update={"status": Status(phase="Ready", tk8s="pre-status")})
-    return c
 
 
-def load(path: Path, *, create_complete_marker: bool = False) -> Cluster:
-    return load_text(path.read_text(), str(path), create_complete_marker=create_complete_marker)
+def load(path: Path) -> Cluster:
+    return load_text(path.read_text(), str(path))
 
 
 # ---- YAML out

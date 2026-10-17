@@ -19,23 +19,20 @@ class ClusterError(Exception):
 
 
 def load_cluster(ctx: Context, name: str) -> model.Cluster:
-    """cluster.yaml of an existing cluster. A cluster created before `status` existed is Ready
-    while its .create-complete marker is there; the first write back retires the marker."""
-    state = ctx.paths.state_dir(name)
-    path = state / "cluster.yaml"
+    """cluster.yaml of an existing cluster."""
+    path = ctx.paths.state_dir(name) / "cluster.yaml"
     if not path.exists():
         raise ClusterError(
             f"cluster {name} not found under {ctx.paths.clusters_dir} (tkctl get clusters)"
         )
     ctx.name = name
-    ctx.cluster = model.load(path, create_complete_marker=(state / ".create-complete").exists())
+    ctx.cluster = model.load(path)
     return ctx.cluster
 
 
 def save_cluster(ctx: Context, cluster: model.Cluster) -> None:
     ctx.cluster = cluster
     ctx.host.write(ctx.state_dir / "cluster.yaml", model.dumps(cluster))
-    ctx.host.remove(ctx.state_dir / ".create-complete")
 
 
 def state_of(ctx: Context, c: model.Cluster) -> str:
@@ -65,7 +62,7 @@ def list_clusters(ctx: Context) -> None:
             )
             continue
         try:
-            c = model.load(path, create_complete_marker=(path.parent / ".create-complete").exists())
+            c = model.load(path)
         except model.ClusterFileError as err:
             ctx.say(f"{name:<12} {err}")  # one bad file must not hide the other clusters
             continue

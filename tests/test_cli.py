@@ -160,6 +160,7 @@ TAKEN = (
     "lb_range: 172.22.0.200-172.22.0.219, pods: 10.244.0.0/21, services: 10.98.0.0/24}\n"
     "  nodes: [{role: control-plane, name: taken-control-plane-1, ip: 172.22.0.1, cpu: 2, "
     "memory: 4g, join: true}]\n"
+    "status: {phase: Ready, tk8s: test}\n"
 )
 
 
@@ -168,7 +169,6 @@ def test_existing_cluster_is_refused_and_indices_come_from_the_real_dir(
 ) -> None:
     taken = data_dir / "clusters" / "taken"
     taken.mkdir(parents=True)
-    (taken / ".create-complete").touch()
     (taken / "cluster.yaml").write_text(TAKEN)
     rc, out = run(capsys, "create", "cluster", "taken", "--dry-run")
     assert rc == 1 and "cluster taken already exists; delete it first or pick another name" in out

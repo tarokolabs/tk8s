@@ -60,14 +60,6 @@ def test_status_is_dumped_after_spec() -> None:
     assert text.index("spec:") < text.index("status:")
 
 
-def test_missing_status_with_marker_is_ready(tmp_path: Path) -> None:
-    p = tmp_path / "cluster.yaml"
-    p.write_text(GOOD)
-    assert model.load(p).status is None
-    c = model.load(p, create_complete_marker=True)
-    assert c.status is not None and c.status.phase == "Ready" and c.status.tk8s == "pre-status"
-
-
 def test_duplicate_keys_are_refused(tmp_path: Path) -> None:
     p = tmp_path / "c.yaml"
     p.write_text("metadata: {name: a}\nmetadata: {name: b}\nspec: {nodes: []}\n")

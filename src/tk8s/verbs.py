@@ -86,27 +86,19 @@ def cmd_verify(a: argparse.Namespace) -> int:
     if a.list_phases:
         print("\n".join(tree(verify.PHASES)))
         return 0
-    if not a.name:
-        raise UsageError("usage: tkctl verify cluster NAME [--phase P]")
-    name = validate_name(a.name)
-    ctx = make_context()
-    state = ctx.paths.state_dir(name)
-    if not (state / "cluster.yaml").exists():
-        raise UsageError(
-            f"cluster {name} not found under {ctx.paths.clusters_dir} (tkctl get clusters)"
-        )
-    marker = (state / ".create-complete").exists()
-    ctx.cluster = model.load(state / "cluster.yaml", create_complete_marker=marker)
+    ctx = cluster_context(a.name, "verify", usage="usage: tkctl verify cluster NAME [--phase P]")
     return 1 if verify.run(ctx, only=a.phase) else 0
 
 
 # ---- get clusters, describe, stop, start, use
 
 
-def cluster_context(name: str | None, verb: str, *, quiet: bool = False) -> Context:
+def cluster_context(
+    name: str | None, verb: str, *, quiet: bool = False, usage: str | None = None
+) -> Context:
     """The context of an existing cluster, for the verbs that take `cluster NAME`."""
     if not name:
-        raise UsageError(f"usage: tkctl {verb} cluster NAME")
+        raise UsageError(usage or f"usage: tkctl {verb} cluster NAME")
     ctx = make_context(quiet=quiet)
     lifecycle.load_cluster(ctx, validate_name(name))
     return ctx

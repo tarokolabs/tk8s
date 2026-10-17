@@ -10,19 +10,16 @@ from tk8s.paths import Paths
 from tk8s.phases import Context, Options
 
 
-def on_disk(ctx: Context, host: FakeHost, *, marker: bool = False) -> model.Cluster:
+def on_disk(ctx: Context, host: FakeHost) -> model.Cluster:
     """demo's cluster.yaml on disk (list and describe read the data dir directly) and in the fake
-    host (writes go through it). With marker: the file a v2026.10.x create left, no status."""
+    host (writes go through it)."""
     c = ctx.require_cluster()
     state = ctx.paths.state_dir(c.name)
     state.mkdir(parents=True)
-    text = model.dumps(c.model_copy(update={"status": None}) if marker else c)
-    if marker:
-        (state / ".create-complete").write_text("")
-        host.files[state / ".create-complete"] = ""
+    text = model.dumps(c)
     (state / "cluster.yaml").write_text(text)
     host.files[state / "cluster.yaml"] = text
-    return model.load(state / "cluster.yaml", create_complete_marker=marker)
+    return model.load(state / "cluster.yaml")
 
 
 def test_load_cluster_names_the_missing_cluster(ctx: Context) -> None:
@@ -32,24 +29,25 @@ def test_load_cluster_names_the_missing_cluster(ctx: Context) -> None:
         lifecycle.load_cluster(ctx, "nope")
 
 
-def test_a_pre_status_cluster_with_the_marker_is_ready(ctx: Context, host: FakeHost) -> None:
-    on_disk(ctx, host, marker=True)
-    c = lifecycle.load_cluster(ctx, "demo")
-    assert c.status is not None and c.status.phase == "Ready" and c.status.tk8s == "pre-status"
-    assert ctx.cluster is c and ctx.name == "demo"
-    assert lifecycle.state_of(ctx, c) == "Stopped"
-    host.active.add("demo.target")
-    assert lifecycle.state_of(ctx, c) == "Running"
+def test_a_cluster_without_status_is_creating_not_ready(ctx: Context, host: FakeHost) -> None:
+    """A cluster.yaml from before status existed: no marker file makes it Ready any more."""
+    c = ctx.require_cluster().model_copy(update={"status": None})
+    state = ctx.paths.state_dir(c.name)
+    state.mkdir(parents=True)
+    (state / "cluster.yaml").write_text(model.dumps(c))
+    (state / ".create-complete").write_text("")
+    loaded = lifecycle.load_cluster(ctx, "demo")
+    assert loaded.status is None and lifecycle.state_of(ctx, loaded) == "Creating"
+    assert ctx.cluster is loaded and ctx.name == "demo"
 
 
-def test_save_cluster_retires_the_marker(ctx: Context, host: FakeHost) -> None:
-    on_disk(ctx, host, marker=True)
+def test_save_cluster_writes_the_file_and_keeps_ctx_in_step(ctx: Context, host: FakeHost) -> None:
+    on_disk(ctx, host)
     c = lifecycle.load_cluster(ctx, "demo")
-    lifecycle.save_cluster(ctx, c)
+    lifecycle.save_cluster(ctx, c.model_copy(update={"status": None}))
     state = ctx.paths.state_dir("demo")
-    assert "phase: Ready" in host.files[state / "cluster.yaml"]
-    assert (state / ".create-complete") not in host.files
-    assert ["rm", "-f", str(state / ".create-complete")] in [k.argv for k in host.calls]
+    assert "status:" not in host.files[state / "cluster.yaml"] and ctx.cluster is not c
+    assert not any(k.argv[:2] == ["rm", "-f"] for k in host.calls)
 
 
 def test_list_shows_every_cluster_and_its_state(ctx: Context, host: FakeHost) -> None:

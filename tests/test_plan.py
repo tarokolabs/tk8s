@@ -255,3 +255,14 @@ def test_used_indices_tolerates_a_file_from_an_older_tk8s(tmp_path: Path) -> Non
     (tmp_path / "clusters" / "junk").mkdir()
     (tmp_path / "clusters" / "junk" / "cluster.yaml").write_text("not: [valid")
     assert used_indices(paths) == {3}
+
+
+def test_a_creating_cluster_is_resumed(tmp_path: Path) -> None:
+    paths = Paths(tmp_path, tmp_path / "wulin", HOME)
+    c = res(user(DEMO))  # status Creating
+    state = paths.state_dir("demo")
+    state.mkdir(parents=True)
+    (state / "cluster.yaml").write_text(model.dumps(c))
+    existing = load_existing(paths, "demo")
+    assert existing is not None and existing.status is not None
+    assert existing.status.phase == "Creating" and existing.spec.network.index == 0
