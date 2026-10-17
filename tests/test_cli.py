@@ -84,6 +84,15 @@ def test_flags(capsys: pytest.CaptureFixture[str]) -> None:
     assert "ha: proxy" in out and "vip:" not in out
 
 
+def test_workers_zero_builds_a_control_plane_only_cluster(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc, out = run(capsys, "create", "cluster", "demo", "--workers", "0", "--dry-run")
+    assert rc == 0
+    assert "name: demo-control-plane-1" in out and "demo-worker" not in out
+    assert "cluster demo: 1 control plane + 0 workers" in out
+
+
 @pytest.mark.parametrize(
     ("argv", "message"),
     [

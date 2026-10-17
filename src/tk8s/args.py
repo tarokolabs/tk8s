@@ -95,7 +95,8 @@ def user_cluster_from_flags(a: argparse.Namespace) -> model.UserCluster:
                 join=not a.defer_join,
             )
         )
-    groups.append(model.NodeGroup(role="worker", count=a.workers, cpu=a.cpu, memory=memory))
+    if a.workers:
+        groups.append(model.NodeGroup(role="worker", count=a.workers, cpu=a.cpu, memory=memory))
     network = model.UserNetwork(ha=a.ha) if a.ha else None
     spec = model.UserSpec(
         kubernetes=a.k8s, gvisor=a.gvisor, datapath=a.datapath, network=network, nodes=groups
