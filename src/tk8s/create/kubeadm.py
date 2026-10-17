@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from .. import model
+from ..host import Result
 from ..phases import Context, Phase, PhaseFailed
 from ..render import template
 from . import frr, router
@@ -18,6 +19,13 @@ KEY_RE = re.compile(r"--certificate-key ([0-9a-f]+)")
 def kubectl_env(ctx: Context) -> dict[str, str]:
     """kubectl never sees the caller's KUBECONFIG; every call names the cluster's own."""
     return {"KUBECONFIG": str(ctx.state_dir / "kubeconfig")}
+
+
+def kubectl(ctx: Context, *args: str, input: str | None = None) -> Result:
+    """kubectl against this cluster's kubeconfig; never raises, the caller reads the Result."""
+    return ctx.host.run(
+        ["kubectl", *args], env=kubectl_env(ctx), input=input, capture=True, check=False
+    )
 
 
 def render_init(ctx: Context) -> str:
@@ -183,10 +191,7 @@ def kubeconfig_done(ctx: Context) -> bool:
     text = ctx.host.read(ctx.state_dir / "kubeconfig")
     if not text:
         return False
-    r = ctx.host.run(
-        ["kubectl", "get", "--raw", "/readyz"], env=kubectl_env(ctx), capture=True, check=False
-    )
-    return r.returncode == 0
+    return kubectl(ctx, "get", "--raw", "/readyz").returncode == 0
 
 
 def kubeconfig_run(ctx: Context) -> None:
@@ -221,10 +226,7 @@ KUBECONFIG = Phase(
 
 
 def joined(ctx: Context, name: str) -> bool:
-    r = ctx.host.run(
-        ["kubectl", "get", "node", name], env=kubectl_env(ctx), capture=True, check=False
-    )
-    return r.returncode == 0
+    return kubectl(ctx, "get", "node", name).returncode == 0
 
 
 def join_command(ctx: Context) -> str:
@@ -277,18 +279,7 @@ def join_node(ctx: Context, node: model.Node, join: str, key: str) -> None:
 def untaint_control_planes(ctx: Context) -> None:
     """Control planes schedule workloads too (a teaching cluster is small)."""
     for n in ctx.require_cluster().control_planes:
-        ctx.host.run(
-            [
-                "kubectl",
-                "taint",
-                "node",
-                n.name,
-                "node-role.kubernetes.io/control-plane:NoSchedule-",
-            ],
-            env=kubectl_env(ctx),
-            capture=True,
-            check=False,
-        )
+        kubectl(ctx, "taint", "node", n.name, "node-role.kubernetes.io/control-plane:NoSchedule-")
 
 
 def _joining(ctx: Context) -> list[model.Node]:

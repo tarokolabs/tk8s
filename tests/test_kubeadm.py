@@ -404,3 +404,16 @@ def test_bgp_wait_router_ready_names_the_bgp_command_on_timeout(
         r"\(podman exec demo-router vtysh -c 'show bgp summary'\)",
     ):
         kubeadm.wait_router_ready(bgp_ctx)
+
+
+def test_kubectl_helper_names_the_cluster_kubeconfig_and_never_raises(
+    ctx: Context, host: FakeHost
+) -> None:
+    host.responses[("kubectl", "get", "ns", "x")] = Result(1, "", "NotFound")
+    r = kubeadm.kubectl(ctx, "get", "ns", "x")
+    assert r.returncode == 1 and r.stderr == "NotFound"
+    call = host.calls[-1]
+    assert call.argv == ["kubectl", "get", "ns", "x"] and not call.sudo
+    assert call.env == {"KUBECONFIG": str(ctx.state_dir / "kubeconfig")}
+    kubeadm.kubectl(ctx, "apply", "-f", "-", input="kind: X\n")
+    assert host.calls[-1].input == "kind: X\n"

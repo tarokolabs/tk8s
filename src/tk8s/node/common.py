@@ -6,7 +6,7 @@ from ipaddress import IPv4Address
 from pathlib import Path
 
 from .. import model
-from ..create.kubeadm import kubectl_env
+from ..create.kubeadm import kubectl
 from ..lifecycle import ClusterError
 from ..phases import Context, PhaseFailed
 
@@ -107,10 +107,5 @@ def unit_file(ctx: Context) -> Path:
 
 def node_ready(ctx: Context, name: str) -> bool:
     ready = 'jsonpath={.status.conditions[?(@.type=="Ready")].status}'
-    r = ctx.host.run(
-        ["kubectl", "get", "node", name, "-o", ready],
-        env=kubectl_env(ctx),
-        capture=True,
-        check=False,
-    )
+    r = kubectl(ctx, "get", "node", name, "-o", ready)
     return r.returncode == 0 and r.stdout.strip() == "True"

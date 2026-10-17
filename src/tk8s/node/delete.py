@@ -6,7 +6,6 @@ import time
 
 from .. import model
 from ..create import kubeadm, router, units
-from ..create.kubeadm import kubectl_env
 from ..delete import (
     container_exists,
     node_volumes,
@@ -30,9 +29,7 @@ def confirm_delete(ctx: Context) -> None:
 def node_object_exists(ctx: Context, name: str) -> bool:
     """Only a NotFound answer means the node is gone; a failed kubectl (the cluster is stopped,
     the apiserver is away) must not pass for "already drained"."""
-    r = ctx.host.run(
-        ["kubectl", "get", "node", name], env=kubectl_env(ctx), capture=True, check=False
-    )
+    r = kubeadm.kubectl(ctx, "get", "node", name)
     if r.returncode == 0:
         return True
     if "NotFound" in r.stderr or "not found" in r.stderr:
@@ -52,11 +49,8 @@ def drain_run(ctx: Context) -> None:
     goes. A drain that cannot finish (a PodDisruptionBudget) is reported, not fatal: the node is
     going away either way."""
     n = require_node(ctx)
-    r = ctx.host.run(
-        ["kubectl", "drain", n, "--ignore-daemonsets", "--delete-emptydir-data", "--timeout=120s"],
-        env=kubectl_env(ctx),
-        capture=True,
-        check=False,
+    r = kubeadm.kubectl(
+        ctx, "drain", n, "--ignore-daemonsets", "--delete-emptydir-data", "--timeout=120s"
     )
     if r.returncode != 0:
         why = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "unknown"
@@ -68,7 +62,9 @@ def drain_run(ctx: Context) -> None:
     if node is not None and node.role == "control-plane":
         _wait_router_forgot(ctx, node)
     kubeadm.wait_router_ready(ctx)
-    ctx.host.run(["kubectl", "delete", "node", n], env=kubectl_env(ctx), capture=True)
+    r = kubeadm.kubectl(ctx, "delete", "node", n)
+    if r.returncode != 0:
+        raise PhaseFailed(f"kubectl delete node {n} failed: {r.stderr.strip()}")
 
 
 def _wait_router_forgot(ctx: Context, n: model.Node) -> None:

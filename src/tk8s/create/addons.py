@@ -7,7 +7,7 @@ import hashlib
 from pathlib import Path
 
 from ..phases import Context, Phase, PhaseFailed
-from .kubeadm import kubectl_env
+from .kubeadm import kubectl
 
 GVISOR_RC = (
     "apiVersion: node.k8s.io/v1\nkind: RuntimeClass\nmetadata:\n  name: gvisor\nhandler: runsc\n"
@@ -17,25 +17,17 @@ ZSTD_APT = "apt-get update -qq >/dev/null && apt-get install -y -qq zstd >/dev/n
 
 
 def _kubectl(ctx: Context, *args: str, input: str | None = None) -> None:
-    r = ctx.host.run(
-        ["kubectl", *args], env=kubectl_env(ctx), input=input, capture=True, check=False
-    )
+    r = kubectl(ctx, *args, input=input)
     if r.returncode != 0:
         raise PhaseFailed(f"kubectl {' '.join(args)} failed: {r.stderr.strip()}")
 
 
 def _exists(ctx: Context, *args: str) -> bool:
-    r = ctx.host.run(["kubectl", *args], env=kubectl_env(ctx), capture=True, check=False)
-    return r.returncode == 0
+    return kubectl(ctx, *args).returncode == 0
 
 
 def _rollout(ctx: Context, ns: str, deploy: str, what: str, hint: str) -> None:
-    r = ctx.host.run(
-        ["kubectl", "rollout", "status", "-n", ns, f"deploy/{deploy}", "--timeout=300s"],
-        env=kubectl_env(ctx),
-        capture=True,
-        check=False,
-    )
+    r = kubectl(ctx, "rollout", "status", "-n", ns, f"deploy/{deploy}", "--timeout=300s")
     if r.returncode != 0:
         raise PhaseFailed(f"{what} did not become ready ({hint})")
 
@@ -177,20 +169,15 @@ GVISOR = Phase(
 
 
 def _metrics_args(ctx: Context) -> str | None:
-    r = ctx.host.run(
-        [
-            "kubectl",
-            "get",
-            "deploy",
-            "-n",
-            "kube-system",
-            "metrics-server",
-            "-o",
-            "jsonpath={.spec.template.spec.containers[0].args}",
-        ],
-        env=kubectl_env(ctx),
-        capture=True,
-        check=False,
+    r = kubectl(
+        ctx,
+        "get",
+        "deploy",
+        "-n",
+        "kube-system",
+        "metrics-server",
+        "-o",
+        "jsonpath={.spec.template.spec.containers[0].args}",
     )
     return r.stdout if r.returncode == 0 else None
 

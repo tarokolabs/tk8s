@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import model
 from .create import PHASES, router
-from .create.kubeadm import kubectl_env
+from .create.kubeadm import kubectl
 from .phases import Context
 
 
@@ -185,12 +185,7 @@ def describe_addons(ctx: Context, c: model.Cluster, state: str) -> None:
         return
 
     def ask(*args: str) -> str:
-        r = ctx.host.run(
-            ["kubectl", "--request-timeout=5s", *args],
-            env=kubectl_env(ctx),
-            capture=True,
-            check=False,
-        )
+        r = kubectl(ctx, "--request-timeout=5s", *args)
         return r.stdout.strip() if r.returncode == 0 else ""
 
     image = "jsonpath={.spec.template.spec.containers[0].image}"
@@ -241,20 +236,13 @@ def start(ctx: Context, c: model.Cluster) -> None:
     since = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     ctx.host.run(["systemctl", "start", f"{c.name}.target"], sudo=True)
     for _ in range(90):
-        r = ctx.host.run(
-            ["kubectl", "get", "nodes", "-o", f"jsonpath={READY_HEARTBEATS}"],
-            env=kubectl_env(ctx),
-            capture=True,
-            check=False,
-        )
+        r = kubectl(ctx, "get", "nodes", "-o", f"jsonpath={READY_HEARTBEATS}")
         rows = [line.split() for line in r.stdout.splitlines() if line.strip()]
         fresh = [row for row in rows if len(row) == 3 and row[1] == "True" and row[2] > since]
         if rows and len(fresh) == len(rows):
             break
         time.sleep(ctx.options.poll_slow)
-    r = ctx.host.run(
-        ["kubectl", "get", "nodes", "--no-headers"], env=kubectl_env(ctx), capture=True, check=False
-    )
+    r = kubectl(ctx, "get", "nodes", "--no-headers")
     for line in r.stdout.splitlines():
         fields = line.split()
         if len(fields) >= 2:

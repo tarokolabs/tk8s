@@ -10,7 +10,7 @@ from typing import Literal
 
 from .. import images, model
 from ..phases import Context, Phase, PhaseFailed
-from .kubeadm import kubectl_env
+from .kubeadm import kubectl, kubectl_env
 
 Datapath = Literal["netkit", "veth"]
 
@@ -69,9 +69,7 @@ def record_datapath(ctx: Context, datapath: Datapath) -> None:
 
 
 def _kubectl(ctx: Context, *args: str, input: str | None = None, check: bool = True) -> int:
-    r = ctx.host.run(
-        ["kubectl", *args], env=kubectl_env(ctx), input=input, capture=True, check=False
-    )
+    r = kubectl(ctx, *args, input=input)
     if check and r.returncode != 0:
         raise PhaseFailed(f"kubectl {' '.join(args)} failed: {r.stderr.strip()}")
     return r.returncode
@@ -101,20 +99,8 @@ def install_cilium(ctx: Context) -> None:
     )
     ctx.say(f"  cilium datapath: {datapath}{note if datapath == 'netkit' else ''}")
     # A partially installed release (interrupted create) is upgraded in place instead of failing.
-    secrets = ctx.host.run(
-        [
-            "kubectl",
-            "-n",
-            "kube-system",
-            "get",
-            "secret",
-            "-l",
-            "owner=helm,name=cilium",
-            "--no-headers",
-        ],
-        env=kubectl_env(ctx),
-        capture=True,
-        check=False,
+    secrets = kubectl(
+        ctx, "-n", "kube-system", "get", "secret", "-l", "owner=helm,name=cilium", "--no-headers"
     )
     action = "upgrade" if secrets.stdout.strip() else "install"
     r = ctx.host.run(
@@ -173,12 +159,7 @@ INSTALL = Phase(
 
 def not_ready(ctx: Context) -> list[str] | None:
     """Names of the nodes that are not Ready; None when kubectl itself failed."""
-    r = ctx.host.run(
-        ["kubectl", "get", "nodes", "--no-headers"],
-        env=kubectl_env(ctx),
-        capture=True,
-        check=False,
-    )
+    r = kubectl(ctx, "get", "nodes", "--no-headers")
     if r.returncode != 0:
         return None
     return [line.split()[0] for line in r.stdout.splitlines() if line.split()[1:2] != ["Ready"]]
@@ -199,9 +180,9 @@ def nodes_ready_run(ctx: Context) -> None:
             what = " ".join(pending) if pending else "kubectl get nodes failed"
             raise PhaseFailed(f"nodes are not Ready after 5 minutes: {what}")
         time.sleep(ctx.options.poll_slow)
-    r = ctx.host.run(
-        ["kubectl", "get", "nodes", "--no-headers"], env=kubectl_env(ctx), capture=True
-    )
+    r = kubectl(ctx, "get", "nodes", "--no-headers")
+    if r.returncode != 0:
+        raise PhaseFailed(f"kubectl get nodes failed: {r.stderr.strip()}")
     for line in r.stdout.splitlines():
         f = line.split()
         ctx.say(f"  {f[0]} {f[1]}")

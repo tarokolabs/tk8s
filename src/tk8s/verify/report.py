@@ -4,7 +4,7 @@ against the cluster and polls; the namespace the test resources live in."""
 import time
 from dataclasses import dataclass
 
-from ..create.kubeadm import kubectl_env
+from ..create import kubeadm
 from ..phases import Context
 
 NS = "tk-verify"
@@ -40,9 +40,7 @@ class Report:
         return self.ctx.options.verify_timeout
 
     def kubectl(self, *args: str, input: str | None = None) -> tuple[int, str]:
-        r = self.ctx.host.run(
-            ["kubectl", *args], env=kubectl_env(self.ctx), input=input, capture=True, check=False
-        )
+        r = kubeadm.kubectl(self.ctx, *args, input=input)
         return r.returncode, r.stdout
 
     def poll(self, rounds: int, probe: object) -> bool:
