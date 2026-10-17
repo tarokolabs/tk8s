@@ -413,3 +413,26 @@ def test_stop_names_both_router_units(two_router_ctx: Context, host: FakeHost) -
     stops = [k for k in host.calls if k.argv[:2] == ["systemctl", "stop"]]
     assert stops[0].argv[2:5] == ["demo.target", "demo-router-1.service", "demo-router-2.service"]
     assert "demo-router.service" not in stops[0].argv
+
+
+def test_describe_says_not_running_for_a_stopped_router(
+    two_router_ctx: Context, host: FakeHost
+) -> None:
+    """A router stopped with systemctl has no VRRP state and no peers to list; the section says
+    so in those words instead of 'unavailable' and 'none listed'."""
+    c = ready_on_disk(two_router_ctx, host)
+    bgp_router_answers(host, router="demo-router-1")
+    vrrp_answers(host, {"demo-router-1": "MASTER"})
+    host.podman.add("stopped:demo-router-2")
+    lifecycle.describe(two_router_ctx, c, None)
+    assert (
+        "  routers:  demo-router-1 172.22.0.251 MASTER, demo-router-2 172.22.0.252 not running"
+        in host.lines
+    )
+    peers = next(line for line in host.lines if line.startswith("  peers:"))
+    assert peers.endswith(" (demo-router-1) / not running (demo-router-2)")
+    hops = "  nexthops: 3 to 172.23.0.1 on demo-router-1, not running on demo-router-2 "
+    assert hops + "(show ip route 172.23.0.1)" in host.lines
+    assert not any(
+        a[:3] == ["podman", "exec", "demo-router-2"] for a in [k.argv for k in host.calls]
+    )

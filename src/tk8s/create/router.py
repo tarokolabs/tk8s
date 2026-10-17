@@ -7,9 +7,7 @@ import json
 
 from .. import model, podman, versions
 from ..phases import Context, PhaseFailed, wait_for
-from .router_state import running
-
-OP = "/opt/vyatta/bin/vyatta-op-cmd-wrapper"
+from .router_state import OP, running  # OP lives there: router_state cannot import this module
 
 
 def image(v: versions.Versions) -> str:

@@ -30,14 +30,22 @@ def describe_router(ctx: Context, c: model.Cluster, state: str) -> None:
     if state != "Running":
         ctx.say(f"  {label:<10}unavailable (cluster is not running)")
     else:
+        # a router stopped with systemctl has nothing to list: say so, do not ask it
+        up = {rt.name: not two or router_state.running(ctx, rt) for rt in c.routers}
         per_router = []
         for rt in c.routers:
-            rows = router.members(ctx, rt, c)
-            listed = ", ".join(f"{n} {s}" for n, s in rows) or "none listed"
+            if up[rt.name]:
+                rows = router.members(ctx, rt, c)
+                listed = ", ".join(f"{n} {s}" for n, s in rows) or "none listed"
+            else:
+                listed = "not running"
             per_router.append(f"{listed} ({rt.name})" if two else listed)
         ctx.say(f"  {label:<10}" + " / ".join(per_router))
         if net.ha == "bgp":
-            hops = [router.nexthops(ctx, rt, c) for rt in c.routers]
+            hops = [
+                str(router.nexthops(ctx, rt, c)) if up[rt.name] else "not running"
+                for rt in c.routers
+            ]
             if two:
                 where = f"{hops[0]} to {net.vip} on {first.name}, {hops[1]} on {c.routers[1].name}"
             else:
@@ -47,14 +55,20 @@ def describe_router(ctx: Context, c: model.Cluster, state: str) -> None:
         ctx.say("  note:     one control plane: nothing to spread; --control-planes 3 shows ECMP")
 
 
+def _vrrp_word(ctx: Context, rt: model.Router) -> str:
+    """MASTER/BACKUP/FAULT; 'not running' for a stopped container (nothing to ask), else
+    'unavailable' when VyOS is up but answers no VRRP state (still booting)."""
+    if not router_state.running(ctx, rt):
+        return "not running"
+    return router_state.vrrp(ctx, rt) or "unavailable"
+
+
 def _describe_router_pair(ctx: Context, c: model.Cluster, state: str) -> None:
     """The two routers with their VRRP state, how to get a shell on each, and how to stop one
     (podman stop is undone by the unit's Restart=always within seconds)."""
     r1, r2 = c.routers
     if state == "Running":
-        pair = ", ".join(
-            f"{rt.name} {rt.ip} {router_state.vrrp(ctx, rt) or 'unavailable'}" for rt in c.routers
-        )
+        pair = ", ".join(f"{rt.name} {rt.ip} {_vrrp_word(ctx, rt)}" for rt in c.routers)
     else:
         pair = f"{r1.name} {r1.ip}, {r2.name} {r2.ip} (unavailable: cluster is not running)"
     ctx.say(f"  routers:  {pair}")

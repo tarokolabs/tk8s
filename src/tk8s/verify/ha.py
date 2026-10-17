@@ -34,7 +34,7 @@ def _check_proxy(r: Report, c: model.Cluster, rt: model.Router, ready: str) -> N
             f"apiserver router {_label(c, rt)}",
             f"readyz='{ready}', {up} of {joined} control planes UP"
             + (f", backends {names}" if stale else "")
-            + f" (podman exec {rt.name} {router.OP} show haproxy)",
+            + f" (podman exec {rt.name} {router_state.OP} show haproxy)",
         )
 
 
