@@ -1,6 +1,14 @@
 import pytest
 
-from tests.fixtures import OP, SHOW_HAPROXY, bgp_router_answers
+from tests.fixtures import (
+    OP,
+    SHOW_HAPROXY,
+    bgp_router_answers,
+    vrrp_answers,
+    vtysh_bfd,
+    vtysh_route,
+    vtysh_summary,
+)
 from tk8s import model, verify
 from tk8s.host import FakeHost, Result
 from tk8s.phases import Context
@@ -313,3 +321,73 @@ def test_router_check_in_bgp_mode_counts_established_only_among_joined_control_p
         "PASS  apiserver router 172.22.0.253 healthy (2/2 control planes Established, "
         "2 ECMP next hops to 172.23.0.1, BFD up)"
     ) in host.lines
+
+
+# ---- two routers
+
+
+def two_routers_healthy(two_router_ctx: Context, host: FakeHost) -> None:
+    bgp_healthy(two_router_ctx, host)
+    for r in ("demo-router-1", "demo-router-2"):
+        bgp_router_answers(host, router=r)
+    vrrp_answers(host, {"demo-router-1": "MASTER", "demo-router-2": "BACKUP"})
+
+
+def test_router_check_with_two_routers_reports_each_router_and_the_vrrp_pair(
+    two_router_ctx: Context, host: FakeHost
+) -> None:
+    two_routers_healthy(two_router_ctx, host)
+    assert verify.run(two_router_ctx, only="router") == 0
+    assert lines(host, "PASS  ") == [
+        "PASS  apiserver router demo-router-1 (172.22.0.251) healthy (3/3 control planes "
+        "Established, 3 ECMP next hops to 172.23.0.1, BFD up)",
+        "PASS  apiserver router demo-router-2 (172.22.0.252) healthy (3/3 control planes "
+        "Established, 3 ECMP next hops to 172.23.0.1, BFD up)",
+        "PASS  router VRRP: demo-router-1 MASTER, demo-router-2 BACKUP",
+    ]
+
+
+def test_router_vrrp_check_fails_when_both_are_master(
+    two_router_ctx: Context, host: FakeHost
+) -> None:
+    two_routers_healthy(two_router_ctx, host)
+    vrrp_answers(host, {"demo-router-1": "MASTER", "demo-router-2": "MASTER"})
+    assert verify.run(two_router_ctx, only="router") == 1
+    assert (
+        "FAIL  router VRRP — demo-router-1 MASTER, demo-router-2 MASTER; expected one MASTER "
+        f"and one BACKUP (podman exec demo-router-1 {OP} show vrrp)"
+    ) in host.lines
+
+
+def test_router_vrrp_check_fails_when_a_router_has_no_vrrp_data(
+    two_router_ctx: Context, host: FakeHost
+) -> None:
+    two_routers_healthy(two_router_ctx, host)
+    vrrp_answers(host, {"demo-router-1": None, "demo-router-2": "MASTER"})
+    assert verify.run(two_router_ctx, only="router") == 1
+    assert any(
+        line.startswith("FAIL  router VRRP — demo-router-1 unavailable, demo-router-2 MASTER;")
+        for line in host.lines
+    )
+
+
+def test_router_check_with_two_routers_fails_the_one_that_is_down(
+    two_router_ctx: Context, host: FakeHost
+) -> None:
+    two_routers_healthy(two_router_ctx, host)
+    vrrp_answers(host, {"demo-router-1": "MASTER", "demo-router-2": None})
+    for key in (
+        vtysh_summary("demo-router-2"),
+        vtysh_route("demo-router-2"),
+        vtysh_bfd("demo-router-2"),
+    ):
+        host.responses[key] = Result(1, "", "Error: container is not running")
+    assert verify.run(two_router_ctx, only="router") == 2  # its own line and the VRRP pair
+    assert (
+        "PASS  apiserver router demo-router-1 (172.22.0.251) healthy (3/3 control planes "
+        "Established, 3 ECMP next hops to 172.23.0.1, BFD up)"
+    ) in host.lines
+    assert any(
+        line.startswith("FAIL  apiserver router demo-router-2 (172.22.0.252) — ")
+        for line in host.lines
+    )

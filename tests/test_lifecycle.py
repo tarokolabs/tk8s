@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.fixtures import HOME, OP, SHOW_HAPROXY, bgp_router_answers
+from tests.fixtures import HOME, OP, SHOW_HAPROXY, bgp_router_answers, vrrp_answers
 from tk8s import lifecycle, model, versions
 from tk8s.create.plan import resolve
 from tk8s.host import FakeHost, Result
@@ -350,3 +350,57 @@ def test_describe_bgp_cluster_tells_other_machines_to_route_the_vip_too(
         "  from another machine: sudo ip route add 172.22.0.0/24 via 10.0.0.9 && "
         "sudo ip route add 172.23.0.1/32 via 10.0.0.9   (and 10.98.0.0/24 for ClusterIPs)"
     ) in host.lines
+
+
+# ---- two routers
+
+
+def ready_on_disk(ctx: Context, host: FakeHost) -> model.Cluster:
+    """A Ready bgp cluster on disk, running, kubectl away, the host's default route known."""
+    c = ctx.require_cluster()
+    assert c.status is not None
+    ctx.cluster = c.model_copy(update={"status": c.status.model_copy(update={"phase": "Ready"})})
+    c = on_disk(ctx, host)
+    host.active.add("demo.target")
+    host.responses[("kubectl", "--request-timeout=5s")] = Result(1, "", "nope")
+    host.responses[("ip", "-4", "route", "get")] = ROUTE_GET
+    return c
+
+
+def test_describe_two_router_cluster_lists_both_routers_and_their_vrrp_state(
+    two_router_ctx: Context, host: FakeHost
+) -> None:
+    c = ready_on_disk(two_router_ctx, host)
+    for r in ("demo-router-1", "demo-router-2"):
+        bgp_router_answers(host, router=r)
+    vrrp_answers(host, {"demo-router-1": "MASTER", "demo-router-2": "BACKUP"})
+    lifecycle.describe(two_router_ctx, c, None)
+    i = host.lines.index("Router:")
+    section = [line for line in host.lines[i + 1 :] if not line.startswith("  $ ")]
+    assert section[:7] == [
+        "  mode:     bgp (VyOS BGP AS 65000, ECMP over every control plane announcing the VIP)",
+        "  address:  172.22.0.253 (api.demo.k8s -> 172.23.0.1, the VIP; VRRP floats it between "
+        "the two routers)",
+        "  routers:  demo-router-1 172.22.0.251 MASTER, demo-router-2 172.22.0.252 BACKUP",
+        "  shell:    sudo podman exec -it demo-router-1 vbash   (demo-router-2 likewise)",
+        "  stop:     sudo systemctl stop demo-router-1.service   (podman stop would be "
+        "restarted by systemd)",
+        "  peers:    demo-control-plane-1 Established, demo-control-plane-2 Established, "
+        "demo-control-plane-3 Established (demo-router-1) / demo-control-plane-1 Established, "
+        "demo-control-plane-2 Established, demo-control-plane-3 Established (demo-router-2)",
+        "  nexthops: 3 to 172.23.0.1 on demo-router-1, 3 on demo-router-2 "
+        "(show ip route 172.23.0.1)",
+    ]
+    assert (
+        "  apiserver:  https://172.23.0.1:6443 (anycast VIP; demo-router-1 and demo-router-2 "
+        "spreads it over the control planes announcing it)"
+    ) in host.lines
+
+
+def test_describe_one_router_cluster_has_no_routers_or_stop_line(
+    bgp_ctx: Context, host: FakeHost
+) -> None:
+    c = ready_on_disk(bgp_ctx, host)
+    bgp_router_answers(host)
+    lifecycle.describe(bgp_ctx, c, None)
+    assert not any(line.startswith(("  routers:", "  stop:")) for line in host.lines)
