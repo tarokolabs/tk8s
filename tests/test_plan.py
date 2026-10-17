@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.fixtures import resolved
 from tk8s import model
 from tk8s.create.plan import (
     PlanError,
     expand_nodes,
     load_existing,
     pick_index,
-    resolve,
     used_indices,
     validate,
 )
@@ -30,14 +30,7 @@ def res(
     used: set[int] | None = None,
     allow_overlap: bool = False,
 ) -> model.Cluster:
-    return resolve(
-        u,
-        k8s_default=K8S,
-        existing=existing,
-        used_indices=used or set(),
-        allow_overlap=allow_overlap,
-        tk8s_version="test",
-    )
+    return resolved(u, existing=existing, used_indices=used, allow_overlap=allow_overlap)
 
 
 DEMO = (

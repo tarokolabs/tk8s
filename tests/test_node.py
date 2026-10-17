@@ -3,15 +3,23 @@ from pathlib import Path
 
 import pytest
 
-from tests.fixtures import HOME, OP, SHOW_HAPROXY, VBASH, ready_host
-from tk8s import lifecycle, model, versions
+from tests.fixtures import (
+    OP,
+    SHOW_HAPROXY,
+    VBASH,
+    argvs,
+    make_ctx,
+    new_node_answers,
+    phases_of,
+    ready_host,
+)
+from tk8s import lifecycle, model
 from tk8s.create import units
 from tk8s.host import FakeHost, Result
 from tk8s.node import add as node_add
 from tk8s.node import common as node_common
 from tk8s.node import delete as node_delete
-from tk8s.paths import Paths
-from tk8s.phases import Context, Options, PhaseFailed, Runner
+from tk8s.phases import Context, PhaseFailed, Runner
 from tk8s.podman import node_volumes
 
 
@@ -111,41 +119,13 @@ def node_ctx(tmp_path: Path) -> tuple[Context, FakeHost]:
     assert c.status is not None
     c = c.model_copy(update={"status": c.status.model_copy(update={"phase": "Ready"})})
     host.files[tmp_path / "clusters" / "demo" / "cluster.yaml"] = model.dumps(c)
-    ctx = Context(
-        host=host,
-        paths=Paths(data_dir=tmp_path, wulin_dir=tmp_path / "wulin", home=HOME),
-        versions=versions.load(HOME / "versions.yaml"),
-        options=Options(poll=0, poll_slow=0, retry_delay=0),
-        say=host.lines.append,
-    )
+    ctx = make_ctx(host, tmp_path, user=None)
     ctx.cluster, ctx.name = c, "demo"
     host.podman.update(f"container:{n.name}" for n in c.spec.nodes)
     host.podman.update(f"volume:{v}" for n in c.spec.nodes for v in node_volumes(n.name))
     host.active.update(f"{n.name}.service" for n in c.spec.nodes)
     host.responses[("curl", "-sk", "--max-time", "3")] = Result(0, "ok", "")  # the LB is healthy
     return ctx, host
-
-
-def new_node_answers(host: FakeHost, name: str, *, ready_after: int) -> None:
-    """The new node boots, is not a Node object until kubeadm join ran, then turns Ready.
-    Specific prefixes go first: FakeHost takes the first matching prefix."""
-    host.responses = {
-        ("kubectl", "get", "node", name, "-o"): [
-            *([Result(0, "False", "")] * ready_after),
-            Result(0, "True", ""),
-        ],
-        ("kubectl", "get", "node", name): [Result(1, "", "not found"), Result(0, name, "")],
-        ("podman", "exec", name, "systemctl", "is-system-running"): Result(0, "running\n", ""),
-        **host.responses,
-    }
-
-
-def phases_of(host: FakeHost) -> list[str]:
-    return [line.split("]")[0][1:] for line in host.lines if line.startswith("[")]
-
-
-def argvs(host: FakeHost) -> list[list[str]]:
-    return [k.argv for k in host.calls]
 
 
 def test_add_worker_runs_plan_units_start_addons_join_in_order(tmp_path: Path) -> None:

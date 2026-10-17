@@ -22,19 +22,21 @@ def run(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str]:
 
 def fake_context(host: object, **kw: object) -> object:
     """verbs.make_context with a FakeHost and no waiting; assume_yes follows --yes."""
-    from tk8s import verbs, versions
+    from tests.fixtures import make_ctx
+    from tk8s import verbs
     from tk8s.host import FakeHost
     from tk8s.paths import Paths
-    from tk8s.phases import Context, Options
 
     assert isinstance(host, FakeHost)
-    return Context(
-        host=host,
-        paths=Paths.from_env(verbs.HOME),
-        versions=versions.load(verbs.HOME / "versions.yaml"),
-        options=Options(poll=0, poll_slow=0, retry_delay=0, assume_yes=bool(kw.get("assume_yes"))),
+    ctx = make_ctx(
+        host,
+        Path(os.environ["TK_DATA_DIR"]),
+        user=None,
         say=print,
+        assume_yes=bool(kw.get("assume_yes")),
     )
+    ctx.paths = Paths.from_env(verbs.HOME)  # what the real make_context reads
+    return ctx
 
 
 def test_default_dry_run(capsys: pytest.CaptureFixture[str], data_dir: Path) -> None:
@@ -521,8 +523,7 @@ def test_tk_assume_yes_is_read_once_in_make_context(monkeypatch: pytest.MonkeyPa
 def test_node_verbs(
     capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from tests.fixtures import ready_host
-    from tests.test_node import new_node_answers
+    from tests.fixtures import new_node_answers, ready_host
     from tk8s import model, verbs
     from tk8s.host import FakeHost, Result
 

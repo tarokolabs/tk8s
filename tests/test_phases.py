@@ -3,12 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from tk8s import versions
+from tests.fixtures import make_ctx as fixture_ctx
 from tk8s.host import FakeHost, Result
-from tk8s.paths import Paths
 from tk8s.phases import (
     Context,
-    Options,
     Phase,
     PhaseFailed,
     Runner,
@@ -23,14 +21,10 @@ HOME = Path(__file__).resolve().parents[1]
 
 def make_ctx(tmp_path: Path, **opts: bool) -> tuple[Context, FakeHost]:
     host = FakeHost()
-    c = Context(
-        host=host,
-        paths=Paths(tmp_path, tmp_path / "wulin", HOME),
-        versions=versions.load(HOME / "versions.yaml"),
-        options=Options(**opts),
-        say=host.lines.append,
-    )
-    return c, host
+    ctx = fixture_ctx(host, tmp_path, user=None)
+    for k, v in opts.items():
+        setattr(ctx.options, k, v)
+    return ctx, host
 
 
 def counter_phase(name: str, needed_runs: int) -> tuple[Phase, dict[str, int]]:

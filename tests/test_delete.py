@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.fixtures import argvs, make_ctx
 from tk8s import delete, lifecycle, podman
 from tk8s.host import FakeHost, HostError, Result
 from tk8s.phases import Context, PhaseFailed, Runner
@@ -23,10 +24,6 @@ def everything_there(ctx: Context, host: FakeHost) -> None:
     # done looks once (there), run looks twice (there, there), done looks again (gone, repeats)
     there = Result(0, f"{c.spec.network.pods} via 172.22.0.1\n", "")
     host.responses[("ip", "route", "show")] = [there, there, there, Result(0, "", "")]
-
-
-def argvs(host: FakeHost) -> list[list[str]]:
-    return [k.argv for k in host.calls]
 
 
 def test_a_full_delete_removes_everything_in_order(ctx: Context, host: FakeHost) -> None:
@@ -90,9 +87,8 @@ def test_rerun_after_a_failed_volume_finishes_the_delete(ctx: Context, host: Fak
 def test_without_cluster_yaml_the_units_name_the_nodes_to_remove(tmp_path: Path) -> None:
     """No cluster.yaml: the node names come from the unit directory, which must be read before
     the units phase removes it; otherwise the volumes survive and poison a same-name create."""
-    from tests.test_phases import make_ctx
-
-    ctx, host = make_ctx(tmp_path)
+    host = FakeHost()
+    ctx = make_ctx(host, tmp_path, user=None)
     ctx.name = "demo"
     unit_dir = ctx.paths.unit_dir / "demo"
     host.dirs.add(unit_dir)
@@ -121,9 +117,7 @@ def test_without_cluster_yaml_the_units_name_the_nodes_to_remove(tmp_path: Path)
 
 
 def test_not_found_when_nothing_is_there(tmp_path: Path) -> None:
-    from tests.test_phases import make_ctx
-
-    ctx, _ = make_ctx(tmp_path)
+    ctx = make_ctx(FakeHost(), tmp_path, user=None)
     ctx.name = "nothing"
     assert not delete.found(ctx)
 
@@ -149,9 +143,8 @@ def test_confirm_aborts_on_anything_but_y(ctx: Context, monkeypatch: pytest.Monk
 def test_fallback_removes_a_v2026_10_lb_container_like_a_node(tmp_path: Path) -> None:
     """A cluster from before the router (cluster.yaml with lb:, unit demo-lb.container) cannot be
     parsed; the unit-directory fallback lists the lb unit like a node so its container goes too."""
-    from tests.test_phases import make_ctx
-
-    ctx, host = make_ctx(tmp_path)
+    host = FakeHost()
+    ctx = make_ctx(host, tmp_path, user=None)
     ctx.name = "demo"
     unit_dir = ctx.paths.unit_dir / "demo"
     host.dirs.add(unit_dir)

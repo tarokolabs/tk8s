@@ -22,6 +22,7 @@ def test_render_phase_writes_into_the_state_dir_mode_600(ctx: Context, host: Fak
 
 import pytest  # noqa: E402
 
+from tests.fixtures import ha_user, resolved  # noqa: E402
 from tk8s.host import Result  # noqa: E402
 from tk8s.phases import PhaseFailed  # noqa: E402
 
@@ -153,28 +154,7 @@ def test_kubeconfig_done_needs_a_non_empty_file_and_a_ready_apiserver(
 
 def ha_ctx(ctx: Context, host: FakeHost) -> Context:
     """demo with 3 control planes (the third deferred) and one worker."""
-    from tk8s import model
-    from tk8s.create.plan import resolve
-
-    user = model.UserCluster(
-        metadata=model.Metadata(name="demo"),
-        spec=model.UserSpec(
-            nodes=[
-                model.NodeGroup(role="control-plane"),
-                model.NodeGroup(role="control-plane"),
-                model.NodeGroup(role="control-plane", join=False),
-                model.NodeGroup(role="worker"),
-            ]
-        ),
-    )
-    ctx.cluster = resolve(
-        user,
-        k8s_default="1.37.1",
-        existing=None,
-        used_indices=set(),
-        allow_overlap=False,
-        tk8s_version="test",
-    )
+    ctx.cluster = resolved(ha_user())
     initialised(host)
     host.files[ctx.state_dir / "kubeconfig"] = "kind: Config\n"
     host.responses[("podman", "exec", "demo-control-plane-1", "kubeadm", "token", "create")] = (
