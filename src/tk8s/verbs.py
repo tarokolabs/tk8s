@@ -36,11 +36,6 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
         return 0
     if a.k8s:
         validate_k8s(a.k8s)
-    if a.gvisor and a.datapath == "netkit":
-        raise UsageError(
-            "--gvisor requires the veth datapath; gVisor sandboxes have no network under netkit "
-            "(drop --datapath netkit)"
-        )
     if a.gvisor and a.datapath is None:
         a.datapath = "veth"
     flags = ("--control-planes", "--workers", "--cpu", "--memory", "--ha")
