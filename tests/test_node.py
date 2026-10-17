@@ -47,7 +47,6 @@ def test_plan_add_records_the_node_as_not_joined(ctx: Context) -> None:
     join and Ready, so an add interrupted in between describes the node as not joined."""
     c = ctx.require_cluster()
     assert node_common.plan_add(c, model.NodeRequest(role="worker")).join is False
-    assert node_common.plan_add(c, model.NodeRequest(role="worker", join=False)).join is False
 
 
 def test_plan_add_inherits_the_size_of_the_first_node_of_the_role(ctx: Context) -> None:
@@ -60,7 +59,7 @@ def test_plan_add_inherits_the_size_of_the_first_node_of_the_role(ctx: Context) 
         "4g",
         False,  # join: true is the record phase's to write
     )
-    req = model.NodeRequest(role="control-plane", cpu=4, memory="8g", join=False)
+    req = model.NodeRequest(role="control-plane", cpu=4, memory="8g")
     n = node_common.plan_add(c, req)
     assert (n.name, n.cpu, n.memory, n.join) == ("demo-control-plane-2", 4, "8g", False)
     spec = c.spec.model_copy(update={"nodes": [c.first_control_plane]})
@@ -227,7 +226,7 @@ def test_add_control_plane_uploads_a_fresh_certificate_key(tmp_path: Path) -> No
 def test_add_no_join_stops_after_the_addons(tmp_path: Path) -> None:
     ctx, host = node_ctx(tmp_path)
     new_node_answers(host, "demo-worker-3", ready_after=0)
-    ctx.request = model.NodeRequest(role="worker", join=False)
+    ctx.request = model.NodeRequest(role="worker")
     Runner([node_add.add_phase(join=False)], record=False).run(ctx)
     assert phases_of(host)[-1] == "add/gvisor"
     saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])

@@ -160,15 +160,11 @@ def install_cilium(ctx: Context) -> None:
     record_datapath(ctx, datapath)
 
 
-def install_run(ctx: Context) -> None:
-    install_cilium(ctx)
-
-
 INSTALL = Phase(
     "install",
     "install the CNI (cilium: kube-proxy replacement, LB-IPAM, Gateway API)",
     install_done,
-    install_run,
+    install_cilium,
 )
 
 

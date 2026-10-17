@@ -196,7 +196,7 @@ def cmd_add_node(a: argparse.Namespace) -> int:
     memory = normalize_memory(a.memory) if a.memory else None
     ctx = make_context()
     c = running_cluster(ctx, a.cluster)
-    ctx.request = model.NodeRequest(role=a.role, cpu=a.cpu, memory=memory, join=not a.no_join)
+    ctx.request = model.NodeRequest(role=a.role, cpu=a.cpu, memory=memory)
     Runner([node_add.add_phase(join=not a.no_join)], record=False).run(ctx)
     print()
     if a.no_join:
@@ -271,7 +271,6 @@ def make_context(
     paths = Paths.from_env(HOME)
     opts = Options(
         dry_run=dry_run,
-        quiet=quiet,
         offline=os.environ.get("TK_OFFLINE") == "1",
         assume_yes=assume_yes or os.environ.get("TK_ASSUME_YES") == "1",
         refresh=refresh,

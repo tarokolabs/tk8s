@@ -60,20 +60,6 @@ def test_status_is_dumped_after_spec() -> None:
     assert text.index("spec:") < text.index("status:")
 
 
-def test_save_is_atomic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    p = tmp_path / "cluster.yaml"
-    p.write_text("old: file\n")
-    c = model.load_text(GOOD)
-
-    def boom(self: Path, target: Path) -> None:
-        raise OSError("disk full")
-
-    monkeypatch.setattr(Path, "replace", boom)
-    with pytest.raises(OSError):
-        model.save(c, p)
-    assert p.read_text() == "old: file\n"  # the old file is intact; only the .tmp was touched
-
-
 def test_missing_status_with_marker_is_ready(tmp_path: Path) -> None:
     p = tmp_path / "cluster.yaml"
     p.write_text(GOOD)
@@ -160,11 +146,11 @@ def test_ha_and_vip_go_together() -> None:
         model.load_text(GOOD.replace("    ha: proxy\n", "    ha: proxy\n    vip: 172.23.3.1\n"))
 
 
-def test_node_request_is_frozen_and_defaults_to_join() -> None:
+def test_node_request_is_frozen_and_sizes_default_to_none() -> None:
     from pydantic import ValidationError
 
     r = model.NodeRequest(role="worker")
-    assert r.cpu is None and r.memory is None and r.join is True
+    assert r.cpu is None and r.memory is None
     with pytest.raises(ValidationError):
         model.NodeRequest(role="worker", cpu=0)
 

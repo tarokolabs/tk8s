@@ -14,7 +14,7 @@ def cni_plugins_done(ctx: Context) -> bool:
 
 
 def cni_plugins_run(ctx: Context) -> None:
-    """Install or refresh the plugins in CNI_DIR (copied in place, never rm -r)."""
+    """Download the plugins into CNI_DIR (copied in place, never rm -r)."""
     cni = ctx.paths.cni_dir
     if ctx.options.offline:
         raise PhaseFailed(
@@ -22,12 +22,6 @@ def cni_plugins_run(ctx: Context) -> None:
         )
     ctx.host.mkdir(cni)
     bridge = cni / "bridge"
-    if ctx.host.exists(bridge) and not ctx.host.writable(bridge):
-        owner = ctx.host.run(["stat", "-c", "%u", str(bridge)], capture=True).stdout.strip()
-        if owner == "0":  # plugins installed by an earlier root-run tkctl
-            uid = ctx.host.run(["id", "-u"], capture=True).stdout.strip()
-            gid = ctx.host.run(["id", "-g"], capture=True).stdout.strip()
-            ctx.host.run(["chown", "-R", f"{uid}:{gid}", str(cni)], sudo=True)
     v = ctx.versions.cni_plugins
     url = (
         f"https://github.com/containernetworking/plugins/releases/download/{v}/"

@@ -23,7 +23,6 @@ from .versions import Versions
 @dataclass
 class Options:
     dry_run: bool = False
-    quiet: bool = False
     offline: bool = False  # TK_OFFLINE=1: never download
     assume_yes: bool = False  # TK_ASSUME_YES=1 or --yes
     refresh: bool = False  # pull images --refresh

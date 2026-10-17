@@ -2,7 +2,7 @@
 against the cluster and polls; the namespace the test resources live in."""
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from ..create.kubeadm import kubectl_env
 from ..phases import Context
@@ -21,7 +21,7 @@ class Report:
     failed: int = 0
     skipped: int = 0
     gateway_ip: str = ""
-    checked: dict[str, bool] = field(default_factory=dict)
+    gvisor_out: bool | None = None  # what the gvisor pod printed, for check_gvisor_network
 
     def ok(self, msg: str) -> None:
         self.passed += 1

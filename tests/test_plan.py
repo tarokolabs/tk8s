@@ -217,7 +217,7 @@ def test_index_and_existing_come_from_the_clusters_dir(tmp_path: Path) -> None:
     paths = Paths(tmp_path, tmp_path / "wulin", HOME)
     (tmp_path / "clusters" / "a").mkdir(parents=True)
     a = res(user("metadata: {name: a}\nspec:\n  nodes: [{role: control-plane}]\n"), used={1})
-    model.save(a, tmp_path / "clusters" / "a" / "cluster.yaml")
+    (tmp_path / "clusters" / "a" / "cluster.yaml").write_text(model.dumps(a))
     assert used_indices(paths) == {0}
     assert load_existing(paths, "a") is not None and load_existing(paths, "b") is None
     assert pick_index(user(DEMO), None, used_indices(paths)) == 1

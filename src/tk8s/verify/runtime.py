@@ -57,7 +57,7 @@ def check_runtimeclass_gvisor(r: Report) -> None:
         "uname -r; wget -qO- -T 10 --no-check-certificate "
         "https://kubernetes.default.svc/version 2>/dev/null | grep -o gitVersion",
     )
-    r.checked["gvisor-out"] = "gitVersion" in out
+    r.gvisor_out = "gitVersion" in out
     if "gvisor" in out:
         r.ok(f"RuntimeClass gvisor (kernel {out.splitlines()[0]})")
     else:
@@ -68,7 +68,7 @@ def check_gvisor_network(r: Report) -> None:
     c = r.ctx.require_cluster()
     if not c.spec.gvisor or r.kubectl("get", "runtimeclass", "gvisor")[0] != 0:
         return
-    if r.checked.get("gvisor-out"):
+    if r.gvisor_out:
         r.ok("gvisor sandbox network (kubernetes API reachable)")
     else:
         dp = c.spec.datapath_resolved or c.spec.datapath

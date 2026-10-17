@@ -66,7 +66,6 @@ class NodeRequest(Strict):
     role: Role
     cpu: int | None = Field(default=None, ge=1)
     memory: str | None = Field(default=None, pattern=MEMORY)
-    join: bool = True
 
 
 # ---- what the platform keeps in <state dir>/cluster.yaml
@@ -245,13 +244,6 @@ def dumps(cluster: Cluster) -> str:
     data = cluster.model_dump(mode="json", exclude_none=True)
     data["spec"]["kubernetes"] = _Quoted(data["spec"]["kubernetes"])
     return yaml.dump(data, Dumper=_Dumper, sort_keys=False, default_flow_style=False)
-
-
-def save(cluster: Cluster, path: Path) -> None:
-    """Atomic: a crash mid-write never leaves half a cluster.yaml behind."""
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(dumps(cluster))
-    tmp.replace(path)
 
 
 def peek(path: Path) -> tuple[int | None, str | None]:

@@ -186,7 +186,9 @@ def test_node_image_pull_build_refresh_offline(ctx: Context, host: FakeHost) -> 
 def test_prune_refuses_while_a_cluster_uses_the_version(ctx: Context, host: FakeHost) -> None:
     ctx.options.assume_yes = True
     (ctx.paths.clusters_dir / "demo").mkdir(parents=True)
-    model.save(ctx.require_cluster(), ctx.paths.clusters_dir / "demo" / "cluster.yaml")
+    (ctx.paths.clusters_dir / "demo" / "cluster.yaml").write_text(
+        model.dumps(ctx.require_cluster())
+    )
     (ctx.paths.images_dir / K8S).mkdir(parents=True)
     with pytest.raises(
         images.ImagesError, match=f"image store {K8S} is used by cluster\\(s\\): demo"
@@ -253,7 +255,9 @@ def test_clusters_using_tolerates_a_broken_file(tmp_path: Path, ctx: Context) ->
     (ctx.paths.clusters_dir / "junk").mkdir(parents=True)
     (ctx.paths.clusters_dir / "junk" / "cluster.yaml").write_text("not: [valid")
     (ctx.paths.clusters_dir / "demo").mkdir()
-    model.save(ctx.require_cluster(), ctx.paths.clusters_dir / "demo" / "cluster.yaml")
+    (ctx.paths.clusters_dir / "demo" / "cluster.yaml").write_text(
+        model.dumps(ctx.require_cluster())
+    )
     assert images.clusters_using(ctx.paths, K8S) == ["demo"]
 
 
