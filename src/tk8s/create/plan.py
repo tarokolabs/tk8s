@@ -80,6 +80,7 @@ def network(
     want_router: IPv4Address | None,
     ha: Literal["proxy", "bgp"] | None,
     want_vip: IPv4Address | None = None,
+    routers: Literal[1, 2] | None = None,
 ) -> model.Network:
     """Subnet by index: nodes 172.22.N.0/24 (the router at .253, LB-IPAM .200-.219), pods a /21,
     services a /24; the gateway .254 is the host bridge, the router's upstream. bgp mode adds the
@@ -92,6 +93,11 @@ def network(
         raise PlanError(
             f"spec.network.router {want_router} must be 172.22.{index}.220-253 "
             "(the default is .253)"
+        )
+    if routers == 2 and want_router is not None and int(want_router) & 0xFF in (251, 252):
+        raise PlanError(
+            f"spec.network.router {want_router} is a router itself with routers: 2 "
+            f"(.251 and .252); pick another 172.22.{index}.220-253"
         )
     vip_net = IPv4Network(f"172.23.{index}.0/24")
     if want_vip is not None and mode != "bgp":
@@ -110,6 +116,7 @@ def network(
         gateway=IPv4Address(f"172.22.{index}.254"),
         router=want_router or IPv4Address(f"172.22.{index}.253"),
         ha=mode,
+        routers=routers or 1,
         vip=vip,
         lb_range=f"172.22.{index}.200-172.22.{index}.219",
         pods=IPv4Network(f"10.244.{index * 8}.0/21"),
@@ -161,6 +168,15 @@ def resolve(
             "pass --allow-overlap to force"
         )
     s = u.spec
+    want_routers = (s.network.routers if s.network else None) or 1
+    if existing is not None and want_routers != existing.spec.network.routers:
+        # a resume re-renders the units but removes none: the old router's unit would stay next
+        # to the new ones, two claimants of the floating address
+        raise PlanError(
+            f"cluster {u.metadata.name} is being created with routers: "
+            f"{existing.spec.network.routers}; rerun with the same --routers (or --preset), "
+            f"or delete it first: tkctl delete cluster {u.metadata.name}"
+        )
     spec = model.Spec(
         kubernetes=s.kubernetes or k8s_default,
         cni=s.cni,
@@ -172,6 +188,7 @@ def resolve(
             s.network.router if s.network else None,
             s.network.ha if s.network else None,
             s.network.vip if s.network else None,
+            routers=s.network.routers if s.network else None,
         ),
         nodes=expand_nodes(u.metadata.name, s.nodes, index),
     )
@@ -209,6 +226,8 @@ def done(ctx: Context) -> bool:
 
 def run(ctx: Context) -> None:
     c = ctx.require_cluster()
+    if ctx.options.preset:
+        ctx.say(f"  {ctx.options.preset}")
     n = len(c.control_planes)
     ctx.say(
         f"  cluster {c.name}: {n} control plane{'s' if n > 1 else ''} + "

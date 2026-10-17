@@ -7,7 +7,7 @@ from pathlib import Path
 from .. import model
 from ..phases import Context, Phase
 from ..render import template
-from . import router
+from . import router, router_config
 
 
 def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str]:
@@ -28,34 +28,49 @@ def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str
     )
     blocks: dict[str, object]
     if net.ha == "proxy":
-        boot, blocks = "router/tkctl-proxy.boot", {"servers": router.servers(c)}
+        boot, blocks = "router/tkctl-proxy.boot", {"servers": router_config.servers(c)}
     else:
         # the reject route at distance 254 loses to any BGP-learned VIP (distance 20); with no
         # control plane announcing, the router refuses at once instead of looping the packet
         # back to the host, whose VIP/32 route points here
         boot = "router/tkctl-bgp.boot"
         blocks = {
-            "neighbors": router.neighbors(c),
-            "bfd_peers": router.bfd_peers(c),
+            "neighbors": router_config.neighbors(c),
+            "bfd_peers": router_config.bfd_peers(c),
             "vip": net.vip,
         }
-    files[state / "router" / "tkctl.boot"] = template(
-        p.home, boot, cluster=c.name, router_ip=net.router, gateway=net.gateway, **blocks
-    )
-    files[state / "router" / "scripts" / "vyos-preconfig-bootup.script"] = template(
-        p.home, "router/vyos-preconfig-bootup.script", cluster=c.name
-    )
-    files[state / "router" / "scripts" / "vyos-postconfig-bootup.script"] = template(
-        p.home, "router/vyos-postconfig-bootup.script", cluster=c.name, router_ip=net.router
-    )
-    files[unit_dir / f"{c.name}-router.container"] = template(
-        p.home,
-        "router.container",
-        cluster=c.name,
-        router_ip=net.router,
-        router_image=router.image(v),
-        state_dir=state,
-    )
+    for r in c.routers:
+        # the same tkctl.boot per router but for its own address, host name and VRRP priority;
+        # the VRRP block (two routers only) goes first, config.boot keeps its sections sorted
+        vrrp = router_config.vrrp_block(c, r)
+        files[state / r.dir / "tkctl.boot"] = template(
+            p.home,
+            boot,
+            router_ip=r.ip,
+            router_name=r.name,
+            gateway=net.gateway,
+            vrrp=vrrp + "\n" if vrrp else "",
+            **blocks,
+        )
+        files[state / r.dir / "scripts" / "vyos-preconfig-bootup.script"] = template(
+            p.home, "router/vyos-preconfig-bootup.script", cluster=c.name
+        )
+        files[state / r.dir / "scripts" / "vyos-postconfig-bootup.script"] = template(
+            p.home,
+            "router/vyos-postconfig-bootup.script",
+            cluster=c.name,
+            floating_ip=c.floating_ip,
+        )
+        files[unit_dir / f"{r.name}.container"] = template(
+            p.home,
+            "router.container",
+            cluster=c.name,
+            router_name=r.name,
+            router_dir=r.dir,
+            router_ip=r.ip,
+            router_image=router.image(v),
+            state_dir=state,
+        )
     for n in c.spec.nodes:
         files[unit_dir / f"{n.name}.container"] = template(
             p.home,
@@ -77,7 +92,7 @@ def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str
             memory=n.memory,
         )
     wants = [
-        f"{c.name}-router.service",
+        *(f"{r.name}.service" for r in c.routers),
         *(f"{n.name}.service" for n in c.spec.nodes),
         f"{c.name}-routes.service",
     ]
@@ -103,9 +118,12 @@ def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str
 
 
 def needs_sudo(ctx: Context, path: Path) -> bool:
-    """Units live under /etc; the router directory is written by VyOS (root in the container)."""
-    router_dir = ctx.paths.state_dir(ctx.cluster_name) / "router"
-    return not path.is_relative_to(ctx.paths.data_dir) or path.is_relative_to(router_dir)
+    """Units live under /etc; the router directories are written by VyOS (root in the container)."""
+    state = ctx.paths.state_dir(ctx.cluster_name)
+    router_dirs = [state / r.dir for r in ctx.require_cluster().routers]
+    return not path.is_relative_to(ctx.paths.data_dir) or any(
+        path.is_relative_to(d) for d in router_dirs
+    )
 
 
 def done(ctx: Context, cluster: model.Cluster | None = None) -> bool:

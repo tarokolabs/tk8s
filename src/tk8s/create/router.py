@@ -1,84 +1,35 @@
-"""router: the VyOS container of a cluster: its image, the server blocks of its tkctl.boot,
-and how tkctl waits for it, reads its load balancer status and reloads its configuration."""
+"""router: the VyOS container(s) of a cluster: the image, how tkctl waits for a router, reads
+its backend or peer list and reloads its configuration. Every function that talks to a router
+names it (model.Router); the cluster-wide ones at the end loop over Cluster.routers. The
+tkctl.boot blocks are router_config's, the running/VRRP state router_state's."""
 
 import json
 
 from .. import model, podman, versions
 from ..phases import Context, PhaseFailed, wait_for
-
-OP = "/opt/vyatta/bin/vyatta-op-cmd-wrapper"
+from .router_state import OP, running  # OP lives there: router_state cannot import this module
 
 
 def image(v: versions.Versions) -> str:
     return f"ghcr.io/tarokolabs/tk8s/router:{v.vyos}"
 
 
-def servers(c: model.Cluster) -> str:
-    """The backend's server blocks, one per control plane, in config.boot's own layout."""
-    return "\n".join(
-        f"            server {n.name} {{\n"
-        f'                address "{n.ip}"\n'
-        f"                check {{\n"
-        f"                }}\n"
-        f'                port "6443"\n'
-        f"            }}"
-        for n in c.control_planes
-    )
+# ---- one router
 
 
-def neighbors(c: model.Cluster) -> str:
-    """One eBGP neighbor per control plane (AS 65001, BFD on, timers 3/9), in config.boot's own
-    layout, for the bgp template."""
-    return "\n".join(
-        f"        neighbor {n.ip} {{\n"
-        f"            address-family {{\n"
-        f"                ipv4-unicast {{\n"
-        f"                }}\n"
-        f"            }}\n"
-        f"            bfd {{\n"
-        f"            }}\n"
-        f'            remote-as "65001"\n'
-        f"            timers {{\n"
-        f'                holdtime "9"\n'
-        f'                keepalive "3"\n'
-        f"            }}\n"
-        f"        }}"
-        for n in c.control_planes
-    )
-
-
-def bfd_peers(c: model.Cluster) -> str:
-    """One BFD peer per control plane, 300 ms x 3: a silent control plane is dead in about a
-    second (the spike measured 1.1 s against 8.8 s on BGP timers alone)."""
-    return "\n".join(
-        f"        peer {n.ip} {{\n"
-        f"            interval {{\n"
-        f'                multiplier "3"\n'
-        f'                receive "300"\n'
-        f'                transmit "300"\n'
-        f"            }}\n"
-        f"        }}"
-        for n in c.control_planes
-    )
-
-
-def name(ctx: Context) -> str:
-    return f"{ctx.cluster_name}-router"
-
-
-def booted(ctx: Context) -> bool:
+def booted(ctx: Context, r: model.Router) -> bool:
     """VyOS writes /tmp/vyos-config-status (0 = applied) when the boot-time config load ends;
     vyos-router.service is active long before that."""
-    r = podman.exec_(ctx, name(ctx), "cat", "/tmp/vyos-config-status")
-    return r.returncode == 0 and r.stdout.strip() == "0"
+    res = podman.exec_(ctx, r.name, "cat", "/tmp/vyos-config-status")
+    return res.returncode == 0 and res.stdout.strip() == "0"
 
 
-def backends(ctx: Context) -> list[tuple[str, str]]:
+def backends(ctx: Context, r: model.Router) -> list[tuple[str, str]]:
     """(server, status) for every control plane in the api backend, from `show haproxy`."""
-    r = podman.exec_(ctx, name(ctx), OP, "show", "haproxy")
-    if r.returncode != 0:
+    res = podman.exec_(ctx, r.name, OP, "show", "haproxy")
+    if res.returncode != 0:
         return []
-    rows = (line.split() for line in r.stdout.splitlines())
+    rows = (line.split() for line in res.stdout.splitlines())
     return [
         (f[1], f[2])
         for f in rows
@@ -86,22 +37,22 @@ def backends(ctx: Context) -> list[tuple[str, str]]:
     ]
 
 
-def _vtysh(ctx: Context, command: str) -> object | None:
+def _vtysh(ctx: Context, r: model.Router, command: str) -> object | None:
     """One op-mode query as JSON, or None when the router or FRR does not answer."""
-    r = podman.exec_(ctx, name(ctx), "vtysh", "-c", f"{command} json")
-    if r.returncode != 0 or not r.stdout.strip():
+    res = podman.exec_(ctx, r.name, "vtysh", "-c", f"{command} json")
+    if res.returncode != 0 or not res.stdout.strip():
         return None
     try:
-        data: object = json.loads(r.stdout)
+        data: object = json.loads(res.stdout)
     except ValueError:
         return None
     return data
 
 
-def peers(ctx: Context, c: model.Cluster) -> list[tuple[str, str]]:
+def peers(ctx: Context, r: model.Router, c: model.Cluster) -> list[tuple[str, str]]:
     """(control plane, BGP state) per neighbor in `show bgp ipv4 unicast summary`; a neighbor
     cluster.yaml does not have is listed by address."""
-    data = _vtysh(ctx, "show bgp ipv4 unicast summary")
+    data = _vtysh(ctx, r, "show bgp ipv4 unicast summary")
     if not isinstance(data, dict):
         return []
     by_ip = {str(n.ip): n.name for n in c.control_planes}
@@ -112,11 +63,11 @@ def peers(ctx: Context, c: model.Cluster) -> list[tuple[str, str]]:
     ]
 
 
-def _nexthop_ips(ctx: Context, c: model.Cluster) -> list[str]:
+def _nexthop_ips(ctx: Context, r: model.Router, c: model.Cluster) -> list[str]:
     """The active next hops of the router's selected route to the VIP: where apiserver
     connections go, empty without a route."""
     vip = c.spec.network.vip
-    data = _vtysh(ctx, f"show ip route {vip}/32")
+    data = _vtysh(ctx, r, f"show ip route {vip}/32")
     entries = data.get(f"{vip}/32", []) if isinstance(data, dict) else []
     dicts = [e for e in entries if isinstance(e, dict)]
     chosen = next((e for e in dicts if e.get("selected")), dicts[0] if dicts else None)
@@ -128,29 +79,29 @@ def _nexthop_ips(ctx: Context, c: model.Cluster) -> list[str]:
     return [str(h.get("ip", "")) for h in hops if isinstance(h, dict) and h.get("active")]
 
 
-def nexthops(ctx: Context, c: model.Cluster) -> int:
+def nexthops(ctx: Context, r: model.Router, c: model.Cluster) -> int:
     """How many active next hops the route to the VIP has: the ECMP width that carries traffic."""
-    return len(_nexthop_ips(ctx, c))
+    return len(_nexthop_ips(ctx, r, c))
 
 
-def routes_to(ctx: Context, c: model.Cluster, n: model.Node) -> bool:
-    """Whether the router still sends apiserver connections to this control plane: an UP backend
-    in proxy mode, an active next hop of the VIP route in bgp mode."""
+def routes_to(ctx: Context, r: model.Router, c: model.Cluster, n: model.Node) -> bool:
+    """Whether this router still sends apiserver connections to this control plane: an UP
+    backend in proxy mode, an active next hop of the VIP route in bgp mode."""
     if c.spec.network.ha == "proxy":
-        return any(name == n.name and status.startswith("UP") for name, status in backends(ctx))
-    return str(n.ip) in _nexthop_ips(ctx, c)
+        return any(name == n.name and s.startswith("UP") for name, s in backends(ctx, r))
+    return str(n.ip) in _nexthop_ips(ctx, r, c)
 
 
-def bfd_down(ctx: Context, c: model.Cluster) -> list[str]:
-    """The control planes whose BFD session with the router is not up."""
-    data = _vtysh(ctx, "show bfd peers")
+def bfd_down(ctx: Context, r: model.Router, c: model.Cluster) -> list[str]:
+    """The control planes whose BFD session with this router is not up."""
+    data = _vtysh(ctx, r, "show bfd peers")
     status = {s.get("peer"): s.get("status") for s in data} if isinstance(data, list) else {}
     return [n.name for n in c.control_planes if status.get(str(n.ip)) != "up"]
 
 
-def members(ctx: Context, c: model.Cluster) -> list[tuple[str, str]]:
-    """What the router knows per control plane in this mode: backends or BGP peers."""
-    return backends(ctx) if c.spec.network.ha == "proxy" else peers(ctx, c)
+def members(ctx: Context, r: model.Router, c: model.Cluster) -> list[tuple[str, str]]:
+    """What this router knows per control plane in this mode: backends or BGP peers."""
+    return backends(ctx, r) if c.spec.network.ha == "proxy" else peers(ctx, r, c)
 
 
 def kind(c: model.Cluster) -> str:
@@ -169,47 +120,42 @@ def show_path(c: model.Cluster) -> str:
     return f"vtysh -c 'show ip route {c.spec.network.vip}'"
 
 
-def synced(ctx: Context, c: model.Cluster) -> bool:
-    """The router's backend (proxy) or peer (bgp) list is exactly the cluster's control planes."""
-    return {n for n, _ in members(ctx, c)} == {n.name for n in c.control_planes}
+def synced(ctx: Context, r: model.Router, c: model.Cluster) -> bool:
+    """This router's backend (proxy) or peer (bgp) list is exactly the cluster's control planes."""
+    return {n for n, _ in members(ctx, r, c)} == {n.name for n in c.control_planes}
 
 
-def wait_booted(ctx: Context) -> None:
+def wait_booted(ctx: Context, r: model.Router) -> None:
     """The boot-time config load holds VyOS for a few seconds after start; a load alongside it
     fails ("Failed to generate committed config") with exit status 0."""
     wait_for(
         ctx,
-        lambda: booted(ctx),
+        lambda: booted(ctx, r),
         rounds=30,
         delay=ctx.options.poll,
         failure=lambda: (
-            f"{name(ctx)} did not finish booting within 60 s (podman logs {name(ctx)}; "
-            f"podman exec {name(ctx)} cat /tmp/vyos-config-status)"
+            f"{r.name} did not finish booting within 60 s (podman logs {r.name}; "
+            f"podman exec {r.name} cat /tmp/vyos-config-status)"
         ),
     )
 
 
-def wait_synced(ctx: Context, c: model.Cluster) -> None:
+def wait_synced(ctx: Context, r: model.Router, c: model.Cluster) -> None:
     """Every control plane listed as a backend (proxy) or neighbor (bgp), no other: the config
     took. The backends stay DOWN, the sessions short of Established, until kubeadm brings an
     apiserver up (and, in bgp mode, kubeadm/frr starts FRR in the control plane)."""
 
     def mismatch() -> str:
-        listed = ", ".join(n for n, _ in members(ctx, c)) or "nothing"
+        listed = ", ".join(n for n, _ in members(ctx, r, c)) or "nothing"
         want = ", ".join(n.name for n in c.control_planes)
         return (
-            f"{name(ctx)} lists {listed} as {kind(c)}s, cluster.yaml has {want} "
-            f"(podman exec {name(ctx)} {show(c)})"
+            f"{r.name} lists {listed} as {kind(c)}s, cluster.yaml has {want} "
+            f"(podman exec {r.name} {show(c)})"
         )
 
-    wait_for(ctx, lambda: synced(ctx, c), rounds=30, delay=ctx.options.poll, failure=mismatch)
+    wait_for(ctx, lambda: synced(ctx, r, c), rounds=30, delay=ctx.options.poll, failure=mismatch)
     got = len(c.control_planes)
-    ctx.say(f"  {name(ctx)}: VyOS up, {got} control plane {kind(c)}(s) at {c.spec.network.router}")
-
-
-def wait(ctx: Context) -> None:
-    wait_booted(ctx)
-    wait_synced(ctx, ctx.require_cluster())
+    ctx.say(f"  {r.name}: VyOS up, {got} control plane {kind(c)}(s) at {r.ip}")
 
 
 RELOAD = (
@@ -225,7 +171,7 @@ RELOAD = (
 )
 
 
-def reload(ctx: Context, c: model.Cluster) -> None:
+def reload(ctx: Context, r: model.Router, c: model.Cluster) -> None:
     """tkctl.boot was re-rendered (a control plane came or went): it becomes config.boot with
     VyOS's version footer (so nothing is migrated), then VyOS loads it and commits the difference
     without dropping connections. `exit` in script-template only tears the session down, so the
@@ -233,9 +179,54 @@ def reload(ctx: Context, c: model.Cluster) -> None:
     changed, 0 when it failed), so the backend list is the proof the change took. The session
     runs in the vyattacfg group, as VyOS requires of configuration scripts: what it leaves under
     /opt/vyatta/config must stay writable to that group, not become root's."""
-    wait_booted(ctx)
-    r = podman.exec_(ctx, name(ctx), "sg", "vyattacfg", "-c", "/bin/vbash -s", input=RELOAD)
-    out = r.stdout + r.stderr
-    if r.returncode != 0 or "Commit failed" in out:
-        raise PhaseFailed(f"{name(ctx)} did not accept config.boot: {out.strip()[-300:]}")
-    wait_synced(ctx, c)
+    wait_booted(ctx, r)
+    res = podman.exec_(ctx, r.name, "sg", "vyattacfg", "-c", "/bin/vbash -s", input=RELOAD)
+    out = res.stdout + res.stderr
+    if res.returncode != 0 or "Commit failed" in out:
+        raise PhaseFailed(f"{r.name} did not accept config.boot: {out.strip()[-300:]}")
+    wait_synced(ctx, r, c)
+
+
+# ---- every router of the cluster
+
+
+def wait(ctx: Context) -> None:
+    """create: every router boots and lists the control planes."""
+    c = ctx.require_cluster()
+    for r in c.routers:
+        wait_booted(ctx, r)
+        wait_synced(ctx, r, c)
+
+
+def all_booted_and_synced(ctx: Context, c: model.Cluster) -> bool:
+    return all(booted(ctx, r) and synced(ctx, r, c) for r in c.routers)
+
+
+def running_routers(ctx: Context, c: model.Cluster) -> list[model.Router]:
+    return [r for r in c.routers if running(ctx, r)]
+
+
+def all_synced(ctx: Context, c: model.Cluster) -> bool:
+    """Every running router lists exactly the control planes; false when none runs."""
+    up = running_routers(ctx, c)
+    return bool(up) and all(synced(ctx, r, c) for r in up)
+
+
+def reload_all(ctx: Context, c: model.Cluster) -> None:
+    """node add/delete: the running routers load the new tkctl.boot now; a stopped one gets it
+    at its next boot (the preconfig script copies tkctl.boot over config.boot every time), so it
+    is skipped with a word, not waited for. No router running at all is a failure: nothing would
+    carry the change."""
+    up = running_routers(ctx, c)
+    if not up:
+        raise PhaseFailed(f"no router of cluster {c.name} is running")
+    for r in c.routers:
+        if r in up:
+            reload(ctx, r, c)
+        else:
+            ctx.say(f"  {r.name} is not running; it loads the new tkctl.boot when it starts")
+
+
+def any_routes_to(ctx: Context, c: model.Cluster, n: model.Node) -> list[str]:
+    """The running routers that still send apiserver connections to this control plane."""
+    return [r.name for r in running_routers(ctx, c) if routes_to(ctx, r, c, n)]

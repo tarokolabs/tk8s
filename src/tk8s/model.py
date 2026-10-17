@@ -37,6 +37,7 @@ class UserNetwork(Strict):
     nodes: IPv4Network | None = None
     router: IPv4Address | None = None
     ha: Literal["proxy", "bgp"] | None = None
+    routers: Literal[1, 2] | None = None
     vip: IPv4Address | None = None
 
 
@@ -90,6 +91,7 @@ class Network(Strict):
     gateway: IPv4Address
     router: IPv4Address
     ha: Literal["proxy", "bgp"] = "proxy"
+    routers: Literal[1, 2] = 1  # two: VRRP floats `router` between them (.251 and .252)
     vip: IPv4Address | None = None  # bgp mode only: the anycast apiserver address, 172.23.N.1
     lb_range: str
     pods: IPv4Network
@@ -102,6 +104,17 @@ class Network(Strict):
                 "spec.network.vip is required with ha: bgp and not allowed with ha: proxy"
             )
         return self
+
+
+class Router(Strict):
+    """One router container of the cluster, derived from Network and never stored: with one
+    router it is <cluster>-router at the floating address; with two, <cluster>-router-1 (.251,
+    VRRP priority 200) and -2 (.252, 100) behind it."""
+
+    name: str
+    dir: str  # the state subdirectory (router, router-1, router-2)
+    ip: IPv4Address
+    priority: int | None
 
 
 class Spec(Strict):
@@ -140,6 +153,33 @@ class Cluster(Strict):
         """What api.<cluster>.k8s resolves to: the router in proxy mode, the VIP in bgp mode."""
         net = self.spec.network
         return net.vip if net.vip is not None else net.router
+
+    @property
+    def floating_ip(self) -> IPv4Address:
+        """The nodes' gateway and, in proxy mode, the apiserver entry: the one router's address,
+        or the VRRP address the two routers share."""
+        return self.spec.network.router
+
+    @property
+    def routers(self) -> list[Router]:
+        net = self.spec.network
+        if net.routers == 1:
+            return [Router(name=f"{self.name}-router", dir="router", ip=net.router, priority=None)]
+        base = int(net.nodes.network_address)
+        return [
+            Router(
+                name=f"{self.name}-router-1",
+                dir="router-1",
+                ip=IPv4Address(base + 251),
+                priority=200,
+            ),
+            Router(
+                name=f"{self.name}-router-2",
+                dir="router-2",
+                ip=IPv4Address(base + 252),
+                priority=100,
+            ),
+        ]
 
     @property
     def control_planes(self) -> list[Node]:

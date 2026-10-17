@@ -15,6 +15,43 @@ class UsageError(Exception):
     pass
 
 
+# --preset: a named topology, expanded into the flags below before anything else sees them
+PRESETS: dict[str, dict[str, object]] = {
+    "lab": {"control_planes": 1, "workers": 2, "ha": "proxy", "routers": 1},
+    "ha": {"control_planes": 3, "workers": 3, "ha": "bgp", "routers": 2},
+}
+PRESET_FLAGS = ("--control-planes", "--workers", "--ha", "--routers", "--defer-join", "-f")
+
+
+def preset_line(name: str) -> str:
+    """The expansion [plan] prints, so a preset is visibly a shorthand for flags."""
+    p = PRESETS[name]
+    return (
+        f"preset {name}: --control-planes {p['control_planes']} --workers {p['workers']} "
+        f"--ha {p['ha']} --routers {p['routers']}"
+    )
+
+
+def apply_preset(a: argparse.Namespace, raw: list[str]) -> str | None:
+    """Without --preset: None. With it: the topology flags take the preset's values and the
+    expansion line comes back; a topology flag on the command line, whatever its value, is
+    refused (the rule is no mixing, not no contradiction)."""
+    if a.preset is None:
+        return None
+    for flag in PRESET_FLAGS:
+        glued = flag == "-f"  # -fFILE is how argparse also spells -f FILE
+        if any(
+            x == flag or x.startswith(flag + "=") or (glued and x.startswith("-f")) for x in raw
+        ):
+            raise UsageError(
+                f"--preset {a.preset} cannot be combined with {flag}; "
+                "use the expanded flags instead"
+            )
+    for k, v in PRESETS[a.preset].items():
+        setattr(a, k, v)
+    return preset_line(a.preset)
+
+
 def validate_name(name: str) -> str:
     if not NAME_RE.match(name):
         raise UsageError(
@@ -58,6 +95,8 @@ def add_create_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--gvisor", action="store_true")
     p.add_argument("--datapath", choices=["auto", "netkit", "veth"])
     p.add_argument("--ha", choices=["proxy", "bgp"])
+    p.add_argument("--routers", type=int, choices=[1, 2], default=1)
+    p.add_argument("--preset", choices=sorted(PRESETS))
     p.add_argument("--defer-join", action="store_true")
     p.add_argument("-f", dest="file")
     p.add_argument("--allow-overlap", action="store_true")
@@ -92,7 +131,7 @@ def user_cluster_from_flags(a: argparse.Namespace) -> model.UserCluster:
         )
     if a.workers:
         groups.append(model.NodeGroup(role="worker", count=a.workers, cpu=a.cpu, memory=memory))
-    network = model.UserNetwork(ha=a.ha) if a.ha else None
+    network = model.UserNetwork(ha=a.ha, routers=a.routers) if a.ha or a.routers == 2 else None
     spec = model.UserSpec(
         kubernetes=a.k8s, gvisor=a.gvisor, datapath=a.datapath, network=network, nodes=groups
     )
@@ -103,8 +142,8 @@ def user_cluster_from_flags(a: argparse.Namespace) -> model.UserCluster:
 def user_cluster_from_file(a: argparse.Namespace, topo_flags: bool) -> model.UserCluster:
     if topo_flags:
         raise UsageError(
-            "-f cannot be combined with --control-planes/--workers/--cpu/--memory/--ha; "
-            "put them in the file"
+            "-f cannot be combined with --control-planes/--workers/--cpu/--memory/--ha/"
+            "--routers; put them in the file"
         )
     path = Path(a.file)
     if not path.is_file():

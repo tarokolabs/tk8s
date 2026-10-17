@@ -8,10 +8,13 @@ from tests.fixtures import (
     SHOW_HAPROXY,
     VBASH,
     argvs,
+    bgp_router_answers,
     make_ctx,
     new_node_answers,
     phases_of,
     ready_host,
+    two_router_user,
+    vtysh_route,
 )
 from tk8s import lifecycle, model
 from tk8s.create import units
@@ -471,3 +474,95 @@ def test_delete_node_refuses_to_guess_when_the_apiserver_is_unreachable(tmp_path
     assert not any(
         x[:2] == ["podman", "rm"] or x[:3] == ["podman", "volume", "rm"] for x in argvs(host)
     )
+
+
+# ---- two routers
+
+
+def two_router_disk(tmp_path: Path) -> tuple[Context, FakeHost]:
+    """demo with two routers (3 control planes + 1 worker, bgp) is Ready on the fake host; both
+    routers booted and route the VIP over the three control planes."""
+    host = FakeHost()
+    c = ready_host(host, tmp_path, user=two_router_user())
+    assert c.status is not None
+    c = c.model_copy(update={"status": c.status.model_copy(update={"phase": "Ready"})})
+    host.files[tmp_path / "clusters" / "demo" / "cluster.yaml"] = model.dumps(c)
+    ctx = make_ctx(host, tmp_path, user=None)
+    ctx.cluster, ctx.name = c, "demo"
+    host.podman.update(f"container:{n.name}" for n in c.spec.nodes)
+    host.active.update(f"{n.name}.service" for n in c.spec.nodes)
+    host.responses[("curl", "-sk", "--max-time", "3")] = Result(0, "ok", "")
+    for r in ("demo-router-1", "demo-router-2"):
+        bgp_router_answers(host, router=r)
+        host.responses[("podman", "exec", "-i", r)] = Result(0, "", "")
+    return ctx, host
+
+
+def test_add_start_reloads_only_the_running_routers_and_says_why(tmp_path: Path) -> None:
+    ctx, host = two_router_disk(tmp_path)
+    ctx.request = model.NodeRequest(role="worker")
+    node_add.plan_run(ctx)
+    new_node_answers(host, "demo-worker-2", ready_after=0)
+    host.podman.add("stopped:demo-router-2")
+    Runner([node_add.START], record=False).run(ctx)
+    assert (
+        "  demo-router-2 is not running; it loads the new tkctl.boot when it starts" in host.lines
+    )
+    vbash = [a for a in argvs(host) if a[:3] == ["podman", "exec", "-i"] and "vbash" in " ".join(a)]
+    assert [a[3] for a in vbash] == ["demo-router-1"]
+
+
+def test_add_start_fails_at_once_when_no_router_is_running(tmp_path: Path) -> None:
+    ctx, host = two_router_disk(tmp_path)
+    ctx.request = model.NodeRequest(role="worker")
+    node_add.plan_run(ctx)
+    host.podman.update({"stopped:demo-router-1", "stopped:demo-router-2"})
+    with pytest.raises(PhaseFailed, match=r"^no router of cluster demo is running$"):
+        Runner([node_add.START], record=False).run(ctx)
+    assert not any("vyos-config-status" in " ".join(a) for a in argvs(host))  # no 60 s wait
+
+
+def test_delete_control_plane_waits_for_every_running_router_to_forget_it(tmp_path: Path) -> None:
+    """router-1 drops the next hop at once, router-2 only on its third answer: kubectl delete node
+    runs after router-2's third route query."""
+    ctx, host = two_router_disk(tmp_path)
+    host.responses = {
+        ("kubectl", "get", "node", "demo-control-plane-2"): [
+            Result(0, "demo-control-plane-2", ""),
+            Result(1, "", "NotFound"),
+        ],
+        **host.responses,
+    }
+    bgp_router_answers(host, router="demo-router-2", hops=3)
+    three = host.responses[vtysh_route("demo-router-2")]
+    bgp_router_answers(host, router="demo-router-2", hops=1)
+    one = host.responses[vtysh_route("demo-router-2")]
+    bgp_router_answers(host, router="demo-router-1", hops=1)
+    host.responses[vtysh_route("demo-router-2")] = [three, three, one]
+    ctx.node = "demo-control-plane-2"
+    Runner([node_delete.DRAIN], record=False).run(ctx)
+    a = argvs(host)
+    gone = a.index(["kubectl", "delete", "node", "demo-control-plane-2"])
+    queries = [
+        i
+        for i, x in enumerate(a)
+        if x[:3] == ["podman", "exec", "demo-router-2"] and "show ip route" in " ".join(x)
+    ]
+    assert len([i for i in queries if i < gone]) == 3
+
+
+def test_delete_control_plane_names_the_routers_that_keep_routing_to_it(tmp_path: Path) -> None:
+    ctx, host = two_router_disk(tmp_path)
+    host.responses = {
+        ("kubectl", "get", "node", "demo-control-plane-2"): Result(0, "demo-control-plane-2", ""),
+        **host.responses,
+    }
+    ctx.node = "demo-control-plane-2"
+    with pytest.raises(
+        PhaseFailed,
+        match=r"demo-router-1, demo-router-2 still send apiserver connections to "
+        r"demo-control-plane-2 after 30 s \(podman exec demo-router-1 vtysh -c "
+        r"'show ip route 172\.23\.0\.1'\)",
+    ):
+        Runner([node_delete.DRAIN], record=False).run(ctx)
+    assert ["kubectl", "delete", "node", "demo-control-plane-2"] not in argvs(host)

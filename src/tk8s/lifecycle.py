@@ -5,8 +5,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import model
-from .create import PHASES, router
+from .create import PHASES
 from .create.kubeadm import kubectl
+from .describe_router import describe_router
 from .phases import Context, poll_until
 
 
@@ -104,14 +105,16 @@ def describe(ctx: Context, c: model.Cluster, output: str | None) -> None:
     describe_addons(ctx, c, state)
     describe_router(ctx, c, state)
     ctx.say("Access:")
+    routers = " and ".join(r.name for r in c.routers)
+    spread = "spreads" if len(c.routers) == 1 else "spread"
     if net.ha == "proxy":
         ctx.say(
-            f"  apiserver:  https://{net.router}:6443 (VyOS haproxy in {c.name}-router; every "
+            f"  apiserver:  https://{net.router}:6443 (VyOS haproxy in {routers}; every "
             "node and this host go through it)"
         )
     else:
         ctx.say(
-            f"  apiserver:  https://{net.vip}:6443 (anycast VIP; {c.name}-router spreads it over "
+            f"  apiserver:  https://{net.vip}:6443 (anycast VIP; {routers} {spread} it over "
             "the control planes announcing it)"
         )
     ctx.say(
@@ -130,30 +133,6 @@ def describe(ctx: Context, c: model.Cluster, output: str | None) -> None:
         f"  units:      {ctx.paths.unit_dir}/{c.name}/   "
         f"target: {ctx.paths.systemd_dir}/{c.name}.target"
     )
-
-
-def describe_router(ctx: Context, c: model.Cluster, state: str) -> None:
-    net = c.spec.network
-    ctx.say("Router:")
-    if net.ha == "proxy":
-        ctx.say("  mode:     proxy (VyOS load-balancing haproxy, TCP check on every control plane)")
-        ctx.say(f"  address:  {net.router} (api.{c.domain} resolves to it on every node)")
-    else:
-        ctx.say(
-            "  mode:     bgp (VyOS BGP AS 65000, ECMP over every control plane announcing the VIP)"
-        )
-        ctx.say(f"  address:  {net.router} (api.{c.domain} -> {net.vip}, the VIP)")
-    ctx.say(f"  shell:    sudo podman exec -it {c.name}-router vbash")
-    label = f"{router.kind(c)}s:"
-    if state != "Running":
-        ctx.say(f"  {label:<10}unavailable (cluster is not running)")
-    else:
-        rows = router.members(ctx, c)
-        ctx.say(f"  {label:<10}" + (", ".join(f"{n} {s}" for n, s in rows) or "none listed"))
-        if net.ha == "bgp":
-            ctx.say(f"  nexthops: {router.nexthops(ctx, c)} to {net.vip} (show ip route {net.vip})")
-    if net.ha == "bgp" and len(c.control_planes) == 1:
-        ctx.say("  note:     one control plane: nothing to spread; --control-planes 3 shows ECMP")
 
 
 def describe_status(ctx: Context, c: model.Cluster) -> None:
@@ -212,7 +191,7 @@ def stop(ctx: Context, c: model.Cluster) -> None:
     all."""
     units = [
         f"{c.name}.target",
-        f"{c.name}-router.service",
+        *(f"{r.name}.service" for r in c.routers),
         *(f"{n.name}.service" for n in c.spec.nodes),
     ]
     # A node recorded in cluster.yaml but never given a unit (an add that died early) makes

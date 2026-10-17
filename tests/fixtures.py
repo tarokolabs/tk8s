@@ -32,6 +32,18 @@ def bgp_user() -> model.UserCluster:
     )
 
 
+def two_router_user() -> model.UserCluster:
+    """demo in bgp mode with two routers: 3 control planes (.1 .2 .3) + 1 worker (.4), routers
+    .251/.252 behind the floating .253, VIP 172.23.0.1."""
+    return model.UserCluster(
+        metadata=model.Metadata(name="demo"),
+        spec=model.UserSpec(
+            network=model.UserNetwork(ha="bgp", routers=2),
+            nodes=[model.NodeGroup(role="control-plane", count=3), model.NodeGroup(role="worker")],
+        ),
+    )
+
+
 def ha_user() -> model.UserCluster:
     """demo with 3 control planes (the third deferred) and one worker."""
     return model.UserCluster(
@@ -137,24 +149,52 @@ SHOW_HAPROXY = (
     "api                   demo-control-plane-1  UP         0 ms         4s\n"
 )
 OP = "/opt/vyatta/bin/vyatta-op-cmd-wrapper"
-VTYSH_SUMMARY = (
-    "podman",
-    "exec",
-    "demo-router",
-    "vtysh",
-    "-c",
-    "show bgp ipv4 unicast summary json",
+
+
+def vtysh_summary(router: str = "demo-router") -> tuple[str, ...]:
+    return ("podman", "exec", router, "vtysh", "-c", "show bgp ipv4 unicast summary json")
+
+
+def vtysh_route(router: str = "demo-router") -> tuple[str, ...]:
+    return ("podman", "exec", router, "vtysh", "-c", "show ip route 172.23.0.1/32 json")
+
+
+def vtysh_bfd(router: str = "demo-router") -> tuple[str, ...]:
+    return ("podman", "exec", router, "vtysh", "-c", "show bfd peers json")
+
+
+VTYSH_SUMMARY = vtysh_summary()
+VTYSH_ROUTE = vtysh_route()
+VTYSH_BFD = vtysh_bfd()
+
+SHOW_VRRP = (
+    "Name    Interface      VRID  State      Priority  Last Transition\n"
+    "------  -----------  ------  -------  ----------  -----------------\n"
+    "tk8s    eth0             10  {state}     {priority}  9s\n"
 )
-VTYSH_ROUTE = ("podman", "exec", "demo-router", "vtysh", "-c", "show ip route 172.23.0.1/32 json")
-VTYSH_BFD = ("podman", "exec", "demo-router", "vtysh", "-c", "show bfd peers json")
+NO_VRRP = "VRRP data is not available (process not running or no active groups)\n"
+
+
+def vrrp_answers(host: FakeHost, states: dict[str, str | None]) -> None:
+    """What `show vrrp` prints on each router: the State column of group tk8s, or VyOS's line for
+    a router with no VRRP running (None)."""
+    for name, state in states.items():
+        text = NO_VRRP if state is None else SHOW_VRRP.format(state=f"{state:<7}", priority=200)
+        host.responses[("podman", "exec", name, OP, "show", "vrrp")] = Result(0, text, "")
 
 
 def bgp_router_answers(
-    host: FakeHost, *, established: int = 3, hops: int = 3, bfd_up: int = 3
+    host: FakeHost,
+    *,
+    router: str = "demo-router",
+    established: int = 3,
+    hops: int = 3,
+    bfd_up: int = 3,
 ) -> None:
     """The demo bgp router (3 control planes .1 .2 .3) as vtysh reports it: the first `established`
     peers Established and the rest Active, `hops` ECMP next hops to the VIP, the first `bfd_up` BFD
-    sessions up. The JSON shapes are FRR 10's, trimmed to the keys tkctl reads."""
+    sessions up. The JSON shapes are FRR 10's, trimmed to the keys tkctl reads. `router` picks the
+    container (demo-router-1/-2 for a two-router cluster)."""
     ips = ["172.22.0.1", "172.22.0.2", "172.22.0.3"]
     summary = {
         "as": 65000,
@@ -180,21 +220,24 @@ def bgp_router_answers(
             ]
         }
     bfd = [{"peer": ip, "status": "up" if i < bfd_up else "down"} for i, ip in enumerate(ips)]
-    host.responses[("podman", "exec", "demo-router", "cat", "/tmp/vyos-config-status")] = Result(
+    host.responses[("podman", "exec", router, "cat", "/tmp/vyos-config-status")] = Result(
         0, "0\n", ""
     )
-    host.responses[VTYSH_SUMMARY] = Result(0, json.dumps(summary), "")
-    host.responses[VTYSH_ROUTE] = Result(0, json.dumps(route), "")
-    host.responses[VTYSH_BFD] = Result(0, json.dumps(bfd), "")
+    host.responses[vtysh_summary(router)] = Result(0, json.dumps(summary), "")
+    host.responses[vtysh_route(router)] = Result(0, json.dumps(route), "")
+    host.responses[vtysh_bfd(router)] = Result(0, json.dumps(bfd), "")
 
 
 # the router reload: a configuration session fed on stdin, in VyOS's configuration group
 VBASH = ("podman", "exec", "-i", "demo-router", "sg", "vyattacfg", "-c", "/bin/vbash -s")
 
 
-def ready_host(host: FakeHost, data_dir: Path, name: str = "demo") -> model.Cluster:
-    """demo (1 control plane + 2 workers) exists and is Ready here: every done() says yes."""
-    user = DEMO_USER.model_copy(update={"metadata": model.Metadata(name=name)})
+def ready_host(
+    host: FakeHost, data_dir: Path, name: str = "demo", *, user: model.UserCluster | None = None
+) -> model.Cluster:
+    """demo (1 control plane + 2 workers, or `user`'s shape) exists and is Ready here: every
+    done() says yes."""
+    user = (user or DEMO_USER).model_copy(update={"metadata": model.Metadata(name=name)})
     ctx = make_ctx(host, data_dir, user=user)
     c, paths = ctx.require_cluster(), ctx.paths
     state = paths.state_dir(name)
@@ -225,8 +268,9 @@ def ready_host(host: FakeHost, data_dir: Path, name: str = "demo") -> model.Clus
     r[("id", "-u")] = Result(0, "1000\n", "")
     r[("id", "-g")] = Result(0, "1000\n", "")
     r[("id", "-un")] = Result(0, "student\n", "")
-    r[("podman", "exec", f"{name}-router", "cat", "/tmp/vyos-config-status")] = Result(0, "0\n", "")
-    r[("podman", "exec", f"{name}-router", OP, "show", "haproxy")] = Result(0, SHOW_HAPROXY, "")
+    for rt in c.routers:
+        r[("podman", "exec", rt.name, "cat", "/tmp/vyos-config-status")] = Result(0, "0\n", "")
+        r[("podman", "exec", rt.name, OP, "show", "haproxy")] = Result(0, SHOW_HAPROXY, "")
     for n in c.spec.nodes:
         r[("podman", "exec", n.name, "systemctl", "is-system-running")] = Result(0, "running\n", "")
         r[("podman", "exec", n.name, "test")] = Result(0, "", "")

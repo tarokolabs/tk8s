@@ -1,4 +1,4 @@
-interfaces {
+${vrrp}interfaces {
     ethernet eth0 {
         address "$router_ip/24"
     }
@@ -34,7 +34,7 @@ system {
     config-management {
         commit-revisions "20"
     }
-    host-name "$cluster-router"
+    host-name "$router_name"
     login {
         user vyos {
             authentication {

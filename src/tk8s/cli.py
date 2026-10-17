@@ -60,6 +60,12 @@ Create flags:
   --datapath MODE        cilium datapath: auto | netkit | veth (default auto)
   --defer-join           create the extra control planes but do not join them (HA exercise);
                          join later with: tkctl join node CLUSTER NODE
+  --routers N            router containers: 1 (default) or 2 (VRRP between them, the nodes'
+                         gateway .253 floats; stop one with systemctl stop NAME-router-1.service)
+  --preset NAME          a named topology, printed expanded under [plan]; cannot be combined
+                         with --control-planes/--workers/--ha/--routers/--defer-join/-f:
+                           lab   --control-planes 1 --workers 2 --ha proxy --routers 1
+                           ha    --control-planes 3 --workers 3 --ha bgp --routers 2
   -f FILE                cluster definition file; cannot be combined with topology flags
   --allow-overlap        allow subnets that overlap an existing cluster
   --dry-run              print the resolved cluster.yaml and generated files without changing
@@ -142,7 +148,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="tkctl", add_help=False)
     sub = ap.add_subparsers(dest="verb")
     create = sub.add_parser("create", add_help=False).add_subparsers(dest="noun")
-    add_create_flags(create.add_parser("cluster", add_help=False))
+    # no abbreviations: --work for --workers would slip past the --preset and -f no-mixing rules
+    add_create_flags(create.add_parser("cluster", add_help=False, allow_abbrev=False))
     v = sub.add_parser("verify", add_help=False).add_subparsers(dest="noun")
     vc = v.add_parser("cluster", add_help=False)
     vc.add_argument("name", nargs="?")

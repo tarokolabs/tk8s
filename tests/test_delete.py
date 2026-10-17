@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.fixtures import argvs, make_ctx
+from tests.fixtures import argvs, make_ctx, two_router_user
 from tk8s import delete, lifecycle, podman
 from tk8s.host import FakeHost, HostError, Result
 from tk8s.phases import Context, PhaseFailed, Runner
@@ -154,3 +154,30 @@ def test_fallback_removes_a_v2026_10_lb_container_like_a_node(tmp_path: Path) ->
     assert delete.node_names(ctx) == ["demo-control-plane-1", "demo-lb"]
     Runner([delete.PHASE], record=False).run(ctx)
     assert ["podman", "rm", "-f", "demo-lb"] in argvs(host)
+
+
+def test_delete_containers_names_both_routers_of_a_two_router_cluster(tmp_path: Path) -> None:
+    host = FakeHost()
+    ctx = make_ctx(host, tmp_path, user=two_router_user())
+    ctx.name = "demo"
+    names = delete.containers(ctx)
+    assert "demo-router-1" in names and "demo-router-2" in names and "demo-router" not in names
+
+
+def test_node_names_from_the_unit_dir_skips_every_router_unit(tmp_path: Path) -> None:
+    """Without a readable cluster.yaml the unit directory says what exists: router units are not
+    nodes (no volumes to remove), whether one or two of them."""
+    host = FakeHost()
+    ctx = make_ctx(host, tmp_path, user=None)
+    ctx.name = "demo"
+    unit_dir = ctx.paths.unit_dir / "demo"
+    host.dirs.add(unit_dir)
+    for f in (
+        "demo.network",
+        "demo-router-1.container",
+        "demo-router-2.container",
+        "demo-worker-1.container",
+    ):
+        host.files[unit_dir / f] = "x"
+    assert delete.node_names(ctx) == ["demo-worker-1"]
+    assert sorted(delete.containers(ctx)) == ["demo-router-1", "demo-router-2", "demo-worker-1"]

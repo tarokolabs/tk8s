@@ -178,3 +178,66 @@ def test_bgp_router_rejects_the_vip_when_no_control_plane_announces_it(bgp_ctx: 
         "            }\n"
         "        }\n"
     ) in boot
+
+
+# ---- two routers
+
+
+def test_two_routers_render_two_directories_and_units(two_router_ctx: Context) -> None:
+    files = units.render(two_router_ctx)
+    names = [p.name for p in files]
+    assert names[:9] == [
+        "demo.network",
+        "tkctl.boot",
+        "vyos-preconfig-bootup.script",
+        "vyos-postconfig-bootup.script",
+        "demo-router-1.container",
+        "tkctl.boot",
+        "vyos-preconfig-bootup.script",
+        "vyos-postconfig-bootup.script",
+        "demo-router-2.container",
+    ]
+    state = two_router_ctx.state_dir
+    assert list(files)[1] == state / "router-1" / "tkctl.boot"
+    assert list(files)[5] == state / "router-2" / "tkctl.boot"
+    target = files[two_router_ctx.paths.systemd_dir / "demo.target"]
+    wants = "Wants=demo-router-1.service demo-router-2.service demo-control-plane-1.service"
+    assert wants in target
+
+
+def test_each_router_config_has_its_own_address_hostname_and_vrrp_priority(
+    two_router_ctx: Context,
+) -> None:
+    files = units.render(two_router_ctx)
+    state, unit_dir = two_router_ctx.state_dir, two_router_ctx.paths.unit_dir / "demo"
+    c1 = files[state / "router-1" / "tkctl.boot"]
+    c2 = files[state / "router-2" / "tkctl.boot"]
+    assert 'address "172.22.0.251/24"' in c1 and 'host-name "demo-router-1"' in c1
+    assert 'address "172.22.0.252/24"' in c2 and 'host-name "demo-router-2"' in c2
+    assert 'priority "200"' in c1 and 'priority "100"' in c2
+    assert c1.startswith("high-availability {") and c2.startswith("high-availability {")
+    assert c1.count("neighbor 172.22.0.") == 3 == c2.count("neighbor 172.22.0.")
+    u1 = files[unit_dir / "demo-router-1.container"]
+    assert "ContainerName=demo-router-1" in u1 and "HostName=demo-router-1" in u1
+    assert "IP=172.22.0.251" in u1 and f"Volume={state}/router-1:/opt/vyatta/etc/config" in u1
+
+
+def test_postconfig_removes_the_route_via_the_floating_address_on_both_routers(
+    two_router_ctx: Context,
+) -> None:
+    files = units.render(two_router_ctx)
+    for d in ("router-1", "router-2"):
+        s = files[two_router_ctx.state_dir / d / "scripts" / "vyos-postconfig-bootup.script"]
+        assert "ip route del default via 172.22.0.253 " in s
+        assert "via 172.22.0.253 metric 100 proto static" in s
+
+
+def test_one_router_config_has_no_vrrp_block(ctx: Context) -> None:
+    cfg = units.render(ctx)[ctx.state_dir / "router" / "tkctl.boot"]
+    assert cfg.startswith("interfaces {") and "high-availability" not in cfg
+
+
+def test_router_directories_are_written_with_sudo(two_router_ctx: Context) -> None:
+    state = two_router_ctx.state_dir
+    assert units.needs_sudo(two_router_ctx, state / "router-2" / "tkctl.boot")
+    assert not units.needs_sudo(two_router_ctx, state / "cluster.yaml")

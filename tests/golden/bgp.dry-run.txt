@@ -16,6 +16,7 @@ spec:
     gateway: 172.22.0.254
     router: 172.22.0.253
     ha: bgp
+    routers: 1
     vip: 172.23.0.1
     lb_range: 172.22.0.200-172.22.0.219
     pods: 10.244.0.0/21

@@ -240,7 +240,9 @@ class FakeHost(Host):
     dirs: set[Path] = field(default_factory=set)
     unwritable: set[Path] = field(default_factory=set)
     active: set[str] = field(default_factory=set)
-    podman: set[str] = field(default_factory=set)  # "container:NAME", "volume:NAME", "network:NAME"
+    # "container:NAME", "volume:NAME", "network:NAME" exist; "stopped:NAME" makes
+    # `podman container inspect --format {{.State.Running}} NAME` answer false (default true)
+    podman: set[str] = field(default_factory=set)
     lines: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -256,6 +258,8 @@ class FakeHost(Host):
         kinds = ("container", "volume", "network")
         if a[:1] == ["podman"] and len(a) == 4 and a[1] in kinds and a[2] == "exists":
             return Result(0 if f"{a[1]}:{a[3]}" in self.podman else 1, "", "")
+        if a[:5] == ["podman", "container", "inspect", "--format", "{{.State.Running}}"]:
+            return Result(0, "false\n" if f"stopped:{a[5]}" in self.podman else "true\n", "")
         return Result(0, "", "")
 
     def _track(self, argv: Sequence[str]) -> None:

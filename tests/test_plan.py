@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.fixtures import resolved
+from tests.fixtures import DEMO_USER, bgp_user, resolved, two_router_user
 from tk8s import model
 from tk8s.create.plan import (
     PlanError,
@@ -259,3 +259,64 @@ def test_a_creating_cluster_is_resumed(tmp_path: Path) -> None:
     existing = load_existing(paths, "demo")
     assert existing is not None and existing.status is not None
     assert existing.status.phase == "Creating" and existing.spec.network.index == 0
+
+
+# ---- routers
+
+
+def test_two_routers_are_named_and_addressed_below_the_floating_address() -> None:
+    c = resolved(two_router_user())
+    assert c.spec.network.routers == 2 and c.floating_ip == IPv4Address("172.22.0.253")
+    assert [(r.name, r.dir, str(r.ip), r.priority) for r in c.routers] == [
+        ("demo-router-1", "router-1", "172.22.0.251", 200),
+        ("demo-router-2", "router-2", "172.22.0.252", 100),
+    ]
+
+
+def test_one_router_keeps_todays_name_and_address() -> None:
+    c = resolved(DEMO_USER)
+    assert c.spec.network.routers == 1
+    assert [(r.name, r.dir, str(r.ip), r.priority) for r in c.routers] == [
+        ("demo-router", "router", "172.22.0.253", None)
+    ]
+
+
+def test_the_floating_address_cannot_be_a_router_body_with_two_routers() -> None:
+    user = model.UserCluster(
+        metadata=model.Metadata(name="demo"),
+        spec=model.UserSpec(
+            network=model.UserNetwork(ha="bgp", routers=2, router=IPv4Address("172.22.0.252")),
+            nodes=[model.NodeGroup(role="control-plane")],
+        ),
+    )
+    with pytest.raises(
+        PlanError,
+        match=r"spec\.network\.router 172\.22\.0\.252 is a router itself with routers: 2 "
+        r"\(\.251 and \.252\); pick another 172\.22\.0\.220-253",
+    ):
+        resolved(user)
+
+
+def test_a_cluster_yaml_without_routers_loads_as_one_router() -> None:
+    text = model.dumps(resolved(DEMO_USER)).replace("    routers: 1\n", "")
+    assert "routers" not in text
+    assert model.load_text(text).spec.network.routers == 1
+
+
+def test_cluster_yaml_writes_routers_right_after_ha() -> None:
+    assert "    ha: proxy\n    routers: 1\n" in model.dumps(resolved(DEMO_USER))
+    assert "    ha: bgp\n    routers: 2\n    vip: 172.23.0.1\n" in model.dumps(
+        resolved(two_router_user())
+    )
+
+
+def test_resume_refuses_a_different_router_count() -> None:
+    """An interrupted create resumed with another --routers would render the new routers next to
+    the old one's unit, two claimants of the floating address: refuse, point at delete."""
+    recorded = resolved(bgp_user())
+    with pytest.raises(
+        PlanError,
+        match=r"cluster demo is being created with routers: 1; rerun with the same --routers "
+        r"\(or --preset\), or delete it first: tkctl delete cluster demo",
+    ):
+        resolved(two_router_user(), existing=recorded)

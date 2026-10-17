@@ -8,6 +8,7 @@ from pathlib import Path
 from . import delete, images, lifecycle, model, verify, versions
 from .args import (
     UsageError,
+    apply_preset,
     normalize_memory,
     user_cluster_from_file,
     user_cluster_from_flags,
@@ -38,10 +39,11 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
         validate_k8s(a.k8s)
     if a.gvisor and a.datapath is None:
         a.datapath = "veth"
-    flags = ("--control-planes", "--workers", "--cpu", "--memory", "--ha")
+    flags = ("--control-planes", "--workers", "--cpu", "--memory", "--ha", "--routers")
     topo = any(a == f or a.startswith(f + "=") for a in raw for f in flags)  # --ha bgp, --ha=bgp
+    preset = apply_preset(a, raw)
     user = user_cluster_from_file(a, topo) if a.file else user_cluster_from_flags(a)
-    ctx = make_context(dry_run=a.dry_run, quiet=a.quiet)
+    ctx = make_context(dry_run=a.dry_run, quiet=a.quiet, preset=preset)
     name = user.metadata.name
     existing = load_existing(ctx.paths, name)
     if existing is not None and existing.status is None:
@@ -260,11 +262,17 @@ def cmd_images(verb: str, a: argparse.Namespace) -> int:
 
 
 def make_context(
-    *, dry_run: bool = False, quiet: bool = False, assume_yes: bool = False, refresh: bool = False
+    *,
+    dry_run: bool = False,
+    quiet: bool = False,
+    assume_yes: bool = False,
+    refresh: bool = False,
+    preset: str | None = None,
 ) -> Context:
     paths = Paths.from_env(HOME)
     opts = Options(
         dry_run=dry_run,
+        preset=preset,
         offline=os.environ.get("TK_OFFLINE") == "1",
         assume_yes=assume_yes or os.environ.get("TK_ASSUME_YES") == "1",
         refresh=refresh,

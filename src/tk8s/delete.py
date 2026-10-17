@@ -30,18 +30,34 @@ def confirm_delete(ctx: Context) -> None:
     )
 
 
+def _router_units(ctx: Context) -> set[str]:
+    """The router unit names a cluster can have: one router, or router-1 and router-2."""
+    n = ctx.cluster_name
+    return {f"{n}-router.container", f"{n}-router-1.container", f"{n}-router-2.container"}
+
+
+def _container_units(ctx: Context) -> list[str]:
+    entries = ctx.host.listdir(ctx.paths.unit_dir / ctx.cluster_name)
+    return [e for e in entries if e.endswith(".container")]
+
+
 def node_names(ctx: Context) -> list[str]:
     """From cluster.yaml, or from the unit directory when the file is gone (so containers and
     volumes are removed before units takes that directory away). Every container unit but the
-    router's counts as a node there, a pre-router cluster's `<name>-lb.container` included: its
+    routers' counts as a node there, a pre-router cluster's `<name>-lb.container` included: its
     cluster.yaml does not parse any more, and this is how its container still goes."""
     if ctx.cluster is not None:
         return [n.name for n in ctx.cluster.spec.nodes]
-    router = f"{ctx.cluster_name}-router.container"
-    entries = ctx.host.listdir(ctx.paths.unit_dir / ctx.cluster_name)
-    return [
-        e.removesuffix(".container") for e in entries if e.endswith(".container") and e != router
-    ]
+    routers = _router_units(ctx)
+    return [e.removesuffix(".container") for e in _container_units(ctx) if e not in routers]
+
+
+def router_names(ctx: Context) -> list[str]:
+    """The router containers: cluster.yaml's, or whichever router units the directory has."""
+    if ctx.cluster is not None:
+        return [r.name for r in ctx.cluster.routers]
+    routers = _router_units(ctx)
+    return [e.removesuffix(".container") for e in _container_units(ctx) if e in routers]
 
 
 # ---- removals, shared with delete node
@@ -114,7 +130,7 @@ UNITS = Phase(
 
 
 def containers(ctx: Context) -> list[str]:
-    return [*node_names(ctx), f"{ctx.cluster_name}-router"]
+    return [*node_names(ctx), *router_names(ctx)]
 
 
 def containers_done(ctx: Context) -> bool:

@@ -21,6 +21,7 @@ spec:
     gateway: 172.22.3.254
     router: 172.22.3.253
     ha: proxy
+    routers: 1
     lb_range: 172.22.3.200-172.22.3.219
     pods: 10.244.24.0/21
     services: 10.98.3.0/24
