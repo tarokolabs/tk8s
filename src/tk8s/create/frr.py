@@ -11,17 +11,39 @@ UNITS = ["frr.service", "tk8s-apiserver-health.timer"]
 DAEMONS = "s/^bgpd=no/bgpd=yes/; s/^bfdd=no/bfdd=yes/"
 
 
+def neighbor_lines(c: model.Cluster) -> str:
+    """One eBGP neighbor per router (AS 65000, BFD, timers 3/9), in frr.conf's own layout."""
+    return "\n".join(
+        f" neighbor {r.ip} remote-as 65000\n neighbor {r.ip} bfd\n neighbor {r.ip} timers 3 9"
+        for r in c.routers
+    )
+
+
+def neighbor_policy_lines(c: model.Cluster) -> str:
+    """The explicit export policy eBGP needs per neighbor (RFC 8212): the VIP and nothing else."""
+    return "\n".join(f"  neighbor {r.ip} route-map vip-only out" for r in c.routers)
+
+
+def bfd_peer_lines(c: model.Cluster) -> str:
+    return "\n".join(
+        f" peer {r.ip}\n  detect-multiplier 3\n  receive-interval 300\n"
+        f"  transmit-interval 300\n exit"
+        for r in c.routers
+    )
+
+
 def config(ctx: Context, n: model.Node) -> str:
     c = ctx.require_cluster()
-    net = c.spec.network
     return template(
         ctx.paths.home,
         "node/frr.conf",
         cluster=c.name,
         node=n.name,
         node_ip=n.ip,
-        router_ip=net.router,
-        vip=net.vip,
+        neighbors=neighbor_lines(c),
+        neighbor_policies=neighbor_policy_lines(c),
+        bfd_peers=bfd_peer_lines(c),
+        vip=c.spec.network.vip,
     )
 
 
@@ -78,7 +100,8 @@ def configure(ctx: Context, n: model.Node) -> None:
     podman.must(ctx, n.name, "systemctl", "enable", "--quiet", *UNITS)
     # restart, not start: a rerun with a changed frr.conf must load it
     podman.must(ctx, n.name, "systemctl", "restart", *UNITS)
-    ctx.say(f"  {n.name}: FRR announces {net.vip} to {net.router} while its apiserver is ready")
+    routers = ", ".join(str(r.ip) for r in c.routers)
+    ctx.say(f"  {n.name}: FRR announces {net.vip} to {routers} while its apiserver is ready")
 
 
 def _targets(ctx: Context, *, only_this_node: bool) -> list[model.Node]:

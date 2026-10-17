@@ -160,3 +160,27 @@ def test_node_phase_is_done_for_a_worker_and_in_proxy_mode(
     ctx.node = "demo-control-plane-1"
     assert frr.NODE_PHASE.done(ctx)
     assert not any(c.argv[:2] == ["podman", "exec"] for c in host.calls)
+
+
+# ---- two routers
+
+
+def test_config_for_one_router_is_unchanged(bgp_ctx: Context) -> None:
+    conf = frr.config(bgp_ctx, cp(bgp_ctx, 0))
+    assert conf.count("neighbor 172.22.0.253 remote-as 65000") == 1
+    assert conf.count(" peer 172.22.0.") == 1
+    assert "neighbor 172.22.0.253 route-map vip-only out" in conf
+    assert "bgp router-id 172.22.0.1" in conf
+
+
+def test_config_has_one_neighbor_and_bfd_peer_per_router(two_router_ctx: Context) -> None:
+    conf = frr.config(two_router_ctx, cp(two_router_ctx, 0))
+    for ip in ("172.22.0.251", "172.22.0.252"):
+        assert (
+            f" neighbor {ip} remote-as 65000\n neighbor {ip} bfd\n neighbor {ip} timers 3 9\n"
+            in conf
+        )
+        assert f"  neighbor {ip} route-map vip-only out\n" in conf
+        peer = f" peer {ip}\n  detect-multiplier 3\n  receive-interval 300\n"
+        assert peer + "  transmit-interval 300\n exit\n" in conf
+    assert "172.22.0.253" not in conf  # the floating address is nobody's BGP speaker
