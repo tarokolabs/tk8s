@@ -167,6 +167,15 @@ def ha_ctx(ctx: Context, host: FakeHost) -> Context:
             "",
         )
     )
+    # Each node is not a Node object until its kubeadm join ran, then it is: the phase's done()
+    # and join_run's own pre-check see "not found", join_node's wait after the join finds it.
+    # The general prefix stays "not found" for anything else asking.
+    for n in ctx.require_cluster().spec.nodes[1:]:
+        host.responses[("kubectl", "get", "node", n.name)] = [
+            Result(1, "", "not found"),
+            Result(1, "", "not found"),
+            Result(0, n.name, ""),
+        ]
     host.responses[("kubectl", "get", "node")] = Result(1, "", "not found")
     return ctx
 
@@ -219,11 +228,9 @@ def test_join_uploads_a_fresh_certificate_key_when_none_is_stored(
 def test_join_skips_nodes_already_in_the_cluster(ctx: Context, host: FakeHost) -> None:
     ctx = ha_ctx(ctx, host)
     host.files[ctx.state_dir / ".certificate-key"] = "abcd\n"
-    general = host.responses.pop(("kubectl", "get", "node"))  # specific prefixes must come first
     host.responses[("kubectl", "get", "node", "demo-worker-1")] = Result(
         0, "demo-worker-1 Ready", ""
     )
-    host.responses[("kubectl", "get", "node")] = general
     kubeadm.join_run(ctx)
     assert not any(c.argv[:3] == ["podman", "exec", "demo-worker-1"] for c in host.calls)
     assert "  demo-worker-1 already joined" in host.lines
@@ -242,7 +249,8 @@ def test_join_failure_shows_the_tail_and_names_the_node(ctx: Context, host: Fake
 def test_join_done_when_every_joining_node_is_in_the_cluster(ctx: Context, host: FakeHost) -> None:
     ctx = ha_ctx(ctx, host)
     assert not kubeadm.join_done(ctx)
-    host.responses[("kubectl", "get", "node")] = Result(0, "x Ready", "")
+    for n in ctx.require_cluster().spec.nodes[1:]:
+        host.responses[("kubectl", "get", "node", n.name)] = Result(0, "x Ready", "")
     assert kubeadm.join_done(ctx)  # demo-control-plane-3 (join: false) is not required
 
 
