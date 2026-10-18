@@ -169,6 +169,28 @@ def test_add_worker_runs_plan_units_start_addons_join_in_order(tmp_path: Path) -
     assert "  demo-worker-3 Ready (worker)" in host.lines
 
 
+def test_add_join_waits_for_the_node_object_to_register(tmp_path: Path) -> None:
+    """kubeadm join returns before the kubelet has registered the Node; the phase must wait for
+    `kubectl get node` instead of failing its own done() check a moment later."""
+    ctx, host = node_ctx(tmp_path)
+    new_node_answers(host, "demo-worker-3", ready_after=1)
+    host.responses[("kubectl", "get", "node", "demo-worker-3")] = [
+        Result(1, "", "not found"),  # done() before the phase runs
+        Result(1, "", "not found"),  # right after kubeadm join: not registered yet
+        Result(1, "", "not found"),
+        Result(0, "demo-worker-3", ""),
+    ]
+    ctx.request = model.NodeRequest(role="worker")
+    Runner([node_add.add_phase(join=True)], record=False).run(ctx)
+    assert "  demo-worker-3 joined (worker)" in host.lines
+    gets = [
+        x
+        for x in argvs(host)
+        if x[:4] == ["kubectl", "get", "node", "demo-worker-3"] and len(x) == 4
+    ]
+    assert len(gets) >= 4
+
+
 def test_add_start_is_not_done_until_the_router_lists_the_new_control_plane(
     tmp_path: Path,
 ) -> None:

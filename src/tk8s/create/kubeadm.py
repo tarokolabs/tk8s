@@ -249,6 +249,15 @@ def join_node(ctx: Context, node: model.Node, join: str, key: str) -> None:
     if r.returncode != 0:
         tail = "\n".join((r.stdout + r.stderr).splitlines()[-20:])
         raise PhaseFailed(f"kubeadm join on {node.name} failed:\n{tail}")
+    # kubeadm join returns before the kubelet has registered the Node object; the join phases'
+    # done() checks ask for it right away, so wait here (a worker takes a second or two).
+    wait_for(
+        ctx,
+        lambda: joined(ctx, node.name),
+        rounds=30,
+        delay=ctx.options.poll,
+        failure=lambda: f"{node.name} did not register as a Node after kubeadm join",
+    )
     ctx.say(f"  {node.name} joined ({node.role})")
 
 
