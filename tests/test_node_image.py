@@ -148,3 +148,11 @@ def test_health_timer_fires_every_second() -> None:
     # a oneshot started every second trips systemd's default start rate limit (5 per 10 s)
     assert "StartLimitIntervalSec=0\n" in service.split("[Service]")[0]
     assert "ExecStart=/usr/local/sbin/tk8s-apiserver-health\n" in service
+
+
+def test_kubelet_reads_the_drop_in_directory_tkctl_mounts() -> None:
+    conf = (ROOT / "systemd" / "kubelet.service.d" / "10-kubeadm.conf").read_text()
+    assert (
+        'Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml '
+        '--config-dir=/etc/kubernetes/kubelet.conf.d"'
+    ) in conf
