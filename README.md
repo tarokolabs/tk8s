@@ -58,8 +58,8 @@ tkctl create cluster bare --skip-phases cni,addons    # 只做到 kubeadm，CNI 
 ### 執行輸出
 
 ```
-[preflight] check the host: podman, systemd, cgroup v2, swap, sudo, sysctls, data tree
-  preflight ok: podman 5.4.2, systemd, cgroup v2, swap off, host bridge-nf off, ip_forward on, /opt/taroko owned by student
+[preflight] check the host: podman, systemd, cgroup v2, swap, sudo, sysctls, data tree, node sizes
+  preflight ok: podman 5.4.2, systemd, cgroup v2, swap off, host bridge-nf off, ip_forward on, /opt/taroko owned by student, host 8 cpu, 32873260 kB
 [plan] resolve cluster.yaml: defaults, subnet, node names
   cluster demo: 1 control plane + 2 workers, K8s 1.37.1, subnet 172.22.0.0/24
 [images] already done
@@ -79,7 +79,7 @@ cluster demo is ready
 
 ```
 $ tkctl create cluster --list-phases
-preflight          check the host: podman, systemd, cgroup v2, swap, sudo, sysctls, data tree
+preflight          check the host: podman, systemd, cgroup v2, swap, sudo, sysctls, data tree, node sizes
 plan               resolve cluster.yaml: defaults, subnet, node names
 images             pull every image the cluster needs into the shared store
 units              write the Quadlet units, the target, the routes and the router config

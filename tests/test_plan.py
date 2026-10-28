@@ -328,3 +328,9 @@ def test_a_new_cluster_is_marked_node_capacity_and_a_resume_keeps_its_status() -
     old = fresh.model_copy(update={"status": model.Status(phase="Creating", tk8s="old")})
     resumed = res(user(DEMO), existing=old)
     assert resumed.status is not None and resumed.status.node_capacity is False
+
+
+def test_memory_below_2g_is_refused() -> None:
+    body = "metadata: {name: demo}\nspec:\n  nodes:\n    - {role: control-plane, memory: 1G}\n"
+    with pytest.raises(PlanError, match=r'node memory "1G" is below the minimum 2G'):
+        validate(user(body))

@@ -10,6 +10,7 @@ from typing import Literal
 from .. import model
 from ..paths import Paths
 from ..phases import Context, Phase
+from . import nodefs
 
 
 class PlanError(Exception):
@@ -31,6 +32,11 @@ def validate(u: model.UserCluster) -> None:
             raise PlanError(
                 f'node memory "{g.memory}" must be a number followed by G or M, e.g. 4G or '
                 "4096M (podman does not accept 4Gi)"
+            )
+        if nodefs.memory_bytes(g.memory) < 2 * 2**30:
+            raise PlanError(
+                f'node memory "{g.memory}" is below the minimum 2G '
+                "(kubelet reserves 512Mi and evicts below 500Mi)"
             )
         if g.name is not None:
             if g.count != 1:
