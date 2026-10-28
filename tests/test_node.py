@@ -588,3 +588,14 @@ def test_delete_control_plane_names_the_routers_that_keep_routing_to_it(tmp_path
     ):
         Runner([node_delete.DRAIN], record=False).run(ctx)
     assert ["kubectl", "delete", "node", "demo-control-plane-2"] not in argvs(host)
+
+
+def test_delete_node_removes_its_node_directory(tmp_path: Path) -> None:
+    ctx, host = node_ctx(tmp_path)
+    ctx.node = "demo-worker-2"
+    d = ctx.state_dir / "nodes" / "demo-worker-2"
+    host.dirs.add(d)
+    assert not node_delete.units_done(ctx)
+    node_delete.units_run(ctx)
+    assert ["rm", "-rf", str(d)] in argvs(host)
+    assert not host.exists(d)
