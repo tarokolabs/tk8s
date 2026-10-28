@@ -315,3 +315,23 @@ def test_an_old_cluster_renders_todays_units_and_no_node_files(ctx: Context) -> 
     unit = files[ctx.paths.unit_dir / "demo" / "demo-worker-1.container"]
     assert "kubelet.conf.d" not in unit and "/proc/meminfo" not in unit
     assert f"Volume={ctx.paths.wulin_dir}:/opt/taroko/wulin\nStopTimeout=60\n" in unit
+
+
+def test_run_removes_cpu_links_a_resume_no_longer_wants(ctx: Context, host: FakeHost) -> None:
+    """A resume with a smaller cpu must not leave the old cpuN symlinks: cAdvisor counts them."""
+    n0 = ctx.state_dir / "nodes" / "demo-worker-1" / "sys-node" / "node0"
+    host.symlink(n0 / "cpu2", Path("/sys/devices/system/cpu/cpu2"))
+    host.symlink(n0 / "cpu3", Path("/sys/devices/system/cpu/cpu3"))
+    units.run(ctx)
+    assert host.readlink(n0 / "cpu2") is None and host.readlink(n0 / "cpu3") is None
+    assert host.readlink(n0 / "cpu1") == Path("/sys/devices/system/cpu/cpu1")
+    assert units.done(ctx)
+    host.symlink(n0 / "cpu2", Path("/sys/devices/system/cpu/cpu2"))
+    assert not units.done(ctx)
+
+
+def test_a_cluster_without_status_renders_todays_units_too(ctx: Context) -> None:
+    none = ctx.require_cluster().model_copy(update={"status": None})
+    files = units.render(ctx, none)
+    assert not any("/nodes/" in str(p) for p in files) and units.links(ctx, none) == {}
+    assert files == units.render(ctx, old_cluster(ctx))

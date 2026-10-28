@@ -633,3 +633,22 @@ def test_add_node_on_an_old_cluster_keeps_todays_behaviour(tmp_path: Path) -> No
     node_add.plan_run(ctx)
     saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
     assert saved.spec.nodes[-1].cpu == 9 and saved.spec.nodes[-1].memory == "1g"
+
+
+def test_add_node_on_an_old_cluster_leaves_every_existing_unit_byte_identical(
+    tmp_path: Path,
+) -> None:
+    ctx, host = node_ctx(tmp_path)
+    c = ctx.require_cluster()
+    ctx.cluster = c.model_copy(update={"status": model.Status(phase="Ready", tk8s="old")})
+    units.run(ctx)  # what the old tkctl left on the host
+    unit_dir = ctx.paths.unit_dir / "demo"
+    before = {p: t for p, t in host.files.items() if p.parent == unit_dir}
+    ctx.request = model.NodeRequest(role="worker")
+    node_add.plan_run(ctx)
+    units.run(ctx)
+    for p, t in before.items():
+        assert host.files[p] == t, p
+    new = host.files[unit_dir / "demo-worker-3.container"]
+    assert "/proc/meminfo" not in new and "kubelet.conf.d" not in new
+    assert not any("/nodes/demo-worker-3/" in str(p) for p in host.files)

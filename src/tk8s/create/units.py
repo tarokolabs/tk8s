@@ -2,6 +2,7 @@
 from cluster.yaml; units go under /etc (root), the router's tkctl.boot into the state dir (root
 too: VyOS owns that directory), the rest as the user."""
 
+import re
 from pathlib import Path
 
 from .. import model
@@ -143,6 +144,40 @@ def links(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, Path
     return out
 
 
+def stale_links(ctx: Context, cluster: model.Cluster | None = None) -> list[Path]:
+    """cpuN entries in a node's fake NUMA node that the cluster no longer wants (a resume with a
+    smaller cpu): cAdvisor would count them."""
+    c = cluster or ctx.require_cluster()
+    if not sized(c):
+        return []
+    wanted = set(links(ctx, c))
+    state = ctx.paths.state_dir(c.name)
+    out: list[Path] = []
+    for n in c.spec.nodes:
+        n0 = nodefs.node_dir(state, n.name) / "sys-node" / "node0"
+        out += [
+            n0 / e
+            for e in ctx.host.listdir(n0)
+            if re.fullmatch(r"cpu[0-9]+", e) and n0 / e not in wanted
+        ]
+    return out
+
+
+def missing_node_files(ctx: Context, cluster: model.Cluster | None = None) -> list[Path]:
+    """Node files podman will bind-mount that are not on the host (someone removed nodes/):
+    the node container would refuse to start."""
+    c = cluster or ctx.require_cluster()
+    if not sized(c):
+        return []
+    state = ctx.paths.state_dir(c.name)
+    missing: list[Path] = []
+    for n in c.spec.nodes:
+        d = nodefs.node_dir(state, n.name)
+        missing += [p for p in nodefs.files(d, n) if ctx.host.read(p) is None]
+        missing += [p for p in nodefs.links(d, n) if ctx.host.readlink(p) is None]
+    return missing
+
+
 def needs_sudo(ctx: Context, path: Path) -> bool:
     """Units live under /etc; the router directories are written by VyOS (root in the container)."""
     state = ctx.paths.state_dir(ctx.cluster_name)
@@ -154,10 +189,14 @@ def needs_sudo(ctx: Context, path: Path) -> bool:
 
 def done(ctx: Context, cluster: model.Cluster | None = None) -> bool:
     """Every file is on the host with exactly this content (a changed cluster.yaml re-renders)."""
-    return all(
-        ctx.host.read(path, sudo=needs_sudo(ctx, path)) == content
-        for path, content in render(ctx, cluster).items()
-    ) and all(ctx.host.readlink(path) == target for path, target in links(ctx, cluster).items())
+    return (
+        all(
+            ctx.host.read(path, sudo=needs_sudo(ctx, path)) == content
+            for path, content in render(ctx, cluster).items()
+        )
+        and all(ctx.host.readlink(path) == target for path, target in links(ctx, cluster).items())
+        and not stale_links(ctx, cluster)
+    )
 
 
 def run(ctx: Context, cluster: model.Cluster | None = None) -> None:
@@ -166,6 +205,8 @@ def run(ctx: Context, cluster: model.Cluster | None = None) -> None:
         ctx.host.write(path, content, sudo=needs_sudo(ctx, path), mode=mode)
     for path, target in links(ctx, cluster).items():
         ctx.host.symlink(path, target)
+    for path in stale_links(ctx, cluster):
+        ctx.host.remove(path)
 
 
 PHASE = Phase(

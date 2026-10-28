@@ -6,6 +6,7 @@ that can be pasted back into a terminal, so a student can redo any step by hand.
 
 import os
 import shlex
+import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -164,6 +165,10 @@ class Host:
         if path.is_symlink():
             if os.readlink(path) == str(target):
                 return
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
+        elif path.exists():
             path.unlink()
         os.symlink(target, path)
 
@@ -354,12 +359,13 @@ class FakeHost(Host):
     def remove(self, path: Path) -> None:
         self.calls.append(Call(["rm", "-f", str(path)], False, {}))
         self.files.pop(path, None)
+        self.links.pop(path, None)
 
     def exists(self, path: Path) -> bool:
         return path in self.files or path in self.dirs
 
     def listdir(self, path: Path) -> list[str]:
-        return sorted({p.name for p in (*self.files, *self.dirs) if p.parent == path})
+        return sorted({p.name for p in (*self.files, *self.dirs, *self.links) if p.parent == path})
 
     def writable(self, path: Path) -> bool:
         return path not in self.unwritable
