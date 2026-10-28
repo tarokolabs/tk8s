@@ -7,7 +7,7 @@ from pathlib import Path
 from .. import model
 from ..phases import Context, Phase
 from ..render import template
-from . import router, router_config
+from . import nodefs, router, router_config
 
 
 def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str]:
@@ -72,6 +72,13 @@ def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str
             state_dir=state,
         )
     for n in c.spec.nodes:
+        # the files the node mounts over /proc/meminfo, /sys/devices/system/node and the kubelet
+        # drop-in directory (nodefs); a cluster from before node sizing gets none and today's unit
+        node_mounts = ""
+        if sized(c):
+            d = nodefs.node_dir(state, n.name)
+            files.update(nodefs.files(d, n))
+            node_mounts = nodefs.mounts(d)
         files[unit_dir / f"{n.name}.container"] = template(
             p.home,
             "node.container",
@@ -90,6 +97,7 @@ def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str
             wulin_dir=p.wulin_dir,
             cpu=n.cpu,
             memory=n.memory,
+            node_mounts=node_mounts,
         )
     wants = [
         *(f"{r.name}.service" for r in c.routers),
@@ -117,6 +125,24 @@ def render(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, str
     return files
 
 
+def sized(c: model.Cluster) -> bool:
+    """Created by a tkctl that sizes nodes: status.node_capacity. Older clusters keep the units
+    they were created with."""
+    return c.status is not None and c.status.node_capacity
+
+
+def links(ctx: Context, cluster: model.Cluster | None = None) -> dict[Path, Path]:
+    """The cpu symlinks of every node's fake NUMA node, path -> target (none for an old cluster)."""
+    c = cluster or ctx.require_cluster()
+    if not sized(c):
+        return {}
+    state = ctx.paths.state_dir(c.name)
+    out: dict[Path, Path] = {}
+    for n in c.spec.nodes:
+        out.update(nodefs.links(nodefs.node_dir(state, n.name), n))
+    return out
+
+
 def needs_sudo(ctx: Context, path: Path) -> bool:
     """Units live under /etc; the router directories are written by VyOS (root in the container)."""
     state = ctx.paths.state_dir(ctx.cluster_name)
@@ -131,13 +157,15 @@ def done(ctx: Context, cluster: model.Cluster | None = None) -> bool:
     return all(
         ctx.host.read(path, sudo=needs_sudo(ctx, path)) == content
         for path, content in render(ctx, cluster).items()
-    )
+    ) and all(ctx.host.readlink(path) == target for path, target in links(ctx, cluster).items())
 
 
 def run(ctx: Context, cluster: model.Cluster | None = None) -> None:
     for path, content in render(ctx, cluster).items():
         mode = 0o755 if path.suffix == ".script" else 0o644
         ctx.host.write(path, content, sudo=needs_sudo(ctx, path), mode=mode)
+    for path, target in links(ctx, cluster).items():
+        ctx.host.symlink(path, target)
 
 
 PHASE = Phase(

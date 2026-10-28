@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from tk8s import model
 from tk8s.create import units
 from tk8s.host import FakeHost
 from tk8s.phases import Context, Runner
@@ -7,14 +8,27 @@ from tk8s.phases import Context, Runner
 
 def test_render_lists_the_files_in_write_order(ctx: Context) -> None:
     paths = list(units.render(ctx))
+    node_files = [
+        "meminfo",
+        "kubelet-reserved.conf",
+        "cpulist",
+        "cpumap",
+        "distance",
+        "meminfo",
+        "nr_hugepages",
+        "nr_hugepages",
+    ]
     assert [p.name for p in paths] == [
         "demo.network",
         "tkctl.boot",
         "vyos-preconfig-bootup.script",
         "vyos-postconfig-bootup.script",
         "demo-router.container",
+        *node_files,
         "demo-control-plane-1.container",
+        *node_files,
         "demo-worker-1.container",
+        *node_files,
         "demo-worker-2.container",
         "demo.target",
         "demo-routes.service",
@@ -241,3 +255,59 @@ def test_router_directories_are_written_with_sudo(two_router_ctx: Context) -> No
     state = two_router_ctx.state_dir
     assert units.needs_sudo(two_router_ctx, state / "router-2" / "tkctl.boot")
     assert not units.needs_sudo(two_router_ctx, state / "cluster.yaml")
+
+
+def old_cluster(ctx: Context) -> model.Cluster:
+    c = ctx.require_cluster()
+    return c.model_copy(update={"status": model.Status(phase="Ready", tk8s="old")})
+
+
+def test_node_files_come_right_before_each_node_unit(ctx: Context) -> None:
+    names = [p.name for p in units.render(ctx)]
+    i = names.index("demo-worker-1.container")
+    assert names[i - 8 : i] == [
+        "meminfo",
+        "kubelet-reserved.conf",
+        "cpulist",
+        "cpumap",
+        "distance",
+        "meminfo",
+        "nr_hugepages",
+        "nr_hugepages",
+    ]
+    d = ctx.state_dir / "nodes" / "demo-worker-1"
+    assert units.render(ctx)[d / "meminfo"] == "MemTotal: 4194304 kB\nSwapTotal: 0 kB\n"
+
+
+def test_node_unit_mounts_the_three_files(ctx: Context) -> None:
+    unit = units.render(ctx)[ctx.paths.unit_dir / "demo" / "demo-worker-1.container"]
+    d = ctx.state_dir / "nodes" / "demo-worker-1"
+    assert (
+        f"Volume={ctx.paths.wulin_dir}:/opt/taroko/wulin\n"
+        f"Volume={d}/meminfo:/proc/meminfo:ro\n"
+        f"Volume={d}/sys-node:/sys/devices/system/node:ro\n"
+        f"Volume={d}/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro\n"
+        "StopTimeout=60\n"
+    ) in unit
+
+
+def test_links_are_one_per_cpu_and_run_creates_them(ctx: Context, host: FakeHost) -> None:
+    d = ctx.state_dir / "nodes" / "demo-control-plane-1" / "sys-node" / "node0"
+    assert units.links(ctx)[d / "cpu1"] == Path("/sys/devices/system/cpu/cpu1")
+    assert len(units.links(ctx)) == 6  # three nodes x 2 cpus
+    assert not units.done(ctx)
+    units.run(ctx)
+    assert host.readlink(d / "cpu0") == Path("/sys/devices/system/cpu/cpu0")
+    assert units.done(ctx)
+    host.links.pop(d / "cpu0")
+    assert not units.done(ctx)
+
+
+def test_an_old_cluster_renders_todays_units_and_no_node_files(ctx: Context) -> None:
+    old = old_cluster(ctx)
+    files = units.render(ctx, old)
+    assert not any("/nodes/" in str(p) for p in files)
+    assert units.links(ctx, old) == {}
+    unit = files[ctx.paths.unit_dir / "demo" / "demo-worker-1.container"]
+    assert "kubelet.conf.d" not in unit and "/proc/meminfo" not in unit
+    assert f"Volume={ctx.paths.wulin_dir}:/opt/taroko/wulin\nStopTimeout=60\n" in unit
