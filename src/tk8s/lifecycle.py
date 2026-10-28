@@ -4,7 +4,7 @@ the order a person meets them; nothing here has steps to resume, so there are no
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import model
+from . import kubeconfig, model
 from .create import PHASES, units
 from .create.kubeadm import kubectl
 from .describe_router import describe_router
@@ -240,7 +240,8 @@ def start(ctx: Context, c: model.Cluster) -> None:
 
 
 def use(ctx: Context, c: model.Cluster) -> None:
-    """~/.kube/config points at the cluster; the previous file is kept as ~/.kube/config.bak."""
+    """The cluster joins ~/.kube/config (other clusters stay) and its context becomes current;
+    the previous file is kept as ~/.kube/config.bak."""
     text = ctx.host.read(ctx.state_dir / "kubeconfig")
     if text is None:
         raise ClusterError(
@@ -248,7 +249,14 @@ def use(ctx: Context, c: model.Cluster) -> None:
         )
     kube = Path.home() / ".kube"
     previous = ctx.host.read(kube / "config")
+    try:
+        # a state file from before the renaming still carries kubeadm's names; rename is idempotent
+        text = kubeconfig.rename(text, c.name, f"https://{c.endpoint_ip}:6443")
+        merged = kubeconfig.merge(previous, text, c.name)
+    except ValueError as err:
+        raise ClusterError(f"{kube / 'config'}: {err}") from err
     if previous is not None:
         ctx.host.write(kube / "config.bak", previous, mode=0o600)
-    ctx.host.write(kube / "config", text, mode=0o600)
-    ctx.say(f"~/.kube/config now points at {c.name}")
+    ctx.host.write(kube / "config", merged, mode=0o600)
+    contexts = ", ".join(x["name"] for x in kubeconfig.load(merged)["contexts"])
+    ctx.say(f"~/.kube/config: current context {c.name} (contexts: {contexts})")

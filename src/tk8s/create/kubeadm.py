@@ -6,7 +6,7 @@ Plan 1 ships the render sub-phase; init, join and kubeconfig follow with the sam
 import re
 from pathlib import Path
 
-from .. import model, podman
+from .. import kubeconfig, model, podman
 from ..host import Result
 from ..phases import Context, Phase, PhaseFailed, wait_for
 from ..render import template
@@ -186,15 +186,17 @@ def kubeconfig_done(ctx: Context) -> bool:
 
 def kubeconfig_run(ctx: Context) -> None:
     """The host cannot resolve api.<cluster>.k8s; its kubeconfig points straight at what the name
-    means: the router, or the VIP in bgp mode (routes.service gives the host a route to it)."""
+    means: the router, or the VIP in bgp mode (routes.service gives the host a route to it). The
+    entries are named after the cluster so that several clusters fit one ~/.kube/config."""
     c = ctx.require_cluster()
     cp = c.first_control_plane.name
     admin = podman.node_read(ctx, cp, "/etc/kubernetes/admin.conf")
     if not admin or not admin.strip():
         raise PhaseFailed(f"could not read /etc/kubernetes/admin.conf from {cp}")
-    text = admin.replace(
-        f"server: https://api.{c.domain}:6443", f"server: https://{c.endpoint_ip}:6443"
-    )
+    try:
+        text = kubeconfig.rename(admin, c.name, f"https://{c.endpoint_ip}:6443")
+    except ValueError as err:
+        raise PhaseFailed(f"/etc/kubernetes/admin.conf from {cp}: {err}") from err
     ctx.host.write(ctx.state_dir / "kubeconfig", text, mode=0o600)
     # On a resume init is already done and skipped: this is where the apiserver gets waited for.
     wait_router_ready(ctx)

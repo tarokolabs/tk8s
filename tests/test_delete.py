@@ -3,7 +3,8 @@ from pathlib import Path
 import pytest
 
 from tests.fixtures import argvs, make_ctx, two_router_user
-from tk8s import delete, lifecycle, podman
+from tests.test_kubeconfig import ADMIN as KUBEADM_ADMIN
+from tk8s import delete, kubeconfig, lifecycle, podman
 from tk8s.host import FakeHost, HostError, Result
 from tk8s.phases import Context, PhaseFailed, Runner
 
@@ -30,7 +31,7 @@ def test_a_full_delete_removes_everything_in_order(ctx: Context, host: FakeHost)
     everything_there(ctx, host)
     Runner([delete.PHASE], record=False).run(ctx)
     phases = [line.split("]")[0][1:] for line in host.lines if line.startswith("[")]
-    names = ("stop", "containers", "volumes", "units", "network", "routes", "state")
+    names = ("stop", "containers", "volumes", "units", "network", "routes", "state", "kubeconfig")
     assert phases == [f"delete/{p}" for p in names]
     a = argvs(host)
     assert ["systemctl", "disable", "--now", "demo.target"] in a
@@ -181,3 +182,42 @@ def test_node_names_from_the_unit_dir_skips_every_router_unit(tmp_path: Path) ->
         host.files[unit_dir / f] = "x"
     assert delete.node_names(ctx) == ["demo-worker-1"]
     assert sorted(delete.containers(ctx)) == ["demo-router-1", "demo-router-2", "demo-worker-1"]
+
+
+def test_delete_drops_the_cluster_from_kube_config(
+    ctx: Context, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    demo = kubeconfig.rename(KUBEADM_ADMIN, "demo", "https://172.22.0.253:6443")
+    other = kubeconfig.rename(KUBEADM_ADMIN, "other", "https://172.22.1.253:6443")
+    config = home / ".kube" / "config"
+    host.files[config] = kubeconfig.merge(kubeconfig.merge(None, other, "other"), demo, "demo")
+    assert not delete.kubeconfig_done(ctx)
+    delete.kubeconfig_run(ctx)
+    doc = kubeconfig.load(host.files[config])
+    assert [c["name"] for c in doc["contexts"]] == ["other"] and doc["current-context"] == ""
+    assert delete.kubeconfig_done(ctx)
+    assert "kubeconfig" in [p.name for p in delete.PHASE.children]
+
+
+def test_delete_leaves_a_foreign_cluster_with_the_same_name_alone_and_keeps_a_backup(
+    ctx: Context, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    foreign = (
+        "apiVersion: v1\nkind: Config\nclusters:\n- cluster: {server: https://corp}\n  name: demo\n"
+        "contexts:\n- context: {cluster: demo, user: demo-admin}\n  name: demo\n"
+        "current-context: demo\nusers:\n- name: demo-admin\n  user: {token: t}\n"
+    )
+    config = home / ".kube" / "config"
+    host.files[config] = foreign
+    assert delete.kubeconfig_done(ctx)
+    delete.kubeconfig_run(ctx)
+    assert host.files[config] == foreign
+    ours = kubeconfig.rename(KUBEADM_ADMIN, "demo", "https://172.22.0.253:6443")
+    host.files[config] = kubeconfig.merge(None, ours, "demo")
+    delete.kubeconfig_run(ctx)
+    assert config not in host.files
+    assert host.files[home / ".kube" / "config.bak"] == kubeconfig.merge(None, ours, "demo")

@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from tk8s import model, versions
+from tk8s import kubeconfig, model, versions
 from tk8s.create import kubeadm, units
 from tk8s.create.plan import resolve
 from tk8s.host import FakeHost, Result
@@ -12,6 +12,15 @@ from tk8s.paths import Paths
 from tk8s.phases import Context, Options
 
 HOME = Path(__file__).resolve().parents[1]
+
+# kubeadm's admin.conf, the shape tkctl renames into the host's kubeconfig
+ADMIN_CONF = (
+    "apiVersion: v1\nkind: Config\nclusters:\n- cluster:\n    server: https://api.demo.k8s:6443\n"
+    "  name: kubernetes\ncontexts:\n- context:\n    cluster: kubernetes\n"
+    "    user: kubernetes-admin\n"
+    "  name: kubernetes-admin@kubernetes\ncurrent-context: kubernetes-admin@kubernetes\n"
+    "users:\n- name: kubernetes-admin\n  user:\n    client-key-data: S0VZ\n"
+)
 
 DEMO_USER = model.UserCluster(
     metadata=model.Metadata(name="demo"),
@@ -246,7 +255,9 @@ def ready_host(
     for p, content in units.render(ctx).items():
         host.files[p] = content
     host.links.update(units.links(ctx))
-    host.files[state / "kubeconfig"] = "kind: Config\n"
+    host.files[state / "kubeconfig"] = kubeconfig.rename(
+        ADMIN_CONF, c.name, f"https://{c.endpoint_ip}:6443"
+    )
     host.files[state / ".certificate-key"] = "abcd\n"
     host.files[paths.cni_dir / "bridge"] = "elf"
     host.dirs.update(

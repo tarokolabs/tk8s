@@ -36,7 +36,7 @@ tkctl create cluster
 約三分鐘後印出 `cluster tk8s is ready`。接著：
 
 ```bash
-tkctl use cluster tk8s      # ~/.kube/config 指向它（原檔留在 ~/.kube/config.bak）
+tkctl use cluster tk8s      # 合進 ~/.kube/config 並切成目前的 context（原檔留在 ~/.kube/config.bak）
 kubectl get nodes
 ```
 
@@ -224,6 +224,7 @@ tkctl version
 - `--gvisor` 需要 veth datapath，會自動選；明確指定 `--datapath netkit` 加 `--gvisor` 會被拒絕。
 - `--memory` 接受 `4G`、`4096M`，`4Gi` 不行。
 - 節點的 capacity 就是它的 `cpu`／`memory`，allocatable 是再扣掉 kubeReserved（cpu 500m、memory 512Mi）與 evictionHard（memory 500Mi）：2 核 4G 的節點是 1500m／3084Mi，和一台同規格的 VM 跑 kubeadm 一樣。記憶體至少 2G，任一節點不能超過主機的核數或記憶體（preflight 會拒絕）。`verify` 的 `node sizes` 檢查這些數字。這版之前建的叢集仍回報整台主機，`verify` 對它們印 SKIP；要改過來就重建。
+- 每個叢集的 kubeconfig 以叢集命名（cluster `<名稱>`、user `<名稱>-admin`、context `<名稱>`），`use cluster` 把它合進 `~/.kube/config` 並切成目前的 context，其他叢集的項目留著，之後用 `kubectl config use-context <名稱>` 切換；`delete cluster` 會把自己的項目拿掉。`~/.kube/config` 裡不是 kubeconfig 的內容 tkctl 不會動。
 - 已完成的叢集再 `create` 會被拒絕；`delete cluster`、`delete node` 也有 `--phase`，中途失敗再執行一次會接續。
 - 環境變數一律 `TK_` 前綴：`TK_DATA_DIR` 變更資料根目錄（預設 `/opt/taroko`）、`TK_ASSUME_YES=1` 等同 `--yes`、`TK_OFFLINE=1` 不下載 image、cilium CLI 與 CNI plugins。`tkctl --help` 有完整清單。
 - `PATH` 上任何叫 `tkctl-<名字>` 的執行檔會變成 `tkctl <名字>`（規則同 kubectl 的 plugin）。

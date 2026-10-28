@@ -34,6 +34,10 @@ INIT_OUT = (
 )
 ADMIN_CONF = (
     "apiVersion: v1\nkind: Config\nclusters:\n- cluster:\n    server: https://api.demo.k8s:6443\n"
+    "  name: kubernetes\ncontexts:\n- context:\n    cluster: kubernetes\n"
+    "    user: kubernetes-admin\n"
+    "  name: kubernetes-admin@kubernetes\ncurrent-context: kubernetes-admin@kubernetes\n"
+    "users:\n- name: kubernetes-admin\n  user:\n    client-key-data: S0VZ\n"
 )
 
 
@@ -121,6 +125,8 @@ def test_kubeconfig_points_at_the_router_and_is_0600(ctx: Context, host: FakeHos
     assert write.argv[2] == "mode=600"
     text = host.files[ctx.state_dir / "kubeconfig"]
     assert "server: https://172.22.0.253:6443" in text and "api.demo.k8s" not in text
+    assert "name: demo\n" in text and "name: demo-admin\n" in text
+    assert "current-context: demo\n" in text and "kubernetes-admin" not in text
     host.responses[("kubectl", "get", "--raw", "/readyz")] = Result(0, "ok", "")
     assert kubeadm.kubeconfig_done(ctx)
 
@@ -365,12 +371,12 @@ def test_bgp_init_config_puts_the_vip_in_the_sans_after_the_router(bgp_ctx: Cont
 def test_bgp_kubeconfig_points_the_host_at_the_vip(bgp_ctx: Context, host: FakeHost) -> None:
     host.responses[
         ("podman", "exec", "demo-control-plane-1", "cat", "/etc/kubernetes/admin.conf")
-    ] = Result(0, "server: https://api.demo.k8s:6443\n", "")
+    ] = Result(0, ADMIN_CONF, "")
     host.responses[("curl", "-sk", "--max-time", "3", "https://172.23.0.1:6443/readyz")] = Result(
         0, "ok", ""
     )
     kubeadm.kubeconfig_run(bgp_ctx)
-    assert host.files[bgp_ctx.state_dir / "kubeconfig"] == "server: https://172.23.0.1:6443\n"
+    assert "server: https://172.23.0.1:6443\n" in host.files[bgp_ctx.state_dir / "kubeconfig"]
     assert ["curl", "-sk", "--max-time", "3", "https://172.23.0.1:6443/readyz"] in [
         c.argv for c in host.calls
     ]
