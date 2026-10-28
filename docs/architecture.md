@@ -64,6 +64,7 @@ templates/                  # 寫到主機上的檔，與實際內容只差 $變
 /opt/taroko/clusters/<名稱>/     # cluster.yaml、kubeconfig、init-config.yaml、storage/、logs/
 /opt/taroko/clusters/<名稱>/router/  # tkctl.boot 與兩個開機腳本，依 cluster.yaml 產生；VyOS 自己寫的 config.boot 與 archive 也在這
 /opt/taroko/clusters/<名稱>/router-1/、router-2/  # --routers 2 時取代 router/，一台一個目錄
+/opt/taroko/clusters/<名稱>/nodes/<節點>/  # 節點掛進去的 meminfo、sys-node/（假的 NUMA node）與 kubelet-reserved.conf
 /opt/taroko/cni/                 # CNI plugins，所有叢集共用
 /opt/taroko/images/<K8s 版本>/   # 共用 image store，節點唯讀掛載；<版本>.conf 是它的 storage.conf
 /etc/containers/systemd/<名稱>/  # Quadlet unit：<名稱>.network、<名稱>-router.container（--routers 2 時 -router-1 與 -router-2）、每個節點一個 .container
@@ -76,6 +77,22 @@ templates/                  # 寫到主機上的檔，與實際內容只差 $變
 節點容器由 Quadlet 管理，每次啟停會重建；節點必須保留的 `/var`、`/etc`、`/usr/local/bin` 放在每節點的 named volume（`<節點>-var`、`-etc`、`-usr-local-bin`），`delete` 會一併移除。
 
 `cluster.yaml` 的 `status` 區塊（`phase: Creating|Ready`、`completed:` 每個 phase 的完成時間、`tk8s:` 建立時的 tk8s 版本）由 tkctl 寫，`-f` 的檔不能有。沒有 `status` 的 `cluster.yaml`（v2026.10.7 之前建的叢集）tkctl 不再讀 `.create-complete` 標記來判 Ready：`get clusters` 列為 Creating，`create` 拒絕把它當成中斷的建立來續跑（續跑會依今天的旗標重算拓樸並覆寫檔案）；請刪除後重建。
+
+## 節點看到的規格
+
+`--cpus`／`--memory` 只會進 podman 的 cgroup，kubelet 不看 cgroup：它內建的 cAdvisor 從 `/proc/meminfo` 的 `MemTotal` 算記憶體、數 `/sys/devices/system/node/node*/cpu[0-9]*` 有幾個目錄算 CPU，兩條路在容器裡看到的都是主機。少了修正，節點會回報整台主機的 capacity，排程器照那個數字塞 pod，kubepods.slice 的 memory.max 被設成主機值，pod 加總撞到的是容器 cgroup 的 kernel OOM，`evictionHard` 以主機容量計算永遠不會先出手。上游沒有要修（cadvisor PR #2699 被拒、kubernetes #120832 not-planned、kind #877 凍結）。
+
+tkctl 用三個每節點一份、依 cluster.yaml 產生的檔案處理，放在 `nodes/<節點>/`，由節點的 Quadlet unit bind mount 進去：
+
+- `meminfo` 蓋在 `/proc/meminfo` 上，只有 `MemTotal`（節點的記憶體）與 `SwapTotal: 0` 兩行，cAdvisor 只讀這兩行。capacity 的記憶體因此等於 `memory`。
+- `sys-node/` 蓋在 `/sys/devices/system/node` 上，裡面只有 `node0`，`node0/cpu0`…`cpu<N-1>` 是指向真的 `/sys/devices/system/cpu/cpuN` 的 symlink（topology、cache 都是真資料，只有數量變成 N），加上 `cpulist`、`cpumap`（`lscpu` 要）、`distance`、`meminfo` 與 hugepages 幾個小檔。capacity 的 CPU 因此等於 `cpu`。節點 image 裡只有 kubelet 讀這個目錄。
+- `kubelet-reserved.conf` 掛到 `/etc/kubernetes/kubelet.conf.d/`，kubelet 用 `--config-dir`（image 的 `10-kubeadm.conf`）把它疊在 kubeadm 產生的 `/var/lib/kubelet/config.yaml` 之上，內容只有 `kubeReserved: cpu 500m、memory 512Mi`。kubelet 自己把 kubepods.slice 的 memory.max 設成 capacity − 512Mi，並把 `evictionHard` 的 `memory.available: 500Mi` 複製成看 kubepods cgroup 的 `allocatableMemory.available` 訊號，所以 pod 吃到快滿時先被驅逐，不等 kernel OOM。沒有 systemReserved：capacity 已經是節點規格，再扣「主機減節點」會讓保留量大於 capacity，kubelet 拒絕啟動。
+
+結果就是 `kubectl describe node` 長得和一台同規格的 VM 一樣：capacity 2／4Gi、allocatable 1500m／3084Mi。`verify` 的 `node sizes` 同時比 capacity 與 allocatable：主機留著舊 node image 時假檔案照樣掛得上，只有 `--config-dir` 不見，差額會露餡。
+
+幾個看得到的現象：節點內 `nproc` 與 `/proc/cpuinfo` 仍是主機核數（那些路徑太多東西在讀，不蓋）；`free` 的 total 是節點規格、used 等於 total、available 0（假檔只有 MemTotal），看資源用 `kubectl top node` 或 cgroup 檔；eviction manager 每 10 秒看一次，pod 每秒長好幾百 MiB 時 500Mi 的門檻幾秒就被衝過，仍是 kernel OOM 殺 pod。
+
+這版之前建的叢集（cluster.yaml 的 `status` 沒有 `node_capacity: true`）完全不受影響：units phase 對它們產生的 unit 和以前一樣，`add node`、`delete node`、`start` 都不會動它們，`verify` 的 `node sizes` 印 SKIP。要新行為就重建。
 
 ## router 與 apiserver 的入口
 
