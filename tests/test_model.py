@@ -159,7 +159,8 @@ def test_cni_is_cilium_only() -> None:
 def test_a_cluster_yaml_without_node_capacity_loads_as_false() -> None:
     text = model.dumps(resolved(DEMO_USER)).replace("  node_capacity: true\n", "")
     assert "node_capacity" not in text
-    assert model.load_text(text).status.node_capacity is False
+    status = model.load_text(text).status
+    assert status is not None and status.node_capacity is False
 
 
 def test_node_capacity_is_dumped_right_after_tk8s() -> None:
