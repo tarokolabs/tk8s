@@ -27,6 +27,7 @@ def test_files_are_the_meminfo_the_drop_in_and_the_fake_numa_node() -> None:
     assert [str(p.relative_to(D)) for p in f] == [
         "meminfo",
         "kubelet-reserved.conf",
+        "kubelet-config-dir.conf",
         "sys-node/node0/cpulist",
         "sys-node/node0/cpumap",
         "sys-node/node0/distance",
@@ -38,6 +39,12 @@ def test_files_are_the_meminfo_the_drop_in_and_the_fake_numa_node() -> None:
     assert f[D / "kubelet-reserved.conf"] == (
         "apiVersion: kubelet.config.k8s.io/v1beta1\nkind: KubeletConfiguration\n"
         "kubeReserved:\n  cpu: 500m\n  memory: 512Mi\n"
+    )
+    assert f[D / "kubelet-config-dir.conf"] == (
+        "# tkctl: the kubelet also reads /etc/kubernetes/kubelet.conf.d (kubeReserved)\n"
+        "[Service]\n"
+        'Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml '
+        '--config-dir=/etc/kubernetes/kubelet.conf.d"\n'
     )
     assert f[D / "sys-node/node0/cpulist"] == "0-1\n"
     assert f[D / "sys-node/node0/cpumap"] == "3\n"
@@ -68,12 +75,14 @@ def test_links_point_every_cpu_at_the_real_sysfs_cpu() -> None:
     }
 
 
-def test_mounts_are_three_volume_lines_each_on_its_own_line() -> None:
+def test_mounts_are_four_volume_lines_each_on_its_own_line() -> None:
     assert nodefs.mounts(D) == (
         f"\nVolume={D}/meminfo:/proc/meminfo:ro"
         f"\nVolume={D}/sys-node:/sys/devices/system/node:ro"
         f"\nVolume={D}/kubelet-reserved.conf"
         ":/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro"
+        f"\nVolume={D}/kubelet-config-dir.conf"
+        ":/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro"
     )
 
 

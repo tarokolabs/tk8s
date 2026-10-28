@@ -17,6 +17,15 @@ class PlanError(Exception):
     pass
 
 
+def check_memory_minimum(memory: str) -> None:
+    """Below 2G the kubelet's 512Mi reservation and 500Mi eviction threshold leave nothing."""
+    if nodefs.memory_bytes(memory) < 2 * 2**30:
+        raise PlanError(
+            f'node memory "{memory}" is below the minimum 2G '
+            "(kubelet reserves 512Mi and evicts below 500Mi)"
+        )
+
+
 def validate(u: model.UserCluster) -> None:
     """The rules a -f file and the flags share; messages name the field (same words as before)."""
     s = u.spec
@@ -33,11 +42,7 @@ def validate(u: model.UserCluster) -> None:
                 f'node memory "{g.memory}" must be a number followed by G or M, e.g. 4G or '
                 "4096M (podman does not accept 4Gi)"
             )
-        if nodefs.memory_bytes(g.memory) < 2 * 2**30:
-            raise PlanError(
-                f'node memory "{g.memory}" is below the minimum 2G '
-                "(kubelet reserves 512Mi and evicts below 500Mi)"
-            )
+        check_memory_minimum(g.memory)
         if g.name is not None:
             if g.count != 1:
                 raise PlanError(

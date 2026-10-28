@@ -13,6 +13,7 @@ Three files per node, rendered here and bind-mounted by the node's Quadlet unit:
 - kubelet-reserved.conf into the kubelet's --config-dir: kubeReserved alone. With capacity now the
   node's own size there is nothing to put in systemReserved; the kubelet turns the reservation into
   the kubepods cgroup limit and the allocatable eviction signal itself.
+- kubelet-config-dir.conf, the systemd drop-in that adds --config-dir to the kubelet's command line.
 """
 
 from pathlib import Path
@@ -26,6 +27,7 @@ EVICTION_MEMORY = 500 * 2**20  # evictionHard memory.available in templates/init
 MEMINFO_MOUNT = "/proc/meminfo"
 SYS_NODE_MOUNT = "/sys/devices/system/node"
 DROP_IN_MOUNT = "/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf"
+CONFIG_DIR_MOUNT = "/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf"
 SYSFS_CPU = Path("/sys/devices/system/cpu")
 
 DROP_IN = (
@@ -34,6 +36,18 @@ DROP_IN = (
     "kubeReserved:\n"
     f"  cpu: {KUBE_RESERVED_CPU_MILLI}m\n"
     f"  memory: {KUBE_RESERVED_MEMORY // 2**20}Mi\n"
+)
+
+
+# The kubelet learns --config-dir from a systemd drop-in mounted next to kubeadm's 10-kubeadm.conf,
+# not from the image: an image flag would point at a directory that does not exist on a node whose
+# /etc volume was filled from the image without the mount (add node on a cluster from before), and
+# the floating node:v<k8s> tag makes "which image is this host running" unknowable.
+CONFIG_DIR_DROP_IN = (
+    "# tkctl: the kubelet also reads /etc/kubernetes/kubelet.conf.d (kubeReserved)\n"
+    "[Service]\n"
+    'Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml '
+    '--config-dir=/etc/kubernetes/kubelet.conf.d"\n'
 )
 
 
@@ -66,6 +80,7 @@ def files(dir: Path, node: model.Node) -> dict[Path, str]:
     return {
         dir / "meminfo": f"MemTotal: {kb} kB\nSwapTotal: 0 kB\n",
         dir / "kubelet-reserved.conf": DROP_IN,
+        dir / "kubelet-config-dir.conf": CONFIG_DIR_DROP_IN,
         n0 / "cpulist": ("0" if node.cpu == 1 else f"0-{node.cpu - 1}") + "\n",
         n0 / "cpumap": _cpumap(node.cpu) + "\n",
         n0 / "distance": "10\n",
@@ -89,6 +104,7 @@ def mounts(dir: Path) -> str:
         f"\nVolume={dir}/meminfo:{MEMINFO_MOUNT}:ro"
         f"\nVolume={dir}/sys-node:{SYS_NODE_MOUNT}:ro"
         f"\nVolume={dir}/kubelet-reserved.conf:{DROP_IN_MOUNT}:ro"
+        f"\nVolume={dir}/kubelet-config-dir.conf:{CONFIG_DIR_MOUNT}:ro"
     )
 
 

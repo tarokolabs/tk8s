@@ -150,9 +150,10 @@ def test_health_timer_fires_every_second() -> None:
     assert "ExecStart=/usr/local/sbin/tk8s-apiserver-health\n" in service
 
 
-def test_kubelet_reads_the_drop_in_directory_tkctl_mounts() -> None:
+def test_kubelet_unit_in_the_image_is_kubeadm_standard_without_config_dir() -> None:
+    """--config-dir comes from a systemd drop-in tkctl mounts per node: an image flag would leave
+    a node whose /etc volume has no such directory (add node on an older cluster) unable to
+    start its kubelet, and the floating node:v<k8s> tag makes "which image" unknowable."""
     conf = (ROOT / "systemd" / "kubelet.service.d" / "10-kubeadm.conf").read_text()
-    assert (
-        'Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml '
-        '--config-dir=/etc/kubernetes/kubelet.conf.d"'
-    ) in conf
+    assert 'Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml"' in conf
+    assert "config-dir" not in conf

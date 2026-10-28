@@ -204,6 +204,11 @@ kubeReserved:
   cpu: 500m
   memory: 512Mi
 
+# ---- <TMP>/clusters/ha/nodes/ha-control-plane-1/kubelet-config-dir.conf
+# tkctl: the kubelet also reads /etc/kubernetes/kubelet.conf.d (kubeReserved)
+[Service]
+Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml --config-dir=/etc/kubernetes/kubelet.conf.d"
+
 # ---- <TMP>/clusters/ha/nodes/ha-control-plane-1/sys-node/node0/cpulist
 0-3
 
@@ -258,6 +263,7 @@ Volume=<TMP>/wulin:/opt/taroko/wulin
 Volume=<TMP>/clusters/ha/nodes/ha-control-plane-1/meminfo:/proc/meminfo:ro
 Volume=<TMP>/clusters/ha/nodes/ha-control-plane-1/sys-node:/sys/devices/system/node:ro
 Volume=<TMP>/clusters/ha/nodes/ha-control-plane-1/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
+Volume=<TMP>/clusters/ha/nodes/ha-control-plane-1/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
 StopTimeout=60
 PodmanArgs=--privileged --cgroupns=private --cpus 4 --memory 6g
 
@@ -280,6 +286,11 @@ kind: KubeletConfiguration
 kubeReserved:
   cpu: 500m
   memory: 512Mi
+
+# ---- <TMP>/clusters/ha/nodes/ha-control-plane-2/kubelet-config-dir.conf
+# tkctl: the kubelet also reads /etc/kubernetes/kubelet.conf.d (kubeReserved)
+[Service]
+Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml --config-dir=/etc/kubernetes/kubelet.conf.d"
 
 # ---- <TMP>/clusters/ha/nodes/ha-control-plane-2/sys-node/node0/cpulist
 0-3
@@ -336,6 +347,7 @@ Volume=<TMP>/wulin:/opt/taroko/wulin
 Volume=<TMP>/clusters/ha/nodes/ha-control-plane-2/meminfo:/proc/meminfo:ro
 Volume=<TMP>/clusters/ha/nodes/ha-control-plane-2/sys-node:/sys/devices/system/node:ro
 Volume=<TMP>/clusters/ha/nodes/ha-control-plane-2/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
+Volume=<TMP>/clusters/ha/nodes/ha-control-plane-2/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
 StopTimeout=60
 PodmanArgs=--privileged --cgroupns=private --cpus 4 --memory 6g
 
@@ -358,6 +370,11 @@ kind: KubeletConfiguration
 kubeReserved:
   cpu: 500m
   memory: 512Mi
+
+# ---- <TMP>/clusters/ha/nodes/ha-control-plane-3/kubelet-config-dir.conf
+# tkctl: the kubelet also reads /etc/kubernetes/kubelet.conf.d (kubeReserved)
+[Service]
+Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml --config-dir=/etc/kubernetes/kubelet.conf.d"
 
 # ---- <TMP>/clusters/ha/nodes/ha-control-plane-3/sys-node/node0/cpulist
 0-3
@@ -414,6 +431,7 @@ Volume=<TMP>/wulin:/opt/taroko/wulin
 Volume=<TMP>/clusters/ha/nodes/ha-control-plane-3/meminfo:/proc/meminfo:ro
 Volume=<TMP>/clusters/ha/nodes/ha-control-plane-3/sys-node:/sys/devices/system/node:ro
 Volume=<TMP>/clusters/ha/nodes/ha-control-plane-3/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
+Volume=<TMP>/clusters/ha/nodes/ha-control-plane-3/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
 StopTimeout=60
 PodmanArgs=--privileged --cgroupns=private --cpus 4 --memory 6g
 
@@ -436,6 +454,11 @@ kind: KubeletConfiguration
 kubeReserved:
   cpu: 500m
   memory: 512Mi
+
+# ---- <TMP>/clusters/ha/nodes/ha-worker-1/kubelet-config-dir.conf
+# tkctl: the kubelet also reads /etc/kubernetes/kubelet.conf.d (kubeReserved)
+[Service]
+Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml --config-dir=/etc/kubernetes/kubelet.conf.d"
 
 # ---- <TMP>/clusters/ha/nodes/ha-worker-1/sys-node/node0/cpulist
 0-3
@@ -492,6 +515,7 @@ Volume=<TMP>/wulin:/opt/taroko/wulin
 Volume=<TMP>/clusters/ha/nodes/ha-worker-1/meminfo:/proc/meminfo:ro
 Volume=<TMP>/clusters/ha/nodes/ha-worker-1/sys-node:/sys/devices/system/node:ro
 Volume=<TMP>/clusters/ha/nodes/ha-worker-1/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
+Volume=<TMP>/clusters/ha/nodes/ha-worker-1/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
 StopTimeout=60
 PodmanArgs=--privileged --cgroupns=private --cpus 4 --memory 6g
 
@@ -514,6 +538,11 @@ kind: KubeletConfiguration
 kubeReserved:
   cpu: 500m
   memory: 512Mi
+
+# ---- <TMP>/clusters/ha/nodes/ha-worker-2/kubelet-config-dir.conf
+# tkctl: the kubelet also reads /etc/kubernetes/kubelet.conf.d (kubeReserved)
+[Service]
+Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml --config-dir=/etc/kubernetes/kubelet.conf.d"
 
 # ---- <TMP>/clusters/ha/nodes/ha-worker-2/sys-node/node0/cpulist
 0-3
@@ -570,6 +599,7 @@ Volume=<TMP>/wulin:/opt/taroko/wulin
 Volume=<TMP>/clusters/ha/nodes/ha-worker-2/meminfo:/proc/meminfo:ro
 Volume=<TMP>/clusters/ha/nodes/ha-worker-2/sys-node:/sys/devices/system/node:ro
 Volume=<TMP>/clusters/ha/nodes/ha-worker-2/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
+Volume=<TMP>/clusters/ha/nodes/ha-worker-2/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
 StopTimeout=60
 PodmanArgs=--privileged --cgroupns=private --cpus 4 --memory 6g
 

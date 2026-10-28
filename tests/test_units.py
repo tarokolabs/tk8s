@@ -11,6 +11,7 @@ def test_render_lists_the_files_in_write_order(ctx: Context) -> None:
     node_files = [
         "meminfo",
         "kubelet-reserved.conf",
+        "kubelet-config-dir.conf",
         "cpulist",
         "cpumap",
         "distance",
@@ -265,9 +266,10 @@ def old_cluster(ctx: Context) -> model.Cluster:
 def test_node_files_come_right_before_each_node_unit(ctx: Context) -> None:
     names = [p.name for p in units.render(ctx)]
     i = names.index("demo-worker-1.container")
-    assert names[i - 8 : i] == [
+    assert names[i - 9 : i] == [
         "meminfo",
         "kubelet-reserved.conf",
+        "kubelet-config-dir.conf",
         "cpulist",
         "cpumap",
         "distance",
@@ -287,6 +289,8 @@ def test_node_unit_mounts_the_three_files(ctx: Context) -> None:
         f"Volume={d}/meminfo:/proc/meminfo:ro\n"
         f"Volume={d}/sys-node:/sys/devices/system/node:ro\n"
         f"Volume={d}/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro\n"
+        f"Volume={d}/kubelet-config-dir.conf"
+        ":/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro\n"
         "StopTimeout=60\n"
     ) in unit
 
