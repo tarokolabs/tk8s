@@ -5,7 +5,7 @@ cluster.yaml (an interrupted create, a cleanup by hand) is deleted from what is 
 
 from pathlib import Path
 
-from . import podman
+from . import kubeconfig, podman
 from .lifecycle import ClusterError
 from .phases import Context, Phase, confirm
 from .podman import node_volumes
@@ -227,10 +227,57 @@ def state_run(ctx: Context) -> None:
 
 STATE = Phase("state", "remove the state directory, PVC data included", state_done, state_run)
 
+
+def _kube_config(ctx: Context) -> tuple[Path, str | None]:
+    path = Path.home() / ".kube" / "config"
+    return path, ctx.host.read(path)
+
+
+def _server(ctx: Context) -> str | None:
+    """What this cluster's entries point at; None without a cluster.yaml (nothing to match)."""
+    return f"https://{ctx.cluster.endpoint_ip}:6443" if ctx.cluster is not None else None
+
+
+def kubeconfig_done(ctx: Context) -> bool:
+    _, text = _kube_config(ctx)
+    server = _server(ctx)
+    if text is None or server is None:
+        return True
+    try:
+        return not kubeconfig.has(text, ctx.cluster_name, server)
+    except ValueError:
+        return True  # not ours to touch
+
+
+def kubeconfig_run(ctx: Context) -> None:
+    """The cluster's entries leave ~/.kube/config (the previous file kept as config.bak); other
+    clusters, and a same-named cluster that points elsewhere, stay. A file that is not a
+    kubeconfig is left alone."""
+    path, text = _kube_config(ctx)
+    server = _server(ctx)
+    if text is None or server is None:
+        return
+    try:
+        rest = kubeconfig.remove(text, ctx.cluster_name, server)
+    except ValueError:
+        return
+    if rest == text:
+        return
+    ctx.host.write(path.with_name("config.bak"), text, mode=0o600)
+    if rest is None:
+        ctx.host.remove(path)
+    else:
+        ctx.host.write(path, rest, mode=0o600)
+
+
+KUBECONFIG = Phase(
+    "kubeconfig", "drop the cluster from ~/.kube/config", kubeconfig_done, kubeconfig_run
+)
+
 PHASE = Phase(
     "delete",
     "delete the cluster",
     None,
     lambda ctx: None,
-    children=(STOP, CONTAINERS, VOLUMES, UNITS, NETWORK, ROUTES, STATE),
+    children=(STOP, CONTAINERS, VOLUMES, UNITS, NETWORK, ROUTES, STATE, KUBECONFIG),
 )

@@ -471,7 +471,7 @@ def test_cluster_verbs_reach_lifecycle(
     assert rc == 0 and ["systemctl", "start", "demo.target"] in [k.argv for k in host.calls]
     monkeypatch.setenv("HOME", str(data_dir / "home"))
     rc, out = run(capsys, "use", "cluster", "demo")
-    assert rc == 0 and "~/.kube/config now points at demo" in out
+    assert rc == 0 and "~/.kube/config: current context demo" in out
     assert c.name == "demo"
 
 

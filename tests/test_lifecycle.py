@@ -3,7 +3,8 @@ from pathlib import Path
 import pytest
 
 from tests.fixtures import HOME, OP, SHOW_HAPROXY, bgp_router_answers, vrrp_answers
-from tk8s import lifecycle, model, versions
+from tests.test_kubeconfig import ADMIN as KUBEADM_ADMIN
+from tk8s import kubeconfig, lifecycle, model, versions
 from tk8s.create import units
 from tk8s.create.plan import resolve
 from tk8s.host import FakeHost, Result
@@ -201,22 +202,50 @@ def test_start_waits_for_fresh_ready_heartbeats(ctx: Context, host: FakeHost) ->
     assert host.lines[-2:] == ["  demo-control-plane-1 Ready", "  demo-worker-1 Ready"]
 
 
-def test_use_creates_kube_dir_and_keeps_the_previous_config(
+def test_use_merges_the_cluster_into_kube_config_and_keeps_the_previous_file(
     ctx: Context, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
-    host.files[ctx.state_dir / "kubeconfig"] = "kind: Config\nclusters: [demo]\n"
+    demo = kubeconfig.rename(KUBEADM_ADMIN, "demo", "https://172.22.0.253:6443")
+    host.files[ctx.state_dir / "kubeconfig"] = demo
     lifecycle.use(ctx, ctx.require_cluster())
     config = home / ".kube" / "config"
-    assert host.files[config] == "kind: Config\nclusters: [demo]\n"
+    assert kubeconfig.load(host.files[config])["current-context"] == "demo"
     assert (home / ".kube" / "config.bak") not in host.files  # nothing to back up the first time
     writes = [k for k in host.calls if k.argv[0] == "write" and k.argv[1] == str(config)]
     assert writes and writes[0].argv[2] == "mode=600"
-    assert host.lines[-1] == "~/.kube/config now points at demo"
-    host.files[ctx.state_dir / "kubeconfig"] = "kind: Config\nclusters: [other]\n"
-    lifecycle.use(ctx, ctx.require_cluster())
-    assert host.files[home / ".kube" / "config.bak"] == "kind: Config\nclusters: [demo]\n"
+    assert host.lines[-1] == "~/.kube/config: current context demo (contexts: demo)"
+    # a second cluster joins the file instead of replacing it
+    other = ctx.require_cluster().model_copy(update={"metadata": model.Metadata(name="other")})
+    host.files[ctx.paths.state_dir("other") / "kubeconfig"] = kubeconfig.rename(
+        KUBEADM_ADMIN, "other", "https://172.22.1.253:6443"
+    )
+    ctx.cluster = other
+    lifecycle.use(ctx, other)
+    doc = kubeconfig.load(host.files[config])
+    assert [c["name"] for c in doc["contexts"]] == ["demo", "other"]
+    assert doc["current-context"] == "other"
+    assert (
+        host.files[home / ".kube" / "config.bak"]
+        == host.files[config].replace("current-context: other", "current-context: demo")
+        or kubeconfig.load(host.files[home / ".kube" / "config.bak"])["current-context"] == "demo"
+    )
+    assert host.lines[-1] == "~/.kube/config: current context other (contexts: demo, other)"
+
+
+def test_use_refuses_to_clobber_a_kube_config_it_cannot_parse(
+    ctx: Context, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    host.files[ctx.state_dir / "kubeconfig"] = kubeconfig.rename(
+        KUBEADM_ADMIN, "demo", "https://172.22.0.253:6443"
+    )
+    host.files[home / ".kube" / "config"] = "just: text\n"
+    with pytest.raises(lifecycle.ClusterError, match="not a kubeconfig"):
+        lifecycle.use(ctx, ctx.require_cluster())
+    assert host.files[home / ".kube" / "config"] == "just: text\n"
 
 
 def test_use_without_a_kubeconfig_says_so(
@@ -450,3 +479,18 @@ def test_start_refuses_when_a_node_file_podman_would_mount_is_missing(
         lifecycle.start(ctx, ctx.require_cluster())
     assert str(meminfo) in str(err.value) and "tkctl create cluster demo" in str(err.value)
     assert ["systemctl", "start", "demo.target"] not in [k.argv for k in host.calls]
+
+
+def test_use_normalises_a_state_kubeconfig_from_before_the_renaming(
+    ctx: Context, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cluster created before entries were named after it still has kubeadm's names in
+    <state>/kubeconfig; use must not point current-context at a context that is not there."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    legacy = KUBEADM_ADMIN.replace("https://api.demo.k8s:6443", "https://172.22.0.253:6443")
+    host.files[ctx.state_dir / "kubeconfig"] = legacy
+    lifecycle.use(ctx, ctx.require_cluster())
+    doc = kubeconfig.load(host.files[home / ".kube" / "config"])
+    assert [c["name"] for c in doc["contexts"]] == ["demo"] and doc["current-context"] == "demo"
+    assert doc["clusters"][0]["cluster"]["server"] == "https://172.22.0.253:6443"

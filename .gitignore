@@ -15,6 +15,7 @@ id_ed25519.*
 talosconfig
 kubeconfig
 kubeconfig.*
+!src/tk8s/kubeconfig.py
 *.kubeconfig
 htpasswd
 .netrc
