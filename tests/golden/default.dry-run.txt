@@ -43,6 +43,7 @@ status:
   phase: Creating
   completed: {}
   tk8s: <VERSION>
+  node_capacity: true
 
 
 [units] write the Quadlet units, the target, the routes and the router config

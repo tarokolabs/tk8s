@@ -131,6 +131,9 @@ class Status(Strict):
     phase: Literal["Creating", "Ready"]
     completed: dict[str, datetime] = {}
     tk8s: str  # the tk8s version that created the cluster
+    # True from the version that sizes nodes (capacity/allocatable from cpu/memory); a cluster
+    # created before it keeps today's units and reports the host, and verify skips the check.
+    node_capacity: bool = False
 
 
 class Cluster(Strict):

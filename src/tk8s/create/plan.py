@@ -192,7 +192,11 @@ def resolve(
         ),
         nodes=expand_nodes(u.metadata.name, s.nodes, index),
     )
-    status = existing.status if existing else model.Status(phase="Creating", tk8s=tk8s_version)
+    status = (
+        existing.status
+        if existing
+        else model.Status(phase="Creating", tk8s=tk8s_version, node_capacity=True)
+    )
     return model.Cluster(metadata=u.metadata, spec=spec, status=status)
 
 
