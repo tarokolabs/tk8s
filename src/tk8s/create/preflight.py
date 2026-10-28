@@ -81,15 +81,24 @@ def check_host_fits(ctx: Context) -> str:
     """Every planned node fits the host: a node sized above the host's cores or MemTotal would
     report a capacity the host cannot back (and podman refuses --cpus above the core count only
     after the units are written). Returns the host size for the ok line."""
-    cpus = int(ctx.host.run(["nproc"], capture=True).stdout.strip())
+    said = ctx.host.run(["nproc"], capture=True).stdout.strip()
+    if not said.isdigit():
+        raise PreflightError(f"cannot read the host's cpu count: nproc said {said!r}")
+    cpus = int(said)
     meminfo = ctx.host.read(Path("/proc/meminfo")) or ""
-    kb = int(next(ln.split()[1] for ln in meminfo.splitlines() if ln.startswith("MemTotal:")))
+    totals = [ln.split() for ln in meminfo.splitlines() if ln.startswith("MemTotal:")]
+    if not totals or len(totals[0]) < 2 or not totals[0][1].isdigit():
+        raise PreflightError("no MemTotal in /proc/meminfo")
+    host_mib = int(totals[0][1]) // 1024
     for n in ctx.require_cluster().spec.nodes:
         if n.cpu > cpus:
             raise PreflightError(f"node {n.name} asks for {n.cpu} cpu, the host has {cpus}")
-        if nodefs.memory_bytes(n.memory) > kb * 1024:
-            raise PreflightError(f"node {n.name} asks for {n.memory} memory, the host has {kb} kB")
-    return f"host {cpus} cpu, {kb} kB"
+        node_mib = nodefs.memory_bytes(n.memory) // 2**20
+        if node_mib > host_mib:
+            raise PreflightError(
+                f"node {n.name} asks for {node_mib} MiB memory, the host has {host_mib} MiB"
+            )
+    return f"host {cpus} cpu, {host_mib} MiB"
 
 
 def run(ctx: Context) -> None:

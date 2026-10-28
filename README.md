@@ -59,7 +59,7 @@ tkctl create cluster bare --skip-phases cni,addons    # 只做到 kubeadm，CNI 
 
 ```
 [preflight] check the host: podman, systemd, cgroup v2, swap, sudo, sysctls, data tree, node sizes
-  preflight ok: podman 5.4.2, systemd, cgroup v2, swap off, host bridge-nf off, ip_forward on, /opt/taroko owned by student, host 8 cpu, 32873260 kB
+  preflight ok: podman 5.4.2, systemd, cgroup v2, swap off, host bridge-nf off, ip_forward on, /opt/taroko owned by student, host 8 cpu, 32102 MiB
 [plan] resolve cluster.yaml: defaults, subnet, node names
   cluster demo: 1 control plane + 2 workers, K8s 1.37.1, subnet 172.22.0.0/24
 [images] already done

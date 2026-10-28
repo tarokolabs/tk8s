@@ -39,7 +39,7 @@ def test_good_host_passes_and_persists_sysctls(ctx: Context, host: FakeHost) -> 
     assert "net.bridge.bridge-nf-call-iptables = 0" in conf and "net.ipv4.ip_forward = 1" in conf
     assert host.files[Path("/etc/modules-load.d/tk8s.conf")] == "br_netfilter\n"
     ok = [line for line in host.lines if line.startswith("  preflight ok: podman 5.4.2")]
-    assert ok and ok[0].endswith(", host 8 cpu, 32873260 kB")
+    assert ok and ok[0].endswith(", host 8 cpu, 32102 MiB")
 
 
 def test_data_tree_is_created_for_the_user(ctx: Context, host: FakeHost) -> None:
@@ -124,7 +124,7 @@ def test_missing_br_netfilter_is_loaded(ctx: Context, host: FakeHost) -> None:
 
 def test_a_host_with_exactly_the_node_size_passes(ctx: Context, host: FakeHost) -> None:
     host_size(host, 2, 4 * 2**20)  # demo nodes are 2 cpu / 4g
-    assert preflight.check_host_fits(ctx) == "host 2 cpu, 4194304 kB"
+    assert preflight.check_host_fits(ctx) == "host 2 cpu, 4096 MiB"
 
 
 def test_a_host_one_core_short_names_the_node_and_both_numbers(
@@ -139,5 +139,18 @@ def test_a_host_one_core_short_names_the_node_and_both_numbers(
 
 def test_a_host_one_kb_short_of_memory_is_refused(ctx: Context, host: FakeHost) -> None:
     host_size(host, 8, 4 * 2**20 - 1)
-    with pytest.raises(PreflightError, match="asks for 4g memory, the host has 4194303 kB"):
+    with pytest.raises(PreflightError, match="asks for 4096 MiB memory, the host has 4095 MiB"):
+        preflight.check_host_fits(ctx)
+
+
+def test_an_unreadable_host_size_is_a_preflight_error_not_a_traceback(
+    ctx: Context, host: FakeHost
+) -> None:
+    host.responses[("nproc",)] = Result(0, "\n", "")
+    host.files[Path("/proc/meminfo")] = "MemTotal:       1 kB\n"
+    with pytest.raises(PreflightError, match="cannot read the host's cpu count"):
+        preflight.check_host_fits(ctx)
+    host.responses[("nproc",)] = Result(0, "8\n", "")
+    host.files[Path("/proc/meminfo")] = "MemFree:        1 kB\n"
+    with pytest.raises(PreflightError, match="no MemTotal in /proc/meminfo"):
         preflight.check_host_fits(ctx)

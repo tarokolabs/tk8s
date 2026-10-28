@@ -55,13 +55,17 @@ def check_node_sizes(r: Report) -> None:
         )
         return
     _, out = r.kubectl("get", "nodes", "-o", f"jsonpath={SIZES}")
-    seen = {ln.split()[0]: ln.split()[1:] for ln in out.splitlines() if len(ln.split()) == 5}
+    seen = {ln.split()[0]: ln.strip() for ln in out.splitlines() if ln.split()}
     bad = []
     for n in c.spec.nodes:
         if n.name not in seen:
             bad.append(f"{n.name}: not in kubectl get nodes")
             continue
-        cap_cpu, cap_mem, alloc_cpu, alloc_mem = seen[n.name]
+        fields = seen[n.name].split()[1:]
+        if len(fields) != 4:
+            bad.append(f"{n.name}: unexpected line {seen[n.name]!r}")
+            continue
+        cap_cpu, cap_mem, alloc_cpu, alloc_mem = fields
         want_cpu, want_mem = nodefs.expected_allocatable(n)
         ok = (
             nodefs.cpu_milli(cap_cpu) == n.cpu * 1000

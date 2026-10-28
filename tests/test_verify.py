@@ -438,3 +438,15 @@ def test_node_sizes_is_skipped_on_a_cluster_from_before(ctx: Context, host: Fake
         "SKIP  node sizes — cluster created before node capacity sizing; "
         "recreate it to get node-sized capacity"
     ]
+
+
+def test_node_sizes_names_a_line_it_cannot_parse(ctx: Context, host: FakeHost) -> None:
+    healthy(ctx, host)
+    host.responses[("kubectl", "get", "nodes", "-o", f"jsonpath={platform.SIZES}")] = Result(
+        0, "demo-control-plane-1 2 4Gi 1500m 3084Mi\ndemo-worker-1 2 4Gi\n", ""
+    )
+    assert verify.run(ctx, only="node-sizes") == 1
+    assert lines(host, "FAIL") == [
+        "FAIL  node sizes — demo-worker-1: unexpected line 'demo-worker-1 2 4Gi'; "
+        "demo-worker-2: not in kubectl get nodes"
+    ]
