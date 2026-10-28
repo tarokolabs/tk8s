@@ -158,6 +158,19 @@ class Host:
     def is_active(self, unit: str) -> bool:
         return self.run(["systemctl", "is-active", "--quiet", unit], check=False).returncode == 0
 
+    def symlink(self, path: Path, target: Path) -> None:
+        """path -> target, created or replaced (ln -sfn); parents created."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_symlink():
+            if os.readlink(path) == str(target):
+                return
+            path.unlink()
+        os.symlink(target, path)
+
+    def readlink(self, path: Path) -> Path | None:
+        """The target of a symlink, None when path is not one."""
+        return Path(os.readlink(path)) if path.is_symlink() else None
+
 
 class DryRunHost(Host):
     """Prints what would happen: commands as `$` lines, files as `# ---- path` + content (the
@@ -216,6 +229,12 @@ class DryRunHost(Host):
     def is_active(self, unit: str) -> bool:
         return False
 
+    def symlink(self, path: Path, target: Path) -> None:
+        self.run(["ln", "-sfn", str(target), str(path)])
+
+    def readlink(self, path: Path) -> Path | None:
+        return None
+
 
 @dataclass
 class Call:
@@ -244,6 +263,7 @@ class FakeHost(Host):
     # `podman container inspect --format {{.State.Running}} NAME` answer false (default true)
     podman: set[str] = field(default_factory=set)
     lines: list[str] = field(default_factory=list)
+    links: dict[Path, Path] = field(default_factory=dict)  # symlink path -> target
 
     def __post_init__(self) -> None:
         super().__init__(self.lines.append)
@@ -351,3 +371,10 @@ class FakeHost(Host):
 
     def is_active(self, unit: str) -> bool:
         return unit in self.active
+
+    def symlink(self, path: Path, target: Path) -> None:
+        self.calls.append(Call(["ln", "-sfn", str(target), str(path)], False, {}))
+        self.links[path] = target
+
+    def readlink(self, path: Path) -> Path | None:
+        return self.links.get(path)
