@@ -13,6 +13,7 @@ from .platform import (
     check_kube_system,
     check_kubelet,
     check_metrics,
+    check_node_sizes,
     check_nodes,
     check_operator,
     check_storage,
@@ -24,6 +25,7 @@ __all__ = ["NS", "PHASES", "Report", "VerifyError", "run"]
 
 CHECKS = [
     ("nodes", "every node Ready", check_nodes),
+    ("node-sizes", "capacity and allocatable follow cluster.yaml", check_node_sizes),
     ("kubelet", "no runtime cgroup errors in the kubelet log", check_kubelet),
     ("kube-system", "every kube-system pod Running", check_kube_system),
     ("cilium", "cilium status", check_cilium),

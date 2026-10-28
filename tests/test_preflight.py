@@ -5,6 +5,7 @@ import pytest
 
 from tests.fixtures import argvs
 from tk8s.create import preflight
+from tk8s.create.preflight import PreflightError
 from tk8s.host import FakeHost, Result
 from tk8s.phases import Context, PhaseFailed, Runner
 
@@ -18,6 +19,12 @@ def good_host(host: FakeHost, uid: str = "1000") -> None:
     host.responses[("id", "-g")] = Result(0, "1000\n", "")
     host.responses[("id", "-un")] = Result(0, "student\n", "")
     host.dirs.add(Path("/run/systemd/system"))
+    host_size(host, 8, 32873260)
+
+
+def host_size(host: FakeHost, cpus: int, kb: int) -> None:
+    host.responses[("nproc",)] = Result(0, f"{cpus}\n", "")
+    host.files[Path("/proc/meminfo")] = f"MemTotal:       {kb} kB\nMemFree:        1 kB\n"
 
 
 def test_good_host_passes_and_persists_sysctls(ctx: Context, host: FakeHost) -> None:
@@ -31,10 +38,8 @@ def test_good_host_passes_and_persists_sysctls(ctx: Context, host: FakeHost) -> 
     conf = host.files[Path("/etc/sysctl.d/90-tk8s.conf")]
     assert "net.bridge.bridge-nf-call-iptables = 0" in conf and "net.ipv4.ip_forward = 1" in conf
     assert host.files[Path("/etc/modules-load.d/tk8s.conf")] == "br_netfilter\n"
-    assert any(
-        line.startswith("  preflight ok: podman 5.4.2, systemd, cgroup v2, swap off")
-        for line in host.lines
-    )
+    ok = [line for line in host.lines if line.startswith("  preflight ok: podman 5.4.2")]
+    assert ok and ok[0].endswith(", host 8 cpu, 32102 MiB")
 
 
 def test_data_tree_is_created_for_the_user(ctx: Context, host: FakeHost) -> None:
@@ -115,3 +120,37 @@ def test_missing_br_netfilter_is_loaded(ctx: Context, host: FakeHost) -> None:
     host.responses[("lsmod",)] = Result(0, "overlay 1 0\n", "")
     Runner([preflight.PHASE]).run(ctx)
     assert ["modprobe", "br_netfilter"] in argvs(host)
+
+
+def test_a_host_with_exactly_the_node_size_passes(ctx: Context, host: FakeHost) -> None:
+    host_size(host, 2, 4 * 2**20)  # demo nodes are 2 cpu / 4g
+    assert preflight.check_host_fits(ctx) == "host 2 cpu, 4096 MiB"
+
+
+def test_a_host_one_core_short_names_the_node_and_both_numbers(
+    ctx: Context, host: FakeHost
+) -> None:
+    host_size(host, 1, 4 * 2**20)
+    with pytest.raises(
+        PreflightError, match="node demo-control-plane-1 asks for 2 cpu, the host has 1"
+    ):
+        preflight.check_host_fits(ctx)
+
+
+def test_a_host_one_kb_short_of_memory_is_refused(ctx: Context, host: FakeHost) -> None:
+    host_size(host, 8, 4 * 2**20 - 1)
+    with pytest.raises(PreflightError, match="asks for 4096 MiB memory, the host has 4095 MiB"):
+        preflight.check_host_fits(ctx)
+
+
+def test_an_unreadable_host_size_is_a_preflight_error_not_a_traceback(
+    ctx: Context, host: FakeHost
+) -> None:
+    host.responses[("nproc",)] = Result(0, "\n", "")
+    host.files[Path("/proc/meminfo")] = "MemTotal:       1 kB\n"
+    with pytest.raises(PreflightError, match="cannot read the host's cpu count"):
+        preflight.check_host_fits(ctx)
+    host.responses[("nproc",)] = Result(0, "8\n", "")
+    host.files[Path("/proc/meminfo")] = "MemFree:        1 kB\n"
+    with pytest.raises(PreflightError, match="no MemTotal in /proc/meminfo"):
+        preflight.check_host_fits(ctx)

@@ -2,8 +2,10 @@
 without it, take it out of cluster.yaml. Like delete cluster, every phase's done() is "that
 part is already gone", so a delete that stopped halfway is finished by running it again."""
 
+from pathlib import Path
+
 from .. import model, podman
-from ..create import kubeadm, router, units
+from ..create import kubeadm, nodefs, router, units
 from ..delete import remove_containers, remove_volumes
 from ..lifecycle import ClusterError, save_cluster
 from ..phases import Context, Phase, PhaseFailed, confirm, wait_for
@@ -124,9 +126,19 @@ def trimmed(ctx: Context) -> model.Cluster:
     return without_node(c, n) if find(c, n) is not None else c
 
 
+def node_dir(ctx: Context) -> Path:
+    """The node's meminfo, NUMA node and kubelet drop-in under <state>/nodes/."""
+    return nodefs.node_dir(ctx.paths.state_dir(ctx.cluster_name), require_node(ctx))
+
+
 def units_done(ctx: Context) -> bool:
     c = trimmed(ctx)
-    return not ctx.host.exists(unit_file(ctx)) and units.done(ctx, c) and router.all_synced(ctx, c)
+    return (
+        not ctx.host.exists(unit_file(ctx))
+        and not ctx.host.exists(node_dir(ctx))
+        and units.done(ctx, c)
+        and router.all_synced(ctx, c)
+    )
 
 
 def units_run(ctx: Context) -> None:
@@ -135,6 +147,7 @@ def units_run(ctx: Context) -> None:
     n = require_node(ctx)
     units.run(ctx, trimmed(ctx))
     ctx.host.run(["rm", "-f", str(unit_file(ctx))], sudo=True)
+    ctx.host.run(["rm", "-rf", str(node_dir(ctx))])
     ctx.host.run(["systemctl", "daemon-reload"], sudo=True)
     ctx.host.run(
         ["systemctl", "reset-failed", f"{n}.service"], sudo=True, capture=True, check=False

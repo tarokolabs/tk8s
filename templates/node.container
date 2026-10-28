@@ -27,7 +27,7 @@ Volume=$name-usr-local-bin:/usr/local/bin
 # because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
 Volume=$images_dir/$k8s:/var/lib/containers/shared:ro
 Volume=$state_dir:/opt/taroko
-Volume=$wulin_dir:/opt/taroko/wulin
+Volume=$wulin_dir:/opt/taroko/wulin$node_mounts
 StopTimeout=60
 PodmanArgs=--privileged --cgroupns=private --cpus $cpu --memory $memory
 

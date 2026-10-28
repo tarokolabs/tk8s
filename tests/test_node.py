@@ -588,3 +588,67 @@ def test_delete_control_plane_names_the_routers_that_keep_routing_to_it(tmp_path
     ):
         Runner([node_delete.DRAIN], record=False).run(ctx)
     assert ["kubectl", "delete", "node", "demo-control-plane-2"] not in argvs(host)
+
+
+def test_delete_node_removes_its_node_directory(tmp_path: Path) -> None:
+    ctx, host = node_ctx(tmp_path)
+    ctx.node = "demo-worker-2"
+    d = ctx.state_dir / "nodes" / "demo-worker-2"
+    host.dirs.add(d)
+    assert not node_delete.units_done(ctx)
+    node_delete.units_run(ctx)
+    assert ["rm", "-rf", str(d)] in argvs(host)
+    assert not host.exists(d)
+
+
+def test_add_node_on_a_sized_cluster_refuses_memory_under_2g_before_saving(
+    tmp_path: Path,
+) -> None:
+    ctx, host = node_ctx(tmp_path)
+    before = host.files[ctx.state_dir / "cluster.yaml"]
+    ctx.request = model.NodeRequest(role="worker", memory="1g")
+    with pytest.raises(PhaseFailed, match=r'node memory "1g" is below the minimum 2G'):
+        node_add.plan_run(ctx)
+    assert host.files[ctx.state_dir / "cluster.yaml"] == before
+
+
+def test_add_node_on_a_sized_cluster_refuses_a_node_bigger_than_the_host(
+    tmp_path: Path,
+) -> None:
+    ctx, host = node_ctx(tmp_path)
+    host.responses[("nproc",)] = Result(0, "8\n", "")
+    host.files[Path("/proc/meminfo")] = "MemTotal:       32873260 kB\n"
+    before = host.files[ctx.state_dir / "cluster.yaml"]
+    ctx.request = model.NodeRequest(role="worker", cpu=9)
+    with pytest.raises(PhaseFailed, match="node demo-worker-3 asks for 9 cpu, the host has 8"):
+        node_add.plan_run(ctx)
+    assert host.files[ctx.state_dir / "cluster.yaml"] == before
+
+
+def test_add_node_on_an_old_cluster_keeps_todays_behaviour(tmp_path: Path) -> None:
+    ctx, host = node_ctx(tmp_path)
+    c = ctx.require_cluster()
+    ctx.cluster = c.model_copy(update={"status": model.Status(phase="Ready", tk8s="old")})
+    ctx.request = model.NodeRequest(role="worker", cpu=9, memory="1g")
+    node_add.plan_run(ctx)
+    saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
+    assert saved.spec.nodes[-1].cpu == 9 and saved.spec.nodes[-1].memory == "1g"
+
+
+def test_add_node_on_an_old_cluster_leaves_every_existing_unit_byte_identical(
+    tmp_path: Path,
+) -> None:
+    ctx, host = node_ctx(tmp_path)
+    c = ctx.require_cluster()
+    ctx.cluster = c.model_copy(update={"status": model.Status(phase="Ready", tk8s="old")})
+    units.run(ctx)  # what the old tkctl left on the host
+    unit_dir = ctx.paths.unit_dir / "demo"
+    before = {p: t for p, t in host.files.items() if p.parent == unit_dir}
+    ctx.request = model.NodeRequest(role="worker")
+    node_add.plan_run(ctx)
+    units.run(ctx)
+    for p, t in before.items():
+        assert host.files[p] == t, p
+    new = host.files[unit_dir / "demo-worker-3.container"]
+    assert "/proc/meminfo" not in new and "kubelet.conf.d" not in new
+    assert not any("/nodes/demo-worker-3/" in str(p) for p in host.files)

@@ -192,3 +192,46 @@ def test_write_keeps_the_old_file_when_the_rename_fails(
         h.write(p, "new: file\n")
     assert p.read_text() == "old: file\n"
     assert list(tmp_path.iterdir()) == [p]  # the temp file is gone too
+
+
+def test_symlink_creates_replaces_and_reads_back(tmp_path: Path) -> None:
+    h = Host(print)
+    link = tmp_path / "a" / "cpu0"
+    h.symlink(link, Path("/sys/devices/system/cpu/cpu0"))
+    assert h.readlink(link) == Path("/sys/devices/system/cpu/cpu0")
+    h.symlink(link, Path("/sys/devices/system/cpu/cpu1"))
+    assert h.readlink(link) == Path("/sys/devices/system/cpu/cpu1")
+    assert h.readlink(tmp_path / "a") is None and h.readlink(tmp_path / "missing") is None
+
+
+def test_fake_host_records_symlinks_and_answers_readlink() -> None:
+    h = FakeHost()
+    h.symlink(Path("/x/cpu0"), Path("/sys/devices/system/cpu/cpu0"))
+    assert h.readlink(Path("/x/cpu0")) == Path("/sys/devices/system/cpu/cpu0")
+    assert h.readlink(Path("/x/other")) is None
+    assert h.calls[-1].argv == ["ln", "-sfn", "/sys/devices/system/cpu/cpu0", "/x/cpu0"]
+
+
+def test_dry_run_host_prints_the_ln_command() -> None:
+    out: list[str] = []
+    h = DryRunHost(out.append)
+    h.symlink(Path("/x/cpu0"), Path("/sys/devices/system/cpu/cpu0"))
+    assert out == ["  $ ln -sfn /sys/devices/system/cpu/cpu0 /x/cpu0"]
+    assert h.readlink(Path("/x/cpu0")) is None
+
+
+def test_symlink_replaces_a_regular_file_in_its_way(tmp_path: Path) -> None:
+    h = Host(print)
+    link = tmp_path / "cpu0"
+    link.write_text("not a link")
+    h.symlink(link, Path("/sys/devices/system/cpu/cpu0"))
+    assert h.readlink(link) == Path("/sys/devices/system/cpu/cpu0")
+
+
+def test_fake_host_listdir_and_remove_see_symlinks() -> None:
+    h = FakeHost()
+    h.symlink(Path("/x/node0/cpu0"), Path("/sys/devices/system/cpu/cpu0"))
+    h.files[Path("/x/node0/cpulist")] = "0\n"
+    assert h.listdir(Path("/x/node0")) == ["cpu0", "cpulist"]
+    h.remove(Path("/x/node0/cpu0"))
+    assert h.readlink(Path("/x/node0/cpu0")) is None

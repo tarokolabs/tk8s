@@ -4,6 +4,7 @@ import pytest
 
 from tests.fixtures import HOME, OP, SHOW_HAPROXY, bgp_router_answers, vrrp_answers
 from tk8s import lifecycle, model, versions
+from tk8s.create import units
 from tk8s.create.plan import resolve
 from tk8s.host import FakeHost, Result
 from tk8s.paths import Paths
@@ -192,6 +193,7 @@ def test_start_waits_for_fresh_ready_heartbeats(ctx: Context, host: FakeHost) ->
         "demo-worker-1 Ready <none> 1d v1.37.1\n",
         "",
     )
+    units.run(ctx)  # a created cluster has its node files on the host
     lifecycle.start(ctx, ctx.require_cluster())
     argvs = [k.argv for k in host.calls]
     assert ["systemctl", "start", "demo.target"] in argvs
@@ -436,3 +438,15 @@ def test_describe_says_not_running_for_a_stopped_router(
     assert not any(
         a[:3] == ["podman", "exec", "demo-router-2"] for a in [k.argv for k in host.calls]
     )
+
+
+def test_start_refuses_when_a_node_file_podman_would_mount_is_missing(
+    ctx: Context, host: FakeHost
+) -> None:
+    units.run(ctx)
+    meminfo = ctx.state_dir / "nodes" / "demo-worker-1" / "meminfo"
+    host.files.pop(meminfo)
+    with pytest.raises(lifecycle.ClusterError) as err:
+        lifecycle.start(ctx, ctx.require_cluster())
+    assert str(meminfo) in str(err.value) and "tkctl create cluster demo" in str(err.value)
+    assert ["systemctl", "start", "demo.target"] not in [k.argv for k in host.calls]

@@ -12,6 +12,7 @@ from tests.fixtures import (
 from tk8s import model, verify
 from tk8s.host import FakeHost, Result
 from tk8s.phases import Context
+from tk8s.verify import platform
 
 NODES = (
     "demo-control-plane-1 Ready control-plane 1m v1.37.1\ndemo-worker-1 Ready <none> 1m v1.37.1\n"
@@ -21,8 +22,16 @@ NODES = (
 
 def healthy(ctx: Context, host: FakeHost) -> None:
     c = ctx.require_cluster()
-    ctx.cluster = c.model_copy(update={"status": model.Status(phase="Ready", tk8s="test")})
+    ctx.cluster = c.model_copy(
+        update={"status": model.Status(phase="Ready", tk8s="test", node_capacity=True)}
+    )
     ctx.options.verify_timeout = 15
+    host.responses[("kubectl", "get", "nodes", "-o", f"jsonpath={platform.SIZES}")] = Result(
+        0,
+        "demo-control-plane-1 2 4Gi 1500m 3084Mi\ndemo-worker-1 2 4Gi 1500m 3084Mi\n"
+        "demo-worker-2 2 4Gi 1500m 3084Mi\n",
+        "",
+    )
     host.files[ctx.state_dir / "kubeconfig"] = "kind: Config\n"
     host.dirs.add(ctx.state_dir / "storage" / "pvc-1234_tk-verify_pvc")
     host.active.add("demo.target")
@@ -81,12 +90,13 @@ def lines(host: FakeHost, prefix: str) -> list[str]:
     return [line for line in host.lines if line.startswith(prefix)]
 
 
-def test_all_healthy_is_15_pass_1_skip(ctx: Context, host: FakeHost) -> None:
+def test_all_healthy_is_16_pass_1_skip(ctx: Context, host: FakeHost) -> None:
     healthy(ctx, host)
     assert verify.run(ctx) == 0
-    assert host.lines[-1] == "PASS 15  FAIL 0  SKIP 1"
+    assert host.lines[-1] == "PASS 16  FAIL 0  SKIP 1"
     for s in (
         "PASS  nodes: 3/3 Ready",
+        "PASS  node sizes: capacity and allocatable follow cluster.yaml (kubeReserved 500m/512Mi)",
         "PASS  kubelet: no runtime cgroup errors",
         "PASS  kube-system pods all Running",
         "PASS  cilium-operator: 0 restarts, Gateway API on",
@@ -123,7 +133,7 @@ def test_one_broken_component_is_one_fail_and_exit_1(ctx: Context, host: FakeHos
     host.responses[("kubectl", "top", "nodes")] = Result(1, "", "")
     assert verify.run(ctx) == 1
     assert "FAIL  kubectl top nodes — metrics-server not ready" in host.lines
-    assert host.lines[-1] == "PASS 14  FAIL 1  SKIP 1"
+    assert host.lines[-1] == "PASS 15  FAIL 1  SKIP 1"
 
 
 def test_kubelet_noise_is_reported_with_the_cgroup(ctx: Context, host: FakeHost) -> None:
@@ -401,3 +411,42 @@ def test_router_vrrp_check_fails_on_a_fault_state(two_router_ctx: Context, host:
         line.startswith("FAIL  router VRRP — demo-router-1 FAULT, demo-router-2 MASTER;")
         for line in host.lines
     )
+
+
+def test_node_sizes_fail_names_the_node_whose_allocatable_lost_the_reservation(
+    ctx: Context, host: FakeHost
+) -> None:
+    healthy(ctx, host)
+    host.responses[("kubectl", "get", "nodes", "-o", f"jsonpath={platform.SIZES}")] = Result(
+        0,
+        "demo-control-plane-1 2 4Gi 1500m 3084Mi\ndemo-worker-1 2 4Gi 2 3596Mi\n"
+        "demo-worker-2 2 4Gi 1500m 3084Mi\n",
+        "",
+    )
+    assert verify.run(ctx, only="node-sizes") == 1
+    assert lines(host, "FAIL") == [
+        "FAIL  node sizes — demo-worker-1: capacity 2/4Gi allocatable 2/3596Mi, want 1500m/3084Mi"
+    ]
+
+
+def test_node_sizes_is_skipped_on_a_cluster_from_before(ctx: Context, host: FakeHost) -> None:
+    healthy(ctx, host)
+    c = ctx.require_cluster()
+    ctx.cluster = c.model_copy(update={"status": model.Status(phase="Ready", tk8s="old")})
+    assert verify.run(ctx, only="node-sizes") == 0
+    assert lines(host, "SKIP") == [
+        "SKIP  node sizes — cluster created before node capacity sizing; "
+        "recreate it to get node-sized capacity"
+    ]
+
+
+def test_node_sizes_names_a_line_it_cannot_parse(ctx: Context, host: FakeHost) -> None:
+    healthy(ctx, host)
+    host.responses[("kubectl", "get", "nodes", "-o", f"jsonpath={platform.SIZES}")] = Result(
+        0, "demo-control-plane-1 2 4Gi 1500m 3084Mi\ndemo-worker-1 2 4Gi\n", ""
+    )
+    assert verify.run(ctx, only="node-sizes") == 1
+    assert lines(host, "FAIL") == [
+        "FAIL  node sizes — demo-worker-1: unexpected line 'demo-worker-1 2 4Gi'; "
+        "demo-worker-2: not in kubectl get nodes"
+    ]

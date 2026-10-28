@@ -2,8 +2,10 @@
 image store, the units, the per-node addons), so a node added later looks exactly like one created
 with the cluster. join node runs the same tail to finish a node that an add left unjoined."""
 
-from ..create import addons, frr, kubeadm, nodes, router, units
+from ..create import addons, frr, kubeadm, nodes, preflight, router, units
 from ..create import images as create_images
+from ..create.plan import PlanError, check_memory_minimum
+from ..datatree import PreflightError
 from ..lifecycle import save_cluster
 from ..phases import Context, Phase, PhaseFailed, wait_for
 from .common import (
@@ -26,7 +28,18 @@ def plan_run(ctx: Context) -> None:
     if ctx.request is None:
         raise PhaseFailed("add node needs a request (role, size, join)")
     n = plan_add(c, ctx.request)
-    save_cluster(ctx, with_node(c, n))
+    grown = with_node(c, n)
+    if units.sized(c):
+        # the same refusals create makes, before the node is written into cluster.yaml: a node
+        # under 2G has no allocatable left, one above the host cannot be backed
+        try:
+            check_memory_minimum(n.memory)
+            ctx.cluster = grown
+            preflight.check_host_fits(ctx)
+        except (PlanError, PreflightError) as err:
+            ctx.cluster = c
+            raise PhaseFailed(str(err)) from err
+    save_cluster(ctx, grown)
     ctx.node = n.name
     ctx.say(f"  {n.name}: {n.role} at {n.ip}, {n.cpu} cpu, {n.memory}")
 

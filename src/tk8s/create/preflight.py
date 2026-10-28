@@ -1,11 +1,13 @@
 """preflight: the host can run tk8s (podman >= 5.4, systemd, cgroup v2, swap off, passwordless
 sudo, curl), bridged frames stay out of the host firewall, forwarding is on, the data tree is the
-user's. Read-only apart from two sysctl files and the data tree; runs every time."""
+user's, and the host has the cores and memory the planned nodes ask for. Read-only apart from two
+sysctl files and the data tree; runs every time."""
 
 from pathlib import Path
 
 from ..datatree import PreflightError, data_dirs
 from ..phases import Context, Phase, PhaseFailed
+from . import nodefs
 
 __all__ = ["PHASE", "PreflightError", "data_dirs"]
 
@@ -75,23 +77,48 @@ def bridge_and_forwarding(ctx: Context) -> None:
     ctx.host.write(Path("/etc/sysctl.d/90-tk8s.conf"), SYSCTL, sudo=True)
 
 
+def check_host_fits(ctx: Context) -> str:
+    """Every planned node fits the host: a node sized above the host's cores or MemTotal would
+    report a capacity the host cannot back (and podman refuses --cpus above the core count only
+    after the units are written). Returns the host size for the ok line."""
+    said = ctx.host.run(["nproc"], capture=True).stdout.strip()
+    if not said.isdigit():
+        raise PreflightError(f"cannot read the host's cpu count: nproc said {said!r}")
+    cpus = int(said)
+    meminfo = ctx.host.read(Path("/proc/meminfo")) or ""
+    totals = [ln.split() for ln in meminfo.splitlines() if ln.startswith("MemTotal:")]
+    if not totals or len(totals[0]) < 2 or not totals[0][1].isdigit():
+        raise PreflightError("no MemTotal in /proc/meminfo")
+    host_mib = int(totals[0][1]) // 1024
+    for n in ctx.require_cluster().spec.nodes:
+        if n.cpu > cpus:
+            raise PreflightError(f"node {n.name} asks for {n.cpu} cpu, the host has {cpus}")
+        node_mib = nodefs.memory_bytes(n.memory) // 2**20
+        if node_mib > host_mib:
+            raise PreflightError(
+                f"node {n.name} asks for {node_mib} MiB memory, the host has {host_mib} MiB"
+            )
+    return f"host {cpus} cpu, {host_mib} MiB"
+
+
 def run(ctx: Context) -> None:
     try:
         v = check_tools(ctx)
         bridge_and_forwarding(ctx)
         data_dirs(ctx)
+        size = check_host_fits(ctx) if ctx.cluster is not None else ""
     except PreflightError as err:
         raise PhaseFailed(f"preflight: {err}") from err
     me = ctx.host.run(["id", "-un"], capture=True).stdout.strip()
     ctx.say(
         f"  preflight ok: podman {v}, systemd, cgroup v2, swap off, host bridge-nf off, "
-        f"ip_forward on, {ctx.paths.data_dir} owned by {me}"
+        f"ip_forward on, {ctx.paths.data_dir} owned by {me}{', ' + size if size else ''}"
     )
 
 
 PHASE = Phase(
     "preflight",
-    "check the host: podman, systemd, cgroup v2, swap, sudo, sysctls, data tree",
+    "check the host: podman, systemd, cgroup v2, swap, sudo, sysctls, data tree, node sizes",
     None,  # no completion state: checked every time
     run,
 )

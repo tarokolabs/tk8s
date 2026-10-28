@@ -245,6 +245,7 @@ def ready_host(
     host.files[state / "init-config.yaml"] = kubeadm.render_init(ctx)
     for p, content in units.render(ctx).items():
         host.files[p] = content
+    host.links.update(units.links(ctx))
     host.files[state / "kubeconfig"] = "kind: Config\n"
     host.files[state / ".certificate-key"] = "abcd\n"
     host.files[paths.cni_dir / "bridge"] = "elf"
@@ -268,6 +269,8 @@ def ready_host(
     r[("id", "-u")] = Result(0, "1000\n", "")
     r[("id", "-g")] = Result(0, "1000\n", "")
     r[("id", "-un")] = Result(0, "student\n", "")
+    r[("nproc",)] = Result(0, "8\n", "")
+    host.files[Path("/proc/meminfo")] = "MemTotal:       32873260 kB\nMemFree:        1 kB\n"
     for rt in c.routers:
         r[("podman", "exec", rt.name, "cat", "/tmp/vyos-config-status")] = Result(0, "0\n", "")
         r[("podman", "exec", rt.name, OP, "show", "haproxy")] = Result(0, SHOW_HAPROXY, "")

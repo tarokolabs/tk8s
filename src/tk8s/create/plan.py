@@ -10,10 +10,20 @@ from typing import Literal
 from .. import model
 from ..paths import Paths
 from ..phases import Context, Phase
+from . import nodefs
 
 
 class PlanError(Exception):
     pass
+
+
+def check_memory_minimum(memory: str) -> None:
+    """Below 2G the kubelet's 512Mi reservation and 500Mi eviction threshold leave nothing."""
+    if nodefs.memory_bytes(memory) < 2 * 2**30:
+        raise PlanError(
+            f'node memory "{memory}" is below the minimum 2G '
+            "(kubelet reserves 512Mi and evicts below 500Mi)"
+        )
 
 
 def validate(u: model.UserCluster) -> None:
@@ -32,6 +42,7 @@ def validate(u: model.UserCluster) -> None:
                 f'node memory "{g.memory}" must be a number followed by G or M, e.g. 4G or '
                 "4096M (podman does not accept 4Gi)"
             )
+        check_memory_minimum(g.memory)
         if g.name is not None:
             if g.count != 1:
                 raise PlanError(
@@ -192,7 +203,11 @@ def resolve(
         ),
         nodes=expand_nodes(u.metadata.name, s.nodes, index),
     )
-    status = existing.status if existing else model.Status(phase="Creating", tk8s=tk8s_version)
+    status = (
+        existing.status
+        if existing
+        else model.Status(phase="Creating", tk8s=tk8s_version, node_capacity=True)
+    )
     return model.Cluster(metadata=u.metadata, spec=spec, status=status)
 
 

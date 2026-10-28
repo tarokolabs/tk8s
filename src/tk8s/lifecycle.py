@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import model
-from .create import PHASES
+from .create import PHASES, units
 from .create.kubeadm import kubectl
 from .describe_router import describe_router
 from .phases import Context, poll_until
@@ -211,6 +211,14 @@ READY_HEARTBEATS = (
 def start(ctx: Context, c: model.Cluster) -> None:
     """Node objects keep their last status for a while after a stop: a node is back only with a
     Ready heartbeat newer than this start."""
+    missing = units.missing_node_files(ctx, c)
+    if missing:
+        raise ClusterError(
+            f"cluster {c.name}: files its nodes mount are missing from the host "
+            f"({', '.join(str(p) for p in missing[:3])}"
+            f"{', ...' if len(missing) > 3 else ''}); "
+            f"tkctl create cluster {c.name} writes them again"
+        )
     since = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     ctx.host.run(["systemctl", "start", f"{c.name}.target"], sudo=True)
 

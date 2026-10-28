@@ -58,8 +58,8 @@ tkctl create cluster bare --skip-phases cni,addons    # 只做到 kubeadm，CNI 
 ### 執行輸出
 
 ```
-[preflight] check the host: podman, systemd, cgroup v2, swap, sudo, sysctls, data tree
-  preflight ok: podman 5.4.2, systemd, cgroup v2, swap off, host bridge-nf off, ip_forward on, /opt/taroko owned by student
+[preflight] check the host: podman, systemd, cgroup v2, swap, sudo, sysctls, data tree, node sizes
+  preflight ok: podman 5.4.2, systemd, cgroup v2, swap off, host bridge-nf off, ip_forward on, /opt/taroko owned by student, host 8 cpu, 32102 MiB
 [plan] resolve cluster.yaml: defaults, subnet, node names
   cluster demo: 1 control plane + 2 workers, K8s 1.37.1, subnet 172.22.0.0/24
 [images] already done
@@ -79,7 +79,7 @@ cluster demo is ready
 
 ```
 $ tkctl create cluster --list-phases
-preflight          check the host: podman, systemd, cgroup v2, swap, sudo, sysctls, data tree
+preflight          check the host: podman, systemd, cgroup v2, swap, sudo, sysctls, data tree, node sizes
 plan               resolve cluster.yaml: defaults, subnet, node names
 images             pull every image the cluster needs into the shared store
 units              write the Quadlet units, the target, the routes and the router config
@@ -223,6 +223,7 @@ tkctl version
 - `--preset lab|ha` 是拓樸縮寫，`[plan]` 會印出展開的旗標；不能跟 `--control-planes`、`--workers`、`--ha`、`--routers`、`--defer-join`、`-f` 混用。`ha` = `--control-planes 3 --workers 3 --ha bgp --routers 2`，`lab` = 預設的 `--control-planes 1 --workers 2 --ha proxy --routers 1`。
 - `--gvisor` 需要 veth datapath，會自動選；明確指定 `--datapath netkit` 加 `--gvisor` 會被拒絕。
 - `--memory` 接受 `4G`、`4096M`，`4Gi` 不行。
+- 節點的 capacity 就是它的 `cpu`／`memory`，allocatable 是再扣掉 kubeReserved（cpu 500m、memory 512Mi）與 evictionHard（memory 500Mi）：2 核 4G 的節點是 1500m／3084Mi，和一台同規格的 VM 跑 kubeadm 一樣。記憶體至少 2G，任一節點不能超過主機的核數或記憶體（preflight 會拒絕）。`verify` 的 `node sizes` 檢查這些數字。這版之前建的叢集仍回報整台主機，`verify` 對它們印 SKIP；要改過來就重建。
 - 已完成的叢集再 `create` 會被拒絕；`delete cluster`、`delete node` 也有 `--phase`，中途失敗再執行一次會接續。
 - 環境變數一律 `TK_` 前綴：`TK_DATA_DIR` 變更資料根目錄（預設 `/opt/taroko`）、`TK_ASSUME_YES=1` 等同 `--yes`、`TK_OFFLINE=1` 不下載 image、cilium CLI 與 CNI plugins。`tkctl --help` 有完整清單。
 - `PATH` 上任何叫 `tkctl-<名字>` 的執行檔會變成 `tkctl <名字>`（規則同 kubectl 的 plugin）。
@@ -234,6 +235,7 @@ tkctl version
 /opt/taroko/images/<K8s 版本>/   # 共用 image store
 /opt/taroko/clusters/<名稱>/router/  # VyOS 的設定（tkctl.boot），依 cluster.yaml 產生
 /opt/taroko/cni/                 # CNI plugins
+/opt/taroko/clusters/<名稱>/nodes/<節點>/  # 節點掛進去的 meminfo、NUMA node 與 kubelet 的保留量設定
 /etc/containers/systemd/<名稱>/  # 節點與 router 的 Quadlet unit；systemctl status <名稱>.target
 ```
 

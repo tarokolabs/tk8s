@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.fixtures import DEMO_USER, resolved
 from tk8s import model
 
 GOOD = """\
@@ -57,7 +58,9 @@ def test_status_is_dumped_after_spec() -> None:
         update={"status": model.Status(phase="Creating", tk8s="v1")}
     )
     text = model.dumps(c)
-    assert text.endswith("status:\n  phase: Creating\n  completed: {}\n  tk8s: v1\n")
+    assert text.endswith(
+        "status:\n  phase: Creating\n  completed: {}\n  tk8s: v1\n  node_capacity: false\n"
+    )
     assert text.index("spec:") < text.index("status:")
 
 
@@ -151,3 +154,15 @@ def test_node_request_is_frozen_and_sizes_default_to_none() -> None:
 def test_cni_is_cilium_only() -> None:
     with pytest.raises(model.ClusterFileError):
         model.load_text(GOOD.replace("cni: cilium", "cni: canal"))
+
+
+def test_a_cluster_yaml_without_node_capacity_loads_as_false() -> None:
+    text = model.dumps(resolved(DEMO_USER)).replace("  node_capacity: true\n", "")
+    assert "node_capacity" not in text
+    status = model.load_text(text).status
+    assert status is not None and status.node_capacity is False
+
+
+def test_node_capacity_is_dumped_right_after_tk8s() -> None:
+    text = model.dumps(resolved(DEMO_USER))
+    assert "  tk8s: test\n  node_capacity: true\n" in text
