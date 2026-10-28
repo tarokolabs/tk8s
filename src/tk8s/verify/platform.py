@@ -4,6 +4,7 @@ addons every cluster has."""
 from pathlib import Path
 
 from .. import podman
+from ..create import nodefs
 from ..create.kubeadm import kubectl_env
 from ..render import template
 from .report import NS, Report
@@ -34,6 +35,53 @@ def check_nodes(r: Report) -> None:
         _, out = r.kubectl("get", "nodes", "--no-headers")
         bad = " ".join(ln.split()[0] for ln in out.splitlines() if ln.split()[1:2] != ["Ready"])
         r.ng(f"nodes: {len(got)}/{n} Ready", bad)
+
+
+SIZES = (
+    "{range .items[*]}{.metadata.name} {.status.capacity.cpu} {.status.capacity.memory} "
+    '{.status.allocatable.cpu} {.status.allocatable.memory}{"\\n"}{end}'
+)
+
+
+def check_node_sizes(r: Report) -> None:
+    """Capacity is the node's cpu/memory and allocatable that minus kubeReserved and the eviction
+    threshold. Allocatable is checked too: a host still running the old node image mounts the
+    files fine but its kubelet has no --config-dir, so only the reservation goes missing."""
+    c = r.ctx.require_cluster()
+    if c.status is None or not c.status.node_capacity:
+        r.skip(
+            "node sizes",
+            "cluster created before node capacity sizing; recreate it to get node-sized capacity",
+        )
+        return
+    _, out = r.kubectl("get", "nodes", "-o", f"jsonpath={SIZES}")
+    seen = {ln.split()[0]: ln.split()[1:] for ln in out.splitlines() if len(ln.split()) == 5}
+    bad = []
+    for n in c.spec.nodes:
+        if n.name not in seen:
+            bad.append(f"{n.name}: not in kubectl get nodes")
+            continue
+        cap_cpu, cap_mem, alloc_cpu, alloc_mem = seen[n.name]
+        want_cpu, want_mem = nodefs.expected_allocatable(n)
+        ok = (
+            nodefs.cpu_milli(cap_cpu) == n.cpu * 1000
+            and nodefs.quantity_bytes(cap_mem) == nodefs.memory_bytes(n.memory)
+            and nodefs.cpu_milli(alloc_cpu) == want_cpu
+            and nodefs.quantity_bytes(alloc_mem) == want_mem
+        )
+        if not ok:
+            bad.append(
+                f"{n.name}: capacity {cap_cpu}/{cap_mem} allocatable {alloc_cpu}/{alloc_mem}, "
+                f"want {want_cpu}m/{want_mem // 2**20}Mi"
+            )
+    if bad:
+        r.ng("node sizes", "; ".join(bad))
+    else:
+        r.ok(
+            "node sizes: capacity and allocatable follow cluster.yaml "
+            f"(kubeReserved {nodefs.KUBE_RESERVED_CPU_MILLI}m/"
+            f"{nodefs.KUBE_RESERVED_MEMORY // 2**20}Mi)"
+        )
 
 
 def check_kubelet(r: Report) -> None:
