@@ -159,3 +159,14 @@ def test_nodes_ready_is_not_done_when_kubectl_fails(ctx: Context, host: FakeHost
     assert not cni.nodes_ready_done(ctx)
     with pytest.raises(PhaseFailed, match="nodes are not Ready after 5 minutes"):
         Runner([cni.PHASE], only="cni/nodes-ready").run(ctx)
+
+
+def test_auto_datapath_takes_the_lowest_kernel(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    for h, rel in zip(hosts.values(), ("6.12.0", "6.1.0-30-amd64", "6.8.0"), strict=True):
+        h.responses[("uname", "-r")] = Result(0, f"{rel}\n", "")
+    assert cni.resolve_datapath(ctx) == "veth"
+    hosts["b"].responses[("uname", "-r")] = Result(0, "6.8.0\n", "")
+    assert cni.resolve_datapath(ctx) == "netkit"

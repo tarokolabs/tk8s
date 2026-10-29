@@ -7,7 +7,7 @@ and the chart are vendored under manifests/, so nothing here fetches from helm.c
 from pathlib import Path
 from typing import Literal
 
-from .. import images
+from .. import hosts, images
 from ..phases import Context, Phase, PhaseFailed, wait_for
 from .kubeadm import kubectl, kubectl_env
 
@@ -15,13 +15,13 @@ Datapath = Literal["netkit", "veth"]
 
 
 def resolve_datapath(ctx: Context) -> Datapath:
-    """auto: netkit needs kernel 6.8; older kernels get veth."""
+    """auto: netkit needs kernel 6.8; older kernels get veth. On several hosts the oldest
+    kernel decides: one node without netkit would be one node without a network."""
     d = ctx.require_cluster().spec.datapath
     if d != "auto":
         return d
-    rel = ctx.host.run(["uname", "-r"], capture=True).stdout.strip()
-    major, minor = (int(x.split("-")[0]) for x in rel.split(".")[:2])
-    return "netkit" if (major, minor) >= (6, 8) else "veth"
+    oldest = min(hosts.kernel(h) for _, h in ctx.node_hosts())
+    return "netkit" if oldest >= (6, 8) else "veth"
 
 
 def cilium_install_argv(ctx: Context, action: str, datapath: Datapath) -> list[str]:
