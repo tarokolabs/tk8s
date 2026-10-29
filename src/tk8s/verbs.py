@@ -5,7 +5,7 @@ import argparse
 import os
 from pathlib import Path
 
-from . import delete, images, lifecycle, model, verify, versions
+from . import delete, hosts, images, lifecycle, model, verify, versions
 from .args import (
     UsageError,
     apply_preset,
@@ -17,7 +17,7 @@ from .args import (
     validate_node_name,
 )
 from .create import DRY_RUN_PHASES, PHASES
-from .create.plan import load_existing, resolve, used_indices
+from .create.plan import load_existing, parse_range, resolve, used_indices
 from .host import DryRunHost, Host
 from .node import add as node_add
 from .node import common as node_common
@@ -39,7 +39,16 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
         validate_k8s(a.k8s)
     if a.gvisor and a.datapath is None:
         a.datapath = "veth"
-    flags = ("--control-planes", "--workers", "--cpu", "--memory", "--ha", "--routers")
+    flags = (
+        "--control-planes",
+        "--workers",
+        "--cpu",
+        "--memory",
+        "--ha",
+        "--routers",
+        "--hosts",
+        "--ip-range",
+    )
     topo = any(a == f or a.startswith(f + "=") for a in raw for f in flags)  # --ha bgp, --ha=bgp
     preset = apply_preset(a, raw)
     user = user_cluster_from_file(a, topo) if a.file else user_cluster_from_flags(a)
@@ -55,6 +64,18 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
         )
     if existing is not None and existing.status is not None and existing.status.phase == "Ready":
         raise UsageError(f"cluster {name} already exists; delete it first or pick another name")
+    lan, operator = None, None
+    if user.spec.hosts is not None:
+        ctx.hosts = hosts.build(
+            ctx.host, user.spec.hosts, say=print, quiet=a.quiet, dry_run=a.dry_run
+        )
+        first = user.spec.hosts[0]
+        if a.dry_run:
+            assert user.spec.network is not None and user.spec.network.range is not None
+            lan = hosts.dry_run_lan(parse_range(user.spec.network.range)[0])
+        else:
+            lan = hosts.lan_facts(ctx.hosts[first.name], first.name)
+        operator = "dry-run" if a.dry_run else hosts.local_hostname(ctx.host)
     ctx.cluster = resolve(
         user,
         k8s_default=ctx.versions.kubernetes.default,
@@ -62,6 +83,8 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
         used_indices=used_indices(ctx.paths),
         allow_overlap=a.allow_overlap,
         tk8s_version=tk8s_version(HOME),
+        lan=lan,
+        operator=operator,
     )
     phases = DRY_RUN_PHASES if a.dry_run else PHASES
     skip = {s for s in a.skip_phases.split(",") if s}

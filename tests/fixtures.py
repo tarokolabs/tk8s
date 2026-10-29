@@ -198,6 +198,8 @@ def resolved(
     existing: model.Cluster | None = None,
     used_indices: set[int] | None = None,
     allow_overlap: bool = False,
+    lan: LanFacts | None = None,
+    operator: str | None = None,
 ) -> model.Cluster:
     return resolve(
         user,
@@ -206,6 +208,8 @@ def resolved(
         used_indices=used_indices or set(),
         allow_overlap=allow_overlap,
         tk8s_version="test",
+        lan=lan,
+        operator=operator,
     )
 
 

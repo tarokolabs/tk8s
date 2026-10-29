@@ -759,3 +759,80 @@ def test_preset_cannot_be_bypassed_by_an_abbreviated_or_glued_flag(
     assert rc == 2 and "unrecognized arguments: --work 5" in out
     rc, out = run(capsys, "create", "cluster", "demo", "--preset", "ha", "-fx.yaml", "--dry-run")
     assert rc == 1 and "--preset ha cannot be combined with -f" in out
+
+
+# ---- --hosts and --ip-range
+
+
+def test_hosts_flag_expands_to_spec_hosts_and_range() -> None:
+    from tk8s.args import parse_hosts_flag
+
+    hosts = parse_hosts_flag("a,b=tux@h:2222,pve-c")
+    assert [(h.name, h.ssh) for h in hosts] == [
+        ("a", "a"),
+        ("b", "tux@h:2222"),
+        ("pve-c", "pve-c"),
+    ]
+
+
+def test_dry_run_multi_host_prints_hosts_placement_and_remote_files(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc, out = run(
+        capsys,
+        "create",
+        "cluster",
+        "demo",
+        "--control-planes",
+        "3",
+        "--hosts",
+        "a,b=tux@192.168.1.231,c=192.168.1.232",
+        "--ip-range",
+        "192.168.1.64-192.168.1.95",
+        "--dry-run",
+    )
+    assert rc == 0
+    assert "  host a: eth0, shim 192.168.1.65\n" in out  # one router: no router-1/-2 addresses
+    assert (
+        "  placement: demo-control-plane-1 a, demo-control-plane-2 b, demo-control-plane-3 c" in out
+    )
+    assert "  routers: demo-router a\n" in out
+    assert "warning" not in out
+    assert "    range: 192.168.1.64-192.168.1.95\n" in out and "  operator: dry-run\n" in out
+    assert "# ---- tux@192.168.1.231:" in out  # the copy of cluster.yaml on host b
+
+
+def test_dry_run_warns_when_one_host_holds_most_control_planes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc, out = run(
+        capsys,
+        "create",
+        "cluster",
+        "--control-planes",
+        "3",
+        "--hosts",
+        "a,b=h",
+        "--ip-range",
+        "192.168.1.64-192.168.1.95",
+        "--dry-run",
+    )
+    assert rc == 0
+    assert "  warning: host a holds 2 of 3 control planes; losing it stops the apiserver" in out
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["--ip-range", "192.168.1.64-192.168.1.95"], "--ip-range needs --hosts"),
+        (["--hosts", "a,b"], "--hosts needs --ip-range A-B"),
+        (["--hosts", "a,b", "--ip-range", "x", "-f", "c.yaml"], "-f cannot be combined with"),
+        (["--hosts", "A=h", "--ip-range", "x"], "invalid host name 'A'"),
+        (["--hosts", "a,192.168.1.2", "--ip-range", "x"], "invalid host name '192.168.1.2'"),
+    ],
+)
+def test_hosts_flag_mistakes_are_usage_errors(
+    capsys: pytest.CaptureFixture[str], argv: list[str], message: str
+) -> None:
+    rc, out = run(capsys, "create", "cluster", *argv, "--dry-run")
+    assert rc == 1 and message in out

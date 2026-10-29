@@ -13,6 +13,7 @@ from .args import UsageError, add_create_flags
 from .create.plan import PlanError
 from .datatree import PreflightError
 from .host import HostError
+from .hosts import HostsError
 from .phases import PhaseFailed, tk8s_version
 from .verbs import (
     HOME,
@@ -62,6 +63,12 @@ Create flags:
                          join later with: tkctl join node CLUSTER NODE
   --routers N            router containers: 1 (default) or 2 (VRRP between them, the nodes'
                          gateway .253 floats; stop one with systemctl stop NAME-router-1.service)
+  --hosts LIST           spread the nodes over several hosts on one LAN (macvlan): a comma list
+                         of [name=][user@]host[:port]; the first item without user@ is this
+                         host. Control planes, workers and routers go round-robin; needs
+                         --ip-range
+  --ip-range A-B         addresses reserved for the cluster on the hosts' LAN (router, nodes,
+                         one shim per host, the last 20 as the LoadBalancer pool)
   --preset NAME          a named topology, printed expanded under [plan]; cannot be combined
                          with --control-planes/--workers/--ha/--routers/--defer-join/-f:
                            lab   --control-planes 1 --workers 2 --ha proxy --routers 1
@@ -228,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
         PhaseFailed,
         images.ImagesError,
         HostError,
+        HostsError,
         PreflightError,
         verify.VerifyError,
         lifecycle.ClusterError,

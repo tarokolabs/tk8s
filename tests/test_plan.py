@@ -3,16 +3,30 @@ from pathlib import Path
 
 import pytest
 
-from tests.fixtures import DEMO_USER, bgp_user, resolved, two_router_user
+from tests.fixtures import (
+    DEMO_USER,
+    MULTI_LAN,
+    MULTI_YAML,
+    bgp_user,
+    multi_user,
+    resolved,
+    two_router_user,
+)
 from tk8s import model
 from tk8s.create.plan import (
     PlanError,
+    allocate,
     expand_nodes,
     load_existing,
+    majority_host,
+    parse_range,
     pick_index,
+    place,
+    place_routers,
     used_indices,
     validate,
 )
+from tk8s.hosts import LanFacts
 from tk8s.paths import Paths
 
 K8S = "1.37.1"
@@ -334,3 +348,139 @@ def test_memory_below_2g_is_refused() -> None:
     body = "metadata: {name: demo}\nspec:\n  nodes:\n    - {role: control-plane, memory: 1G}\n"
     with pytest.raises(PlanError, match=r'node memory "1G" is below the minimum 2G'):
         validate(user(body))
+
+
+# ---- multi-host: placement and the address range
+
+
+def ip(last: int) -> IPv4Address:
+    return IPv4Address(f"192.168.1.{last}")
+
+
+def test_parse_range_wants_an_ordered_pair() -> None:
+    assert parse_range("192.168.1.64-192.168.1.95") == (ip(64), ip(95))
+    with pytest.raises(PlanError, match="the end is before the start"):
+        parse_range("192.168.1.95-192.168.1.64")
+    with pytest.raises(PlanError, match=r"spec\.network\.range must be A-B"):
+        parse_range("192.168.1.64-nope")
+
+
+def test_allocate_cuts_the_range_in_the_fixed_order() -> None:
+    a = allocate((ip(64), ip(95)), hosts=3, routers=2, nodes=5)
+    assert a.router == ip(64) and a.routers == [ip(65), ip(66)]
+    assert a.shims == [ip(67), ip(68), ip(69)]
+    assert a.nodes == [ip(70), ip(71), ip(72), ip(73), ip(74)]
+    assert a.lb_range == "192.168.1.76-192.168.1.95"
+    one = allocate((ip(64), ip(95)), hosts=1, routers=1, nodes=1)
+    assert one.routers == [] and one.shims == [ip(65)] and one.nodes == [ip(66)]
+
+
+def test_allocate_refuses_a_range_too_small_with_the_count_it_needs() -> None:
+    with pytest.raises(
+        PlanError,
+        match=r"range 192.168.1.64-192.168.1.71 has 8 addresses; this cluster needs 31 "
+        r"\(1 router address, 2 router container addresses, 3 host shims, 5 nodes, "
+        r"20 LoadBalancer addresses\)",
+    ):
+        allocate((ip(64), ip(71)), hosts=3, routers=2, nodes=5)
+
+
+def cp(count: int = 1, host: str | None = None) -> model.NodeGroup:
+    return model.NodeGroup(role="control-plane", count=count, host=host)
+
+
+def worker(count: int = 1, host: str | None = None) -> model.NodeGroup:
+    return model.NodeGroup(role="worker", count=count, host=host)
+
+
+def test_place_round_robins_by_role_and_keeps_fixed_hosts_out_of_the_rotation() -> None:
+    assert place([cp(3), worker(2, host="c"), worker(2)], ["a", "b", "c"]) == [
+        "a",
+        "b",
+        "c",
+        "c",
+        "c",
+        "a",
+        "b",
+    ]
+    assert place([cp(), worker(2, host="auto")], ["x", "y"]) == ["x", "y", "x"]
+    assert place_routers(None, ["a", "b", "c"], 2) == ["a", "b"]
+    assert place_routers(None, ["a"], 2) == ["a", "a"]
+    assert place_routers(["c", "a"], ["a", "b", "c"], 2) == ["c", "a"]
+
+
+def test_majority_host_names_the_host_holding_more_than_half() -> None:
+    assert majority_host(["a", "a", "b"]) == "a"
+    assert majority_host(["a", "b", "c"]) is None
+    assert majority_host(["a"]) == "a"
+
+
+def test_resolve_multi_host_fills_hosts_placement_and_addresses() -> None:
+    c = resolved(multi_user(), lan=MULTI_LAN, operator="op")
+    assert c == model.load_text(MULTI_YAML)
+    assert [n.host for n in c.spec.nodes] == ["a", "b", "c", "a", "b"]
+    assert c.spec.hosts is not None and [str(h.shim) for h in c.spec.hosts] == [
+        "192.168.1.67",
+        "192.168.1.68",
+        "192.168.1.69",
+    ]
+
+
+def test_resolve_multi_host_needs_the_lan_facts() -> None:
+    with pytest.raises(PlanError, match="needs the hosts' LAN facts"):
+        resolved(multi_user())
+
+
+def test_resume_with_different_lan_facts_is_refused() -> None:
+    existing = model.load_text(MULTI_YAML)
+    other = LanFacts("eth0", IPv4Network("192.168.1.0/24"), IPv4Address("192.168.1.1"))
+    with pytest.raises(PlanError, match=r"cluster\.yaml says ens18 on 192\.168\.1\.0/24.*eth0"):
+        resolved(multi_user(), existing=existing, lan=other, operator="op")
+    again = resolved(multi_user(), existing=existing, lan=MULTI_LAN, operator="op")
+    assert again.spec == existing.spec
+
+
+def test_range_outside_the_lan_is_refused() -> None:
+    far = LanFacts("ens18", IPv4Network("10.0.0.0/24"), IPv4Address("10.0.0.1"))
+    with pytest.raises(PlanError, match=r"is outside the hosts' network 10\.0\.0\.0/24"):
+        resolved(multi_user(), lan=far, operator="op")
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        (
+            "  hosts: [{name: a}]\n  nodes: [{role: control-plane}]\n",
+            "spec.hosts needs spec.network.range",
+        ),
+        (
+            "  network: {range: 192.168.1.64-192.168.1.95}\n  nodes: [{role: control-plane}]\n",
+            "spec.hosts needs spec.network.range",
+        ),
+        (
+            "  hosts: [{name: a}]\n  gvisor: true\n"
+            "  network: {range: 192.168.1.64-192.168.1.95}\n  nodes: [{role: control-plane}]\n",
+            "gvisor is not supported on a multi-host cluster yet",
+        ),
+        (
+            "  hosts: [{name: a}]\n"
+            "  network: {range: 192.168.1.64-192.168.1.95, nodes: 172.22.0.0/24}\n"
+            "  nodes: [{role: control-plane}]\n",
+            "spec.network.nodes and router are allocated from spec.network.range",
+        ),
+        (
+            "  hosts: [{name: a}]\n  network: {range: 192.168.1.64-192.168.1.95}\n"
+            "  nodes: [{role: control-plane, host: zz}]\n",
+            "node host zz is not in spec.hosts",
+        ),
+        (
+            "  hosts: [{name: a}]\n"
+            "  network: {range: 192.168.1.64-192.168.1.95, router_hosts: [zz]}\n"
+            "  nodes: [{role: control-plane}]\n",
+            "router host zz is not in spec.hosts",
+        ),
+    ],
+)
+def test_multi_host_user_mistakes_are_refused(body: str, message: str) -> None:
+    with pytest.raises(PlanError, match=message):
+        validate(user(f"metadata: {{name: m}}\nspec:\n{body}"))
