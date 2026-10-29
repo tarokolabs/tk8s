@@ -799,7 +799,10 @@ def test_dry_run_multi_host_prints_hosts_placement_and_remote_files(
     assert "  routers: demo-router a\n" in out
     assert "warning" not in out
     assert "    range: 192.168.1.64-192.168.1.95\n" in out and "  operator: dry-run\n" in out
-    assert "# ---- tux@192.168.1.231:" in out  # the copy of cluster.yaml on host b
+    assert (
+        "# ---- tux@192.168.1.231:/etc/containers/systemd/demo/demo-control-plane-2.container"
+        in out
+    )
 
 
 def test_dry_run_warns_when_one_host_holds_most_control_planes(

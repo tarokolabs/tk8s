@@ -29,7 +29,7 @@ Volume=$images_dir/$k8s:/var/lib/containers/shared:ro
 Volume=$state_dir:/opt/taroko
 Volume=$wulin_dir:/opt/taroko/wulin$node_mounts
 StopTimeout=60
-PodmanArgs=--privileged --cgroupns=private --cpus $cpu --memory $memory
+PodmanArgs=--privileged --cgroupns=private --cpus $cpu --memory $memory$mac_arg
 
 [Service]
 # The node image stops with SIGRTMIN+3; systemd inside exits 130 on halt.

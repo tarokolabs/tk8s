@@ -63,11 +63,12 @@ def vrrp_block(c: model.Cluster, r: model.Router) -> str:
     if r.priority is None:
         return ""
     delay = '            preempt-delay "10"\n' if r.priority == 200 else ""
+    prefix = c.spec.network.nodes.prefixlen
     return (
         "high-availability {\n"
         "    vrrp {\n"
         "        group tk8s {\n"
-        f"            address {c.floating_ip}/24 {{\n"
+        f"            address {c.floating_ip}/{prefix} {{\n"
         "            }\n"
         '            interface "eth0"\n'
         f"{delay}"
