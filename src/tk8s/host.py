@@ -65,6 +65,11 @@ class Host:
     def quiet(self) -> bool:
         return self._quiet
 
+    @property
+    def local(self) -> bool:
+        """This process's own machine (a label names a remote one)."""
+        return self.label is None
+
     def _show(self, argv: Sequence[str], sudo: bool, env: Mapping[str, str] | None) -> None:
         if self._quiet:
             return
