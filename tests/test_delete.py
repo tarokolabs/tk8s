@@ -310,3 +310,15 @@ def test_single_host_delete_sequence_is_unchanged(ctx: Context, host: FakeHost) 
     Runner([delete.PHASE], record=False).run(ctx)
     assert not any(x[:2] == ["ip", "link"] for x in argvs(host))
     assert not any(ln.startswith("  host ") for ln in host.lines)
+
+
+def test_delete_multi_host_removes_the_operators_state_last(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    multi_everything_there(ctx, hosts)
+    Runner([delete.PHASE], record=False).run(ctx)
+    lines = hosts["a"].lines
+    state = lines.index("[delete/state] remove the state directory, PVC data included")
+    visited = [ln.strip() for ln in lines[state + 1 :] if ln.startswith("  host ")]
+    assert visited == ["host b:", "host c:", "host a:"]  # cluster.yaml on the operator last

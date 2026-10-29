@@ -61,6 +61,10 @@ class Host:
         self._quiet = quiet
         self.label = label
 
+    @property
+    def quiet(self) -> bool:
+        return self._quiet
+
     def _show(self, argv: Sequence[str], sudo: bool, env: Mapping[str, str] | None) -> None:
         if self._quiet:
             return

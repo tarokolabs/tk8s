@@ -632,3 +632,55 @@ def test_stop_and_start_touch_every_host(
     del hosts["c"].files[ctx.state_dir / "nodes" / "demo-control-plane-3" / "meminfo"]
     with pytest.raises(lifecycle.ClusterError, match="files its nodes mount are missing"):
         lifecycle.start(ctx, c)
+
+
+def test_load_cluster_keeps_the_callers_quiet_setting(
+    multi_ctx: tuple[Context, dict[str, FakeHost]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, hosts = multi_ctx
+    multi_on_disk(ctx, hosts)
+    seen: dict[str, object] = {}
+
+    def build(*a: object, **k: object) -> dict[str, FakeHost]:
+        seen.update(k)
+        return hosts
+
+    monkeypatch.setattr("tk8s.hosts.build", build)
+    ctx.hosts = {}
+    lifecycle.load_cluster(ctx, "demo")
+    assert seen["quiet"] is False  # the `$ ssh …` lines show like the local ones
+    assert hosts["a"].quiet is False
+
+
+def test_get_clusters_judges_a_multi_host_cluster_by_every_host(
+    multi_ctx: tuple[Context, dict[str, FakeHost]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, hosts = multi_ctx
+    ready = model.Status(phase="Ready", tk8s="test", operator="op")
+    ctx.cluster = ctx.require_cluster().model_copy(update={"status": ready})
+    multi_on_disk(ctx, hosts)
+    monkeypatch.setattr("tk8s.hosts.build", lambda *a, **k: hosts)
+    ctx.hosts = {}
+    ctx.cluster = None  # get clusters starts from nothing: every row is its own cluster
+    hosts["b"].active.add("demo.target")  # the operator's own target is down
+    lifecycle.list_clusters(ctx)
+    assert "demo         3+2     1.37.1   auto      Degraded  3      192.168.1.0/24" in "\n".join(
+        hosts["a"].lines
+    )
+
+
+def test_stop_and_start_include_an_operator_that_runs_no_node(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, _ = multi_ctx
+    op = FakeHost()
+    ctx.host = op
+    c = ctx.require_cluster()
+    units.run(ctx)
+    lifecycle.stop(ctx, c)
+    assert ["systemctl", "stop", "demo.target"] in [k.argv for k in op.calls]
+    fresh = "".join(f"{n.name} True 2999-01-01T00:00:00Z\n" for n in c.spec.nodes)
+    op.responses[("kubectl", "get", "nodes", "-o")] = Result(0, fresh, "")
+    op.responses[("kubectl", "get", "nodes", "--no-headers")] = Result(0, "x Ready\n", "")
+    lifecycle.start(ctx, c)
+    assert ["systemctl", "start", "demo.target"] in [k.argv for k in op.calls]

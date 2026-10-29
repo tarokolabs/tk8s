@@ -15,6 +15,10 @@ class ClusterError(Exception):
     """A verb that cannot proceed; the message is the whole story."""
 
 
+class ClusterNotFound(ClusterError):
+    """No cluster.yaml of that name here (delete falls back to what the host still has)."""
+
+
 # ---- the cluster a verb works on
 
 
@@ -23,7 +27,7 @@ def load_cluster(ctx: Context, name: str) -> model.Cluster:
     only the operator's to touch: a copy on another host names where to run tkctl."""
     path = ctx.paths.state_dir(name) / "cluster.yaml"
     if not path.exists():
-        raise ClusterError(
+        raise ClusterNotFound(
             f"cluster {name} not found under {ctx.paths.clusters_dir} (tkctl get clusters)"
         )
     ctx.name = name
@@ -34,7 +38,7 @@ def load_cluster(ctx: Context, name: str) -> model.Cluster:
             raise ClusterError(f"cluster {name} is managed from {op}; run tkctl there")
         if not ctx.hosts:
             ctx.hosts = hosts.build(
-                ctx.host, c.spec.hosts or [], say=ctx.say, quiet=True, dry_run=False
+                ctx.host, c.spec.hosts or [], say=ctx.say, quiet=ctx.host.quiet, dry_run=False
             )
     ctx.cluster = c
     return c
@@ -99,11 +103,14 @@ def list_clusters(ctx: Context) -> None:
         if op is not None:  # a copy: the operator's hosts are not ours to ask
             state, tail = "managed", f" from {op}"
         else:
-            if c.multi_host and not ctx.hosts:
-                ctx.hosts = hosts.build(
-                    ctx.host, c.spec.hosts or [], say=ctx.say, quiet=True, dry_run=False
-                )
-            state, tail = state_of(ctx, c), ""
+            row = ctx.on(ctx.host)  # each row judged with its own cluster and hosts
+            row.cluster = c
+            row.hosts = (
+                hosts.build(ctx.host, c.spec.hosts or [], say=ctx.say, quiet=True, dry_run=False)
+                if c.multi_host
+                else {}
+            )
+            state, tail = state_of(row, c), ""
         ctx.say(
             f"{name:<12} {nodes:<7} {s.kubernetes:<8} {datapath:<9} {state:<9} {count:<6} "
             f"{s.network.nodes}{tail}"
@@ -246,7 +253,7 @@ def stop(ctx: Context, c: model.Cluster) -> None:
     """systemctl waits only for the units it was given; the nodes and the LB are PartOf= the
     target and would still be stopping when a bare `stop <cluster>.target` returns: name them
     all (on every host, each its own)."""
-    for name, h in ctx.node_hosts():
+    for name, h in ctx.target_hosts():
         units_ = [
             f"{c.name}.target",
             *(f"{r.name}.service" for r in c.routers if not name or r.host == name),
@@ -278,7 +285,7 @@ def start(ctx: Context, c: model.Cluster) -> None:
             f"tkctl create cluster {c.name} writes them again"
         )
     since = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    for _, h in ctx.node_hosts():
+    for _, h in ctx.target_hosts():
         h.run(["systemctl", "start", f"{c.name}.target"], sudo=True)
 
     def all_fresh() -> bool:

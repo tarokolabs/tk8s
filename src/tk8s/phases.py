@@ -69,6 +69,16 @@ class Context:
     def remote_hosts(self) -> list[tuple[str, Host]]:
         return [(n, h) for n, h in self.node_hosts() if h is not self.host]
 
+    def target_hosts(self) -> list[tuple[str, Host]]:
+        """Every host with a <cluster>.target: the node hosts, and the operator when it runs
+        no node (its target carries the routes unit); the operator comes last."""
+        hosts = self.node_hosts()
+        mine = [(n, h) for n, h in hosts if h is self.host]
+        others = [(n, h) for n, h in hosts if h is not self.host]
+        if self.cluster is not None and self.cluster.multi_host and not mine:
+            mine = [("operator", self.host)]
+        return [*others, *mine]
+
     def on(self, host: Host) -> Context:
         """This context with `host` as the one commands go to (the cluster's hosts shared)."""
         return dataclasses.replace(self, host=host)

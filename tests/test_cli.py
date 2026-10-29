@@ -846,3 +846,17 @@ def test_hosts_flag_mistakes_are_usage_errors(
 ) -> None:
     rc, out = run(capsys, "create", "cluster", *argv, "--dry-run")
     assert rc == 1 and message in out
+
+
+def test_delete_cluster_on_a_copy_host_refuses_and_keeps_everything(
+    capsys: pytest.CaptureFixture[str], data_dir: Path
+) -> None:
+    """A copy of cluster.yaml names its operator; this host is not it (status.operator is op)."""
+    from tests.fixtures import MULTI_YAML
+
+    state = data_dir / "clusters" / "demo"
+    state.mkdir(parents=True)
+    (state / "cluster.yaml").write_text(MULTI_YAML)
+    rc, out = run(capsys, "delete", "cluster", "demo", "--yes")
+    assert rc == 1 and "cluster demo is managed from op; run tkctl there" in out
+    assert (state / "cluster.yaml").exists()

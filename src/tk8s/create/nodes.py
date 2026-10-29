@@ -57,7 +57,7 @@ def systemd_state(ctx: Context, node: str) -> str:
 
 def up_done(ctx: Context) -> bool:
     c = ctx.require_cluster()
-    if not all(h.is_active(f"{c.name}.target") for _, h in ctx.node_hosts()):
+    if not all(h.is_active(f"{c.name}.target") for _, h in ctx.target_hosts()):
         return False
     if any(systemd_state(ctx, n.name) not in ("running", "degraded") for n in c.spec.nodes):
         return False
@@ -128,7 +128,7 @@ def up_run(ctx: Context) -> None:
         _start_on(ctx, None)
     else:
         fresh = not ctx.host.exists(ctx.state_dir / "kubeconfig")
-        for name, h in ctx.node_hosts():
+        for name, h in ctx.target_hosts():
             ctx.say(f"  host {name}:")
             mine = [n for n in c.spec.nodes if n.host == name] if fresh else []
             _start_on(ctx.on(h), mine)

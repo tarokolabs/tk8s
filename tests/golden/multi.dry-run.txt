@@ -290,7 +290,7 @@ high-availability {
             interface "eth0"
             preempt-delay "10"
             priority "200"
-            vrid "10"
+            vrid "64"
         }
     }
 }
@@ -454,6 +454,22 @@ Restart=always
 
 [Install]
 WantedBy=multi.target
+
+# ---- <TMP>/clusters/multi/logs/apiserver/audit-policy.yaml
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+  - "RequestReceived"
+rules:
+  - level: Request
+    verbs: ["create","update","patch","delete","watch","get","list","deletecollection"]
+    resources:
+      - group: ""  # core
+        resources: ["pods", "services", "secrets", "configmaps"]
+      - group: "apps"
+        resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
+      - group: "batch"
+        resources: ["jobs", "cronjobs"]
 
 # ---- <TMP>/clusters/multi/nodes/multi-control-plane-1/meminfo
 MemTotal: 4194304 kB
@@ -695,7 +711,7 @@ high-availability {
             }
             interface "eth0"
             priority "100"
-            vrid "10"
+            vrid "64"
         }
     }
 }
@@ -859,6 +875,22 @@ Restart=always
 
 [Install]
 WantedBy=multi.target
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/logs/apiserver/audit-policy.yaml
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+  - "RequestReceived"
+rules:
+  - level: Request
+    verbs: ["create","update","patch","delete","watch","get","list","deletecollection"]
+    resources:
+      - group: ""  # core
+        resources: ["pods", "services", "secrets", "configmaps"]
+      - group: "apps"
+        resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
+      - group: "batch"
+        resources: ["jobs", "cronjobs"]
 
 # ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-control-plane-2/meminfo
 MemTotal: 4194304 kB
@@ -1056,6 +1088,22 @@ DNS=1.1.1.1
 DNS=1.0.0.1
 DNS=8.8.8.8
 DNS=8.8.4.4
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/logs/apiserver/audit-policy.yaml
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+  - "RequestReceived"
+rules:
+  - level: Request
+    verbs: ["create","update","patch","delete","watch","get","list","deletecollection"]
+    resources:
+      - group: ""  # core
+        resources: ["pods", "services", "secrets", "configmaps"]
+      - group: "apps"
+        resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
+      - group: "batch"
+        resources: ["jobs", "cronjobs"]
 
 # ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-control-plane-3/meminfo
 MemTotal: 4194304 kB

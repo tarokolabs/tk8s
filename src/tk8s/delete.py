@@ -19,13 +19,9 @@ from .podman import node_volumes
 
 
 def targets(ctx: Context) -> list[tuple[str, Host]]:
-    """The hosts the host-side phases visit: the node hosts, and the operator when it runs no
-    node (its target and routes unit); a single-host cluster is [("", host)]."""
-    out = ctx.node_hosts()
-    multi = ctx.cluster is not None and ctx.cluster.multi_host
-    if multi and all(h is not ctx.host for _, h in out):
-        out = [*out, ("operator", ctx.host)]
-    return out
+    """The hosts the host-side phases visit: the node hosts and, when it runs no node, the
+    operator; the operator last, so cluster.yaml (the list of hosts) goes last of all."""
+    return ctx.target_hosts()
 
 
 def per_host(

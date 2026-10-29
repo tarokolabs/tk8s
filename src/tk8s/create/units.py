@@ -136,6 +136,11 @@ def render(
             state_dir=state,
             mac_arg=f" --mac-address {mac(r.ip)}" if c.multi_host else "",
         )
+    if me is not None:
+        # kubeadm join --control-plane copies init's ClusterConfiguration, audit-policy-file
+        # included: every host a control plane may run on needs the policy in its state dir
+        policy = state / "logs" / "apiserver" / "audit-policy.yaml"
+        files[policy] = (p.home / "manifests" / "audit-policy.yaml").read_text()
     for n in mine_nodes:
         # the files the node mounts over /proc/meminfo, /sys/devices/system/node and the kubelet
         # drop-in directory (nodefs); a cluster from before node sizing gets none and today's unit

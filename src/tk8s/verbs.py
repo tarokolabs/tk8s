@@ -17,7 +17,7 @@ from .args import (
     validate_node_name,
 )
 from .create import DRY_RUN_PHASES, PHASES
-from .create.plan import load_existing, parse_range, resolve, used_indices
+from .create.plan import load_existing, parse_range, resolve, used_indices, used_indices_on
 from .host import DryRunHost, Host
 from .node import add as node_add
 from .node import common as node_common
@@ -80,11 +80,15 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
                 hosts.check_reachable(ctx.hosts[h.name], h.name)
                 lans[h.name] = hosts.lan_facts(ctx.hosts[h.name], h.name)
             operator = hosts.local_hostname(ctx.host)
+    used = used_indices(ctx.paths)
+    for remote in ctx.hosts.values():
+        if remote is not ctx.host and not a.dry_run:
+            used |= used_indices_on(remote, ctx.paths)
     ctx.cluster = resolve(
         user,
         k8s_default=ctx.versions.kubernetes.default,
         existing=existing,
-        used_indices=used_indices(ctx.paths),
+        used_indices=used,
         allow_overlap=a.allow_overlap,
         tk8s_version=tk8s_version(HOME),
         lans=lans,
@@ -173,7 +177,7 @@ def cmd_delete_cluster(a: argparse.Namespace) -> int:
     ctx.name = name
     try:
         lifecycle.load_cluster(ctx, name)
-    except lifecycle.ClusterError:
+    except lifecycle.ClusterNotFound:
         pass  # no cluster.yaml: delete what the units and podman still know
     except model.ClusterFileError as err:
         print(f"  {err}; deleting what the units and podman still know")

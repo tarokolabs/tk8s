@@ -536,3 +536,19 @@ def test_a_hosts_own_address_inside_the_range_is_refused() -> None:
 def test_multi_host_user_mistakes_are_refused(body: str, message: str) -> None:
     with pytest.raises(PlanError, match=message):
         validate(user(f"metadata: {{name: m}}\nspec:\n{body}"))
+
+
+def test_used_indices_on_a_remote_host_read_its_copies(tmp_path: Path) -> None:
+    from tests.fixtures import MULTI_YAML
+    from tk8s.create.plan import used_indices_on
+    from tk8s.host import FakeHost
+
+    paths = Paths(data_dir=tmp_path, wulin_dir=tmp_path / "wulin", home=HOME)
+    h = FakeHost()
+    h.dirs.update({paths.clusters_dir / "demo", paths.clusters_dir / "other"})
+    h.files[paths.clusters_dir / "demo" / "cluster.yaml"] = MULTI_YAML
+    h.files[paths.clusters_dir / "other" / "cluster.yaml"] = (
+        "spec:\n  network:\n    index: 4\n  kubernetes: '1.37.1'\n"
+    )
+    assert used_indices_on(h, paths) == {0, 4}
+    assert used_indices_on(FakeHost(), paths) == set()

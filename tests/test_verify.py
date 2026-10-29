@@ -524,3 +524,19 @@ def test_storage_check_finds_the_pv_directory_on_any_node_host(
     r = Report(ctx)
     platform.check_storage(r)
     assert f"PASS  PV data on host ({ctx.state_dir}/storage)" in hosts["a"].lines
+
+
+def test_xff_expects_the_operators_source_address_on_several_hosts(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    r = Report(ctx)
+    r.gateway_ip = "192.168.1.85"
+    hosts["a"].responses[("ip", "-4", "route", "get", "192.168.1.85")] = Result(
+        0, "192.168.1.85 dev tk8s-demo src 192.168.1.67 uid 1000\n", ""
+    )
+    hosts["a"].responses[("curl", "-s", "-m", "8", "-H")] = Result(0, "192.168.1.67", "")
+    from tk8s.verify.gateway import check_xff
+
+    check_xff(r)
+    assert "PASS  X-Forwarded-For carries the client IP (192.168.1.67)" in hosts["a"].lines

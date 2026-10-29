@@ -187,3 +187,24 @@ def test_multi_host_stale_volumes_are_removed_on_the_nodes_host(
     nodes.up_run(ctx)
     assert ["podman", "volume", "rm", "-f", "demo-worker-2-var"] in argvs(hosts["b"])
     assert not any(c.argv[:3] == ["podman", "volume", "rm"] for c in hosts["a"].calls)
+
+
+def test_multi_host_up_starts_the_target_of_an_operator_that_runs_no_node(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    op = FakeHost()
+    ctx.host = op
+    running_multi_answers(hosts, ctx)
+    op.responses[("id", "-u")] = Result(0, "1000\n", "")
+    op.responses[("id", "-g")] = Result(0, "1000\n", "")
+    for h in (*hosts.values(), op):
+        h.active.discard("demo.target")
+    nodes.up_run(ctx)
+    a = argvs(op)
+    assert ["systemctl", "daemon-reload"] in a
+    assert ["systemctl", "enable", "--now", "--quiet", "demo.target"] in a
+    assert not any(x[:3] == ["podman", "volume", "exists"] for x in a)  # no node here
+    assert nodes.up_done(ctx)
+    op.active.discard("demo.target")
+    assert not nodes.up_done(ctx)

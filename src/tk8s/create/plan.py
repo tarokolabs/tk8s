@@ -12,6 +12,7 @@ from ipaddress import IPv4Address, IPv4Network
 from typing import Literal
 
 from .. import model
+from ..host import Host
 from ..hosts import LanFacts
 from ..paths import Paths
 from ..phases import Context, Phase
@@ -536,6 +537,18 @@ def used_indices(paths: Paths) -> set[int]:
     """Subnet indices of every cluster on this host (dry-run reads the real directory too)."""
     found = (model.peek(p)[0] for p in paths.clusters_dir.glob("*/cluster.yaml"))
     return {i for i in found if i is not None}
+
+
+def used_indices_on(host: Host, paths: Paths) -> set[int]:
+    """The same on another host of the cluster, through its Host: its own clusters and the
+    copies it holds both count (their pod, service and VIP prefixes are routed there)."""
+    out: set[int] = set()
+    for name in host.listdir(paths.clusters_dir):
+        text = host.read(paths.clusters_dir / name / "cluster.yaml")
+        index = model.peek_text(text)[0] if text is not None else None
+        if index is not None:
+            out.add(index)
+    return out
 
 
 # ---- the phase

@@ -458,3 +458,31 @@ def test_single_host_files_carry_no_mac_or_shim(ctx: Context) -> None:
     assert "mac-address" not in text and "tk8s-demo" not in text and "macvlan" not in text
     assert 'address "172.22.0.253/24"' in files[ctx.state_dir / "router" / "tkctl.boot"]
     assert [hf.name for hf in units.per_host(ctx)] == [""]
+
+
+def test_every_node_host_gets_the_audit_policy_the_apiservers_mount(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    """kubeadm join --control-plane copies init's ClusterConfiguration, audit-policy-file
+    included: the file has to be on every host a control plane may run on."""
+    ctx, _ = multi_ctx
+    by = {hf.name: hf for hf in units.per_host(ctx)}
+    policy = ctx.state_dir / "logs" / "apiserver" / "audit-policy.yaml"
+    text = (ctx.paths.home / "manifests" / "audit-policy.yaml").read_text()
+    for name in ("a", "b", "c"):
+        assert by[name].files[policy] == text, name
+
+
+def test_single_host_units_do_not_carry_the_audit_policy(ctx: Context) -> None:
+    assert ctx.state_dir / "logs" / "apiserver" / "audit-policy.yaml" not in units.render(ctx)
+
+
+def test_vrrp_id_follows_the_floating_address_on_several_hosts(
+    multi_ctx: tuple[Context, dict[str, FakeHost]], two_router_ctx: Context
+) -> None:
+    ctx, _ = multi_ctx
+    by = {hf.name: hf for hf in units.per_host(ctx)}
+    boot = by["a"].files[ctx.state_dir / "router-1" / "tkctl.boot"]
+    assert 'vrid "64"' in boot  # 192.168.1.64: two clusters on one LAN never share a VRID
+    single = units.render(two_router_ctx)[two_router_ctx.state_dir / "router-1" / "tkctl.boot"]
+    assert 'vrid "10"' in single
