@@ -67,10 +67,16 @@ def _describe_router_pair(ctx: Context, c: model.Cluster, state: str) -> None:
     """The two routers with their VRRP state, how to get a shell on each, and how to stop one
     (podman stop is undone by the unit's Restart=always within seconds)."""
     r1, r2 = c.routers
+    where = {rt.name: f" on {rt.host}" if rt.host else "" for rt in c.routers}
     if state == "Running":
-        pair = ", ".join(f"{rt.name} {rt.ip} {_vrrp_word(ctx, rt)}" for rt in c.routers)
+        pair = ", ".join(
+            f"{rt.name} {rt.ip}{where[rt.name]} {_vrrp_word(ctx, rt)}" for rt in c.routers
+        )
     else:
-        pair = f"{r1.name} {r1.ip}, {r2.name} {r2.ip} (unavailable: cluster is not running)"
+        pair = (
+            f"{r1.name} {r1.ip}{where[r1.name]}, {r2.name} {r2.ip}{where[r2.name]} "
+            "(unavailable: cluster is not running)"
+        )
     ctx.say(f"  routers:  {pair}")
     ctx.say(f"  shell:    sudo podman exec -it {r1.name} vbash   ({r2.name} likewise)")
     ctx.say(
