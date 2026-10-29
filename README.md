@@ -16,7 +16,7 @@
 | 權限 | `sudo` 免密碼；每一道 sudo 指令執行時都會印出 |
 | 網路 | 第一次需要對外連線，下載約 3 GB（含 router image）；之後建叢集不需要網路 |
 | 其他 | `curl`、`git` |
-| 多主機（`--hosts`） | 每台主機都符合以上條件、在同一個 L2 網段，跑 `tkctl` 的機器能以金鑰 ssh 到每台並 `sudo -n`；LAN 上保留一段位址給叢集（`--ip-range`）；每台主機有 `arping` |
+| 多主機（`--hosts`） | 每台主機都符合以上條件、在同一個 L2 網段，跑 `tkctl` 的機器能以金鑰 ssh 到每台並 `sudo -n`；LAN 上保留一些位址給叢集（`--ip-range`，可以不連續）；主機有 `arping` 探測較快，沒有就用 ping |
 
 ## 安裝
 
@@ -50,7 +50,7 @@ tkctl create cluster ha --control-planes 3 --defer-join # 額外的 control plan
 tkctl create cluster ha --control-planes 3 --ha bgp     # 同樣三台，apiserver 入口改走 BGP + ECMP 的 anycast VIP
 tkctl create cluster ha --preset ha                      # 3 control plane + 3 worker、bgp、兩台 router；[plan] 會印出展開的旗標
 tkctl create cluster demo --routers 2                    # 兩台 VyOS router 跑 VRRP，.253 在兩台之間漂移；停一台叢集照常
-tkctl create cluster ha --preset ha --hosts a,b=tux@192.168.1.231,c=192.168.1.232 --ip-range 192.168.1.64-192.168.1.95
+tkctl create cluster ha --preset ha --hosts a=local,b=tux@192.168.1.231,c=192.168.1.232 --ip-range 192.168.1.64-70,192.168.1.80-89
                                                          # 節點、router 分散到三台主機（macvlan，節點拿 LAN 的位址），任一台主機掛掉叢集照常
 tkctl create cluster sandbox --gvisor                   # 多一個 gvisor 的 RuntimeClass
 tkctl create cluster old --k8s 1.36.5                   # 次新版
@@ -160,10 +160,10 @@ route add 172.22.0.0 mask 255.255.255.0 <主機 IP>  # Windows
 
 `--hosts` 把節點容器與 router 分散到同一個 L2 的多台主機上，目的是沒有任何一台主機是單點。跑 `tkctl` 的機器是操作台，`cluster.yaml` 與 kubeconfig 在它上面；對其他主機的每一道指令都走 ssh，印出來的是 `$ ssh tux@192.168.1.231 'sudo -n podman …'`，一樣可以手動重現。叢集跑起來後不依賴操作台：每台主機的 unit 重開機自己起來。
 
-- 主機清單 `[名稱=][使用者@]主機[:port]` 以逗號分隔；第一項沒寫 `使用者@` 就是操作台自己。ssh 的金鑰、ProxyJump 等由 `~/.ssh/config` 管，host key 要先手動 ssh 一次信任。
-- `--ip-range A-B` 是 LAN 上保留給這個叢集的位址，依固定順序切：第一個是 router 的浮動位址（節點的閘道），`--routers 2` 時接著兩台 router 各一個，再每台主機一個 shim、每個節點一個，最後 20 個是 LoadBalancer 池。preflight 會對整段 ARP 探測，有人在用就拒絕。範圍要在主機的網段內，網段與閘道由主機的預設路由查出。
+- 主機清單 `[名稱=][使用者@]主機[:port]` 以逗號分隔；寫 `local`（或 `名稱=local`）的那項是操作台自己，最多一項。ssh 的金鑰、ProxyJump 等由 `~/.ssh/config` 管，host key 要先手動 ssh 一次信任。
+- `--ip-range` 是 LAN 上保留給這個叢集的位址池：一段或多段 `A-B` 以逗號分隔，結尾可以只寫最後一組（`192.168.1.64-70,192.168.1.80-89`）。池依固定順序切：第一個是 router 的浮動位址（節點的閘道），`--routers 2` 時接著兩台 router 各一個，操作台若是節點主機再一個 shim，然後每個節點一個，池的最後 5 個是 LoadBalancer 池，中間剩下的留給 `add node`。preflight 會對整個池 ARP 探測，有人在用就拒絕；池要在主機的網段內（網段、閘道、每台主機的介面由各自的預設路由查出）。
 - 放置：control plane 從第一台主機輪流、worker 接著輪、router 從第一台輪；`-f` 裡每個節點群組可寫 `host:` 固定在某台（省略或 `auto` 就輪流），router 用 `network.router_hosts`。三台 control plane 放兩台主機時總有一台持有多數，那台掉了 apiserver 就停，`plan` 與 preflight 會印警告（不拒絕）。
-- 節點網路是 Quadlet 的 macvlan network，節點與 router 拿 LAN 的位址、固定的 MAC；router 仍是節點的預設閘道（它扮演 ToR），再轉給 LAN 的閘道。
+- 節點網路是 Quadlet 的 macvlan network，節點與 router 拿 LAN 的位址、固定的 MAC；router 仍是節點的預設閘道（它扮演 ToR），再轉給 LAN 的閘道。macvlan 讓主機自己連不到它上面的容器，所以操作台若同時是節點主機，會多一個 `tk8s-<名稱>` shim 介面；其他主機不需要。
 - 每台主機各有一份 `cluster.yaml` 副本（`status.operator` 記著操作台）；在不是操作台的主機上 `get clusters` 會列出它並標 `managed from <操作台>`，其他動詞拒絕。
 - `tkctl stop`／`start`、`delete cluster`、`add node`（`--host` 指定主機）、`delete node`、`verify`（多一段 `[hosts]`）都支援多主機；沒有 `cluster.yaml` 的 `delete cluster` 只清操作台這台。
 - 不支援：`--gvisor`、`spec.network.nodes`／`router` 明寫、建立後增減主機、不在同一個 L2 的操作台；`tkctl pull images` 一次只對一台主機（create 的 images phase 會對每台做）。
@@ -213,7 +213,7 @@ spec:
     - name: pve-c
       ssh: 192.168.1.232
   network:
-    range: 192.168.1.64-192.168.1.95
+    range: 192.168.1.64-70,192.168.1.80-89   # 可多段
     ha: bgp
     routers: 2
     router_hosts: [pve-a, pve-b]   # 省略就輪流
@@ -280,7 +280,7 @@ tkctl version
 /opt/taroko/cni/                 # CNI plugins
 /opt/taroko/clusters/<名稱>/nodes/<節點>/  # 節點掛進去的 meminfo、NUMA node 與 kubelet 的保留量設定
 /etc/containers/systemd/<名稱>/  # 節點與 router 的 Quadlet unit；systemctl status <名稱>.target
-/etc/systemd/system/<名稱>-routes.service  # 主機到 pod／service 網段的路由；多主機時也建 tk8s-<名稱> 這個 macvlan shim
+/etc/systemd/system/<名稱>-routes.service  # 主機到 pod／service 網段的路由；多主機時只有操作台有，兼建 tk8s-<名稱> 這個 macvlan shim
 ```
 
 多主機時每台主機都有這棵樹，但各放自己節點與 router 的檔；`cluster.yaml` 正本在操作台，其他主機是副本，kubeconfig 只在操作台。
