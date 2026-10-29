@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage question
+    url: https://github.com/tarokolabs/tk8s/blob/main/README.md
+    about: Commands and flags are in the README; if it does not answer you, open a bug report saying what you tried.

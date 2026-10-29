@@ -1,0 +1,28 @@
+name: Goal or proposal
+description: Something tk8s should do, a different way of doing it, or a direction still under discussion.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: What should happen
+      description: A paragraph or two on the outcome — what the user types and what they get. Result first, mechanism second.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: When it comes up and what goes wrong without it. A teaching reason is a reason.
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current state
+      description: What tk8s does today, what you tried, related issues, PRs or upstream discussions.
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is explicitly out, and what has to be decided before work can start (say so here or in the title; a maintainer adds needs-team-decision).
