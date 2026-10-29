@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .. import model, podman
 from ..create import kubeadm, nodefs, router, units
-from ..delete import remove_containers, remove_volumes
+from ..delete import node_volumes_gone, remove_containers, remove_node_volumes
 from ..lifecycle import ClusterError, save_cluster
 from ..phases import Context, Phase, PhaseFailed, confirm, wait_for
 from .common import find, require_node, unit_file, without_node
@@ -109,11 +109,11 @@ CONTAINER = Phase("container", "remove the node container", container_done, cont
 
 
 def volumes_done(ctx: Context) -> bool:
-    return not any(podman.exists(ctx, "volume", v) for v in podman.node_volumes(require_node(ctx)))
+    return node_volumes_gone(ctx, require_node(ctx))
 
 
 def volumes_run(ctx: Context) -> None:
-    remove_volumes(ctx, podman.node_volumes(require_node(ctx)))
+    remove_node_volumes(ctx, require_node(ctx))
 
 
 VOLUMES = Phase("volumes", "remove the node's volumes", volumes_done, volumes_run)
