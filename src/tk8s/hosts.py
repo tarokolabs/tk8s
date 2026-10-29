@@ -92,6 +92,11 @@ def in_use(host: Host, iface: str, addrs: Sequence[IPv4Address]) -> list[tuple[s
                 m = re.search(r"\[([0-9A-Fa-f:]+)\]", r.stdout)
                 taken.append((str(ip), m.group(1) if m else "?"))
             continue
+        # a neighbour entry left by something that just went away (a container deleted a
+        # minute ago) would read as "in use": start from nothing, then whatever the ping leaves
+        # behind was learnt now
+        flush = ["ip", "neigh", "flush", "to", str(ip), "dev", iface]
+        host.run(flush, sudo=True, capture=True, check=False)
         host.run(["ping", "-c", "1", "-W", "1", "-I", iface, str(ip)], capture=True, check=False)
         n = host.run(
             ["ip", "-j", "neigh", "show", str(ip), "dev", iface], capture=True, check=False

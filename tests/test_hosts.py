@@ -100,6 +100,16 @@ def test_in_use_falls_back_to_ping_and_the_neighbour_table_without_arping() -> N
         ["ping", "-c", "1", "-W", "1", "-I", "ens18", "192.168.1.64"],
         ["ping", "-c", "1", "-W", "1", "-I", "ens18", "192.168.1.65"],
     ]
+    # a stale entry from a container deleted a minute ago must not count: the entry is flushed
+    # before the ping, so whatever is there afterwards was learnt by this probe
+    flushes = [c for c in h.calls if c.argv[:3] == ["ip", "neigh", "flush"]]
+    assert [c.argv for c in flushes] == [
+        ["ip", "neigh", "flush", "to", "192.168.1.64", "dev", "ens18"],
+        ["ip", "neigh", "flush", "to", "192.168.1.65", "dev", "ens18"],
+    ]
+    assert all(c.sudo for c in flushes)
+    order = [c.argv[0] for c in h.calls if c.argv[0] in ("ip", "ping")]
+    assert order == ["ip", "ping", "ip", "ip", "ping", "ip"]  # flush, ping, show; per address
 
 
 def test_build_maps_names_to_the_operator_or_an_ssh_host(
