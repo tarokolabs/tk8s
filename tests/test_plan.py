@@ -552,3 +552,15 @@ def test_used_indices_on_a_remote_host_read_its_copies(tmp_path: Path) -> None:
     )
     assert used_indices_on(h, paths) == {0, 4}
     assert used_indices_on(FakeHost(), paths) == set()
+
+
+def test_a_pool_touching_the_networks_own_addresses_is_refused() -> None:
+    u = multi_user()
+    net = model.UserNetwork(ha="bgp", routers=2, range="192.168.1.0-20")
+    u = u.model_copy(update={"spec": u.spec.model_copy(update={"network": net})})
+    with pytest.raises(PlanError, match=r"192\.168\.1\.0 is the network address of 192"):
+        resolved(u, lans=MULTI_LANS, operator="op")
+    net = model.UserNetwork(ha="bgp", routers=2, range="192.168.1.240-255")
+    u = u.model_copy(update={"spec": u.spec.model_copy(update={"network": net})})
+    with pytest.raises(PlanError, match=r"192\.168\.1\.255 is the broadcast address of 192"):
+        resolved(u, lans=MULTI_LANS, operator="op")

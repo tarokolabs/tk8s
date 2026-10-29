@@ -68,52 +68,59 @@ def dry_run_lan(start: IPv4Address) -> LanFacts:
 
 def kernel(host: Host) -> tuple[int, int]:
     rel = host.run(["uname", "-r"], capture=True).stdout.strip()
-    major, minor = (int(x.split("-")[0]) for x in rel.split(".")[:2])
-    return major, minor
+    m = re.match(r"(\d+)\.(\d+)", rel)
+    if m is None:
+        raise HostsError(f"cannot read a kernel version from {rel!r}")
+    return int(m.group(1)), int(m.group(2))
 
 
 def in_use(host: Host, iface: str, addrs: Sequence[IPv4Address]) -> list[tuple[str, str]]:
-    """(address, MAC) for every address something on the LAN answers ARP for: arping when the
-    host has it (exit 0 answered, 1 silent, anything else is an error), else a ping that makes
-    the kernel resolve the neighbour and `ip neigh` to read what came back."""
-    taken: list[tuple[str, str]] = []
-    use_arping = host.run(["arping", "-V"], capture=True, check=False).returncode != 127
-    for ip in addrs:
-        if use_arping:
-            r = host.run(
-                ["arping", "-c", "2", "-w", "1", "-I", iface, str(ip)], capture=True, check=False
-            )
-            if r.returncode not in (0, 1):
-                raise HostsError(
-                    f"arping {ip} on {iface} failed ({r.stderr.strip() or r.returncode}); "
-                    "the address probe needs CAP_NET_RAW (run tkctl as a user with sudo)"
-                )
-            if r.returncode == 0:
-                m = re.search(r"\[([0-9A-Fa-f:]+)\]", r.stdout)
-                taken.append((str(ip), m.group(1) if m else "?"))
-            continue
-        # a neighbour entry left by something that just went away (a container deleted a
-        # minute ago) would read as "in use": start from nothing, then whatever the ping leaves
-        # behind was learnt now
-        flush = ["ip", "neigh", "flush", "to", str(ip), "dev", iface]
-        host.run(flush, sudo=True, capture=True, check=False)
-        host.run(["ping", "-c", "1", "-W", "1", "-I", iface, str(ip)], capture=True, check=False)
-        n = host.run(
-            ["ip", "-j", "neigh", "show", str(ip), "dev", iface], capture=True, check=False
+    """(address, MAC) for every address something on the LAN answers ARP for, 16 at a time:
+    arping when the host has it (a reply is "in use", silence is free, anything arping
+    complains about is an error), else pings that make the kernel resolve the neighbours and
+    one read of the neighbour table."""
+    listed = "".join(f"{ip}\n" for ip in addrs)
+    parallel = ["xargs", "-P", "16", "-I{}"]
+    if host.run(["arping", "-V"], capture=True, check=False).returncode != 127:
+        r = host.run(
+            [*parallel, "arping", "-c", "2", "-w", "1", "-I", iface, "{}"],
+            input=listed,
+            capture=True,
+            check=False,
         )
-        try:
-            entries = json.loads(n.stdout) if n.returncode == 0 and n.stdout.strip() else []
-        except ValueError:
-            entries = []
-        for e in entries if isinstance(entries, list) else []:
-            if (
-                isinstance(e, dict)
-                and e.get("lladdr")
-                and e.get("state") not in (["FAILED"], ["INCOMPLETE"])
-            ):
-                taken.append((str(ip), str(e["lladdr"])))
-                break
-    return taken
+        if "arping:" in r.stderr:
+            raise HostsError(
+                f"arping on {iface} failed ({r.stderr.strip().splitlines()[0]}); the address "
+                "probe needs CAP_NET_RAW (run tkctl as a user with sudo)"
+            )
+        found = re.findall(r"Unicast reply from (\S+) \[([0-9A-Fa-f:]+)\]", r.stdout)
+        wanted = {str(ip) for ip in addrs}
+        seen: dict[str, str] = {}
+        for ip, mac in found:
+            seen.setdefault(ip, mac)
+        return [(str(ip), seen[str(ip)]) for ip in addrs if str(ip) in seen and str(ip) in wanted]
+    # neighbour entries left by something that just went away (a container deleted a minute
+    # ago) would read as "in use": start from nothing, then whatever the pings leave behind
+    # was learnt now
+    host.run(["ip", "neigh", "flush", "dev", iface], sudo=True, capture=True, check=False)
+    host.run(
+        [*parallel, "ping", "-c", "1", "-W", "1", "-I", iface, "{}"],
+        input=listed,
+        capture=True,
+        check=False,
+    )
+    n = host.run(["ip", "-j", "neigh", "show", "dev", iface], capture=True, check=False)
+    try:
+        entries = json.loads(n.stdout) if n.returncode == 0 and n.stdout.strip() else []
+    except ValueError:
+        entries = []
+    dead = (["FAILED"], ["INCOMPLETE"])
+    answered = {
+        str(e.get("dst")): str(e["lladdr"])
+        for e in (entries if isinstance(entries, list) else [])
+        if isinstance(e, dict) and e.get("lladdr") and e.get("state") not in dead
+    }
+    return [(str(ip), answered[str(ip)]) for ip in addrs if str(ip) in answered]
 
 
 def build(

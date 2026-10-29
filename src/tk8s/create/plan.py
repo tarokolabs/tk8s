@@ -456,6 +456,14 @@ def resolve(
             raise PlanError(
                 f"spec.network.range {rng} is outside the hosts' network {first.subnet}"
             )
+        for ip, what in (
+            (first.subnet.network_address, "network"),
+            (first.subnet.broadcast_address, "broadcast"),
+        ):
+            if ip in pool:
+                raise PlanError(
+                    f"spec.network.range {rng}: {ip} is the {what} address of {first.subnet}"
+                )
         for n in names:
             if lans[n].address in pool:
                 raise PlanError(

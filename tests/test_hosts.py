@@ -66,52 +66,6 @@ def test_kernel_is_major_minor_of_uname() -> None:
     assert kernel(h) == (6, 12)
 
 
-def test_in_use_lists_ip_and_mac_of_answering_addresses() -> None:
-    h = FakeHost(
-        responses={
-            ("arping", "-c", "2", "-w", "1", "-I", "ens18", "192.168.1.64"): Result(
-                0, "Unicast reply from 192.168.1.64 [AA:BB:CC:DD:EE:FF]  0.5ms\n", ""
-            ),
-            ("arping", "-c", "2", "-w", "1", "-I", "ens18", "192.168.1.65"): Result(1, "", ""),
-        }
-    )
-    addrs = [IPv4Address("192.168.1.64"), IPv4Address("192.168.1.65")]
-    assert in_use(h, "ens18", addrs) == [("192.168.1.64", "AA:BB:CC:DD:EE:FF")]
-    h.responses = {("arping",): Result(2, "", "arping: socket: Operation not permitted")}
-    with pytest.raises(HostsError, match=r"arping 192\.168\.1\.64 on ens18 failed"):
-        in_use(h, "ens18", addrs)
-
-
-def test_in_use_falls_back_to_ping_and_the_neighbour_table_without_arping() -> None:
-    neigh = (
-        '[{"dst":"192.168.1.64","dev":"ens18","lladdr":"aa:bb:cc:dd:ee:ff","state":["REACHABLE"]}]'
-    )
-    h = FakeHost(
-        responses={
-            ("arping", "-V"): Result(127, "", "arping: command not found"),
-            ("ip", "-j", "neigh", "show", "192.168.1.64"): Result(0, neigh, ""),
-            ("ip", "-j", "neigh", "show", "192.168.1.65"): Result(0, "[]", ""),
-        }
-    )
-    addrs = [IPv4Address("192.168.1.64"), IPv4Address("192.168.1.65")]
-    assert in_use(h, "ens18", addrs) == [("192.168.1.64", "aa:bb:cc:dd:ee:ff")]
-    pings = [c.argv for c in h.calls if c.argv[:1] == ["ping"]]
-    assert pings == [
-        ["ping", "-c", "1", "-W", "1", "-I", "ens18", "192.168.1.64"],
-        ["ping", "-c", "1", "-W", "1", "-I", "ens18", "192.168.1.65"],
-    ]
-    # a stale entry from a container deleted a minute ago must not count: the entry is flushed
-    # before the ping, so whatever is there afterwards was learnt by this probe
-    flushes = [c for c in h.calls if c.argv[:3] == ["ip", "neigh", "flush"]]
-    assert [c.argv for c in flushes] == [
-        ["ip", "neigh", "flush", "to", "192.168.1.64", "dev", "ens18"],
-        ["ip", "neigh", "flush", "to", "192.168.1.65", "dev", "ens18"],
-    ]
-    assert all(c.sudo for c in flushes)
-    order = [c.argv[0] for c in h.calls if c.argv[0] in ("ip", "ping")]
-    assert order == ["ip", "ping", "ip", "ip", "ping", "ip"]  # flush, ping, show; per address
-
-
 def test_build_maps_names_to_the_operator_or_an_ssh_host(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -136,3 +90,52 @@ def test_build_maps_names_to_the_operator_or_an_ssh_host(
 def test_local_hostname_falls_back_under_dry_run() -> None:
     assert local_hostname(FakeHost(responses={("hostname",): Result(0, "pve-a\n", "")})) == "pve-a"
     assert local_hostname(DryRunHost(lambda _: None)) == "dry-run"
+
+
+def test_kernel_reads_odd_release_strings() -> None:
+    for rel, want in (("6.12+deb13", (6, 12)), ("6.8.0-45-generic", (6, 8)), ("5.15", (5, 15))):
+        assert kernel(FakeHost(responses={("uname", "-r"): Result(0, rel + "\n", "")})) == want
+
+
+def test_in_use_probes_every_address_in_one_parallel_arping_run() -> None:
+    out = (
+        "ARPING 192.168.1.64 from 192.168.1.230 ens18\n"
+        "Unicast reply from 192.168.1.64 [AA:BB:CC:DD:EE:FF]  0.5ms\n"
+        "ARPING 192.168.1.66 from 192.168.1.230 ens18\n"
+        "Unicast reply from 192.168.1.66 [11:22:33:44:55:66]  0.7ms\n"
+    )
+    h = FakeHost(responses={("xargs",): Result(123, out, "")})  # 123: some addresses silent
+    addrs = [IPv4Address(f"192.168.1.{i}") for i in (64, 65, 66)]
+    assert in_use(h, "ens18", addrs) == [
+        ("192.168.1.64", "AA:BB:CC:DD:EE:FF"),
+        ("192.168.1.66", "11:22:33:44:55:66"),
+    ]
+    run = next(c for c in h.calls if c.argv[:1] == ["xargs"])
+    arping = ["arping", "-c", "2", "-w", "1", "-I", "ens18", "{}"]
+    assert run.argv == ["xargs", "-P", "16", "-I{}", *arping]
+    assert run.input == "192.168.1.64\n192.168.1.65\n192.168.1.66\n"
+    h.responses[("xargs",)] = Result(123, "", "arping: socket: Operation not permitted\n")
+    with pytest.raises(HostsError, match="arping on ens18 failed"):
+        in_use(h, "ens18", addrs)
+
+
+def test_in_use_fallback_pings_in_parallel_then_reads_the_neighbour_table_once() -> None:
+    neigh = (
+        '[{"dst":"192.168.1.64","lladdr":"aa:bb:cc:dd:ee:ff","state":["REACHABLE"]},'
+        '{"dst":"192.168.1.65","state":["FAILED"]},'
+        '{"dst":"192.168.1.99","lladdr":"00:11:22:33:44:55","state":["STALE"]}]'
+    )
+    h = FakeHost(
+        responses={
+            ("arping", "-V"): Result(127, "", "arping: command not found"),
+            ("ip", "-j", "neigh", "show", "dev", "ens18"): Result(0, neigh, ""),
+        }
+    )
+    addrs = [IPv4Address("192.168.1.64"), IPv4Address("192.168.1.65")]
+    assert in_use(h, "ens18", addrs) == [("192.168.1.64", "aa:bb:cc:dd:ee:ff")]
+    argvs = [c.argv for c in h.calls]
+    assert ["ip", "neigh", "flush", "dev", "ens18"] in argvs  # stale entries go first
+    ping = next(c for c in h.calls if c.argv[:1] == ["xargs"])
+    pinging = ["ping", "-c", "1", "-W", "1", "-I", "ens18", "{}"]
+    assert ping.argv == ["xargs", "-P", "16", "-I{}", *pinging]
+    assert ping.input == "192.168.1.64\n192.168.1.65\n"

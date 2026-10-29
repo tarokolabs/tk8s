@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from tests.fixtures import argvs
+from tk8s import model
 from tk8s.create import preflight
 from tk8s.create.preflight import PreflightError
 from tk8s.host import FakeHost, Result
@@ -176,6 +177,7 @@ def good_lan(host: FakeHost, kernel: str = "6.12.0", iface: str = "ens18") -> No
     host.responses[("hostname",)] = Result(0, f"host-{id(host)}\n", "")
     host.responses[("uname", "-r")] = Result(0, f"{kernel}\n", "")
     host.responses[("arping",)] = Result(1, "", "")  # nobody answers
+    host.responses[("xargs",)] = Result(123, "", "")  # nobody answers the parallel probe
 
 
 def test_multi_host_preflight_checks_every_host_and_prints_one_line_each(
@@ -190,12 +192,11 @@ def test_multi_host_preflight_checks_every_host_and_prints_one_line_each(
     for h in hosts.values():
         assert ["sysctl", "-qw", "net.ipv4.ip_forward=1"] in argvs(h)
         assert Path("/etc/sysctl.d/90-tk8s.conf") in h.files
-    # the pool was probed from the first host, every address but none twice
-    probed = [
-        c.argv[-1] for c in hosts["a"].calls if c.argv[:1] == ["arping"] and c.argv[1] != "-V"
-    ]
+    # the pool was probed from the first host, every address, in one parallel run
+    probe = next(c for c in hosts["a"].calls if c.argv[:1] == ["xargs"])
+    probed = (probe.input or "").split()
     assert len(probed) == 17 and probed[0] == "192.168.1.64" and probed[-1] == "192.168.1.89"
-    assert not any(c.argv[:1] == ["arping"] for c in hosts["b"].calls)
+    assert not any(c.argv[:1] in (["xargs"], ["arping"]) for c in hosts["b"].calls)
     assert "warning" not in out
 
 
@@ -264,10 +265,7 @@ def test_addresses_in_use_are_listed_and_not_probed_on_a_rerun(
     ctx, hosts = multi_ctx
     good_lans(hosts)
     taken = "Unicast reply from 192.168.1.80 [AA:BB:CC:DD:EE:FF]  0.6ms\n"
-    hosts["a"].responses = {
-        ("arping", "-c", "2", "-w", "1", "-I", "ens18", "192.168.1.80"): Result(0, taken, ""),
-        **hosts["a"].responses,
-    }
+    hosts["a"].responses[("xargs",)] = Result(123, taken, "")
     with pytest.raises(
         PhaseFailed, match=r"addresses in use on the LAN: 192.168.1.80 \(AA:BB:CC:DD:EE:FF\)"
     ):
@@ -333,3 +331,30 @@ def test_single_host_preflight_output_is_unchanged(ctx: Context, host: FakeHost)
         "ip_forward on, " + str(ctx.paths.data_dir) + " owned by student, host 8 cpu, 32102 MiB"
     )
     assert not any(c.argv[:1] in (["arping"], ["uname"]) for c in host.calls)
+
+
+def test_multi_host_preflight_checks_every_host_before_writing_anything(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    """A refusal on host c must leave host a untouched: no sysctl file, no drop-in."""
+    ctx, hosts = multi_ctx
+    good_lans(hosts)
+    hosts["c"].responses[("podman", "--version")] = Result(127, "", "")
+    with pytest.raises(PhaseFailed, match="host c: podman not found"):
+        Runner([preflight.PHASE]).run(ctx)
+    assert Path("/etc/sysctl.d/90-tk8s.conf") not in hosts["a"].files
+    assert not any(c.argv[:1] == ["sysctl"] for c in hosts["a"].calls)
+    assert not any(c.argv[:1] == ["mkdir"] for c in hosts["a"].calls)
+
+
+def test_same_named_interrupted_create_without_units_on_a_host_is_refused(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    good_lans(hosts)
+    other = model.dumps(ctx.require_cluster()).replace("operator: op", "operator: someone")
+    hosts["c"].files[ctx.state_dir / "cluster.yaml"] = other  # no unit dir: plan died early there
+    with pytest.raises(
+        PhaseFailed, match=r"host c: a cluster named demo already exists there \(not managed"
+    ):
+        Runner([preflight.PHASE]).run(ctx)

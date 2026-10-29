@@ -179,12 +179,12 @@ def check_hostnames(ctx: Context) -> None:
 
 
 def check_name_free(ctx: Context, name: str, host: Host) -> None:
-    """No other cluster of this name on the host: its units directory exists only when the
-    cluster.yaml there is our own copy (a rerun)."""
+    """No other cluster of this name on the host: its units directory or state file exist
+    only when the cluster.yaml there is our own copy (a rerun)."""
     c = ctx.require_cluster()
-    if not host.exists(ctx.paths.unit_dir / c.name):
-        return
     text = host.read(ctx.state_dir / "cluster.yaml")
+    if text is None and not host.exists(ctx.paths.unit_dir / c.name):
+        return
     mine = c.status.operator if c.status is not None else None
     try:
         there = model.load_text(text).status if text is not None else None
@@ -258,25 +258,43 @@ def run_one(ctx: Context, nodes: list[model.Node] | None) -> str:
 
 
 def run_multi(ctx: Context) -> None:
+    """Every host is checked before any host is written to: a refusal on the last host must
+    not leave sysctl files and drop-ins on the first."""
     c = ctx.require_cluster()
     check_operator(ctx)
+    found: dict[str, tuple[str, str]] = {}
     for name, h in ctx.node_hosts():
         want = next(x for x in c.spec.hosts or [] if x.name == name)
         try:
             hosts.check_reachable(h, name)
         except hosts.HostsError as err:
             raise PreflightError(str(err)) from err
+        sub = ctx.on(h)
         try:
-            line = run_one(ctx.on(h), [n for n in c.spec.nodes if n.host == name])
+            v = check_tools(sub)
+            size = check_host_fits(sub, [n for n in c.spec.nodes if n.host == name])
         except PreflightError as err:
             raise PreflightError(f"host {name}: {err}") from err
         check_lan(ctx, name, h, want)
         check_name_free(ctx, name, h)
-        unmanaged_drop_ins(h)
-        ctx.say(f"  host {name}: {line}")
+        found[name] = (v, size)
     check_hostnames(ctx)
     check_kernels(ctx)
     check_addresses_free(ctx)
+    for name, h in ctx.node_hosts():
+        sub = ctx.on(h)
+        try:
+            bridge_and_forwarding(sub)
+            data_dirs(sub)
+        except PreflightError as err:
+            raise PreflightError(f"host {name}: {err}") from err
+        unmanaged_drop_ins(h)
+        me = h.run(["id", "-un"], capture=True).stdout.strip()
+        v, size = found[name]
+        ctx.say(
+            f"  host {name}: preflight ok: podman {v}, systemd, cgroup v2, swap off, host "
+            f"bridge-nf off, ip_forward on, {ctx.paths.data_dir} owned by {me}, {size}"
+        )
     warning = majority_warning(c)
     if warning:
         ctx.say(f"  {warning}")
