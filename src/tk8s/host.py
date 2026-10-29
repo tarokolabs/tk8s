@@ -5,6 +5,7 @@ that can be pasted back into a terminal, so a student can redo any step by hand.
 """
 
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -15,11 +16,13 @@ from pathlib import Path
 
 CLEAN_ENV = {"PATH": "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C"}
 PASS_THROUGH = ("http_proxy", "https_proxy", "no_proxy", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY")
+SSH_PASS_THROUGH = ("SSH_AUTH_SOCK", "HOME")  # the agent socket and ~/.ssh for the ssh client
 
 
-def _base_env() -> dict[str, str]:
-    """A clean environment: PATH and LANG fixed, only proxy settings inherited."""
-    return CLEAN_ENV | {k: v for k, v in os.environ.items() if k in PASS_THROUGH}
+def _base_env(*extra: str) -> dict[str, str]:
+    """A clean environment: PATH and LANG fixed, only proxy settings (and `extra`) inherited."""
+    keep = (*PASS_THROUGH, *extra)
+    return CLEAN_ENV | {k: v for k, v in os.environ.items() if k in keep}
 
 
 @dataclass(frozen=True)
@@ -47,15 +50,24 @@ def _full_argv(argv: Sequence[str], sudo: bool, env: Mapping[str, str] | None) -
 
 
 class Host:
-    """A real host. `say` receives every line a student should see."""
+    """A real host. `say` receives every line a student should see. `label` names a remote host
+    (user@host): the `$` lines then show the ssh form a student would paste."""
 
-    def __init__(self, say: Callable[[str], None], *, quiet: bool = False) -> None:
+    def __init__(
+        self, say: Callable[[str], None], *, quiet: bool = False, label: str | None = None
+    ) -> None:
         self._say = say
         self._quiet = quiet
+        self.label = label
 
     def _show(self, argv: Sequence[str], sudo: bool, env: Mapping[str, str] | None) -> None:
-        if not self._quiet:
-            self._say("  $ " + shlex.join(_full_argv(argv, sudo, env)))
+        if self._quiet:
+            return
+        full = _full_argv(argv, sudo, env)
+        if self.label is None:
+            self._say("  $ " + shlex.join(full))
+        else:
+            self._say("  $ " + shlex.join(["ssh", self.label, shlex.join(full)]))
 
     def run(
         self,
@@ -177,9 +189,186 @@ class Host:
         return Path(os.readlink(path)) if path.is_symlink() else None
 
 
+# ---- a host reached over ssh
+
+
+@dataclass(frozen=True)
+class SshTarget:
+    """[user@]host[:port] as cluster.yaml spells an ssh host."""
+
+    user: str | None
+    host: str
+    port: int | None
+
+    def __str__(self) -> str:
+        return f"{self.user}@{self.host}" if self.user else self.host
+
+
+def parse_ssh(text: str) -> SshTarget:
+    m = re.fullmatch(r"(?:([^@\s:]+)@)?([^@\s:]+)(?::([0-9]+))?", text)
+    if m is None:
+        raise ValueError(f"not an ssh target ([user@]host[:port]): {text!r}")
+    user, host, port = m.groups()
+    return SshTarget(user, host, int(port) if port else None)
+
+
+def default_control_dir() -> Path:
+    """Where the ControlMaster sockets go: the user's runtime directory (XDG)."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    return Path(runtime) / "tk8s"
+
+
+class SshHost(Host):
+    """A host reached with OpenSSH: the same commands and files, each command one ssh call.
+    BatchMode: no prompts, an untrusted host key or a refused key fails at once (255) instead
+    of hanging; ControlMaster: a create runs hundreds of commands per host, one connection
+    carries them all."""
+
+    def __init__(
+        self,
+        say: Callable[[str], None],
+        target: SshTarget,
+        *,
+        quiet: bool = False,
+        ssh: str = "ssh",
+        control_dir: Path | None = None,
+    ) -> None:
+        super().__init__(say, quiet=quiet, label=str(target))
+        self.target = target
+        self._ssh = ssh
+        self._control_dir = control_dir or default_control_dir()
+        self._control_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+    def remote_argv(
+        self, argv: Sequence[str], sudo: bool, env: Mapping[str, str] | None
+    ) -> list[str]:
+        """The ssh command line: options, the target, the remote command as one word."""
+        port = ["-p", str(self.target.port)] if self.target.port else []
+        return [
+            self._ssh,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ControlMaster=auto",
+            "-o",
+            "ControlPersist=60",
+            "-o",
+            f"ControlPath={self._control_dir}/ssh-%C",
+            *port,
+            str(self.target),
+            shlex.join(_full_argv(argv, sudo, env)),
+        ]
+
+    def run(
+        self,
+        argv: Sequence[str],
+        *,
+        sudo: bool = False,
+        env: Mapping[str, str] | None = None,
+        input: str | None = None,
+        capture: bool = False,
+        check: bool = True,
+    ) -> Result:
+        self._show(argv, sudo, env)
+        full = self.remote_argv(argv, sudo, env)
+        try:
+            p = subprocess.run(
+                full,
+                input=input,
+                text=True,
+                env=_base_env(*SSH_PASS_THROUGH),
+                capture_output=capture,
+                check=False,
+            )
+            r = Result(p.returncode, p.stdout or "", p.stderr or "")
+        except FileNotFoundError:
+            r = Result(127, "", f"{full[0]}: command not found")
+        if check and r.returncode != 0:
+            raise HostError(full, r.returncode, r.stderr)
+        return r
+
+    def run_bytes(
+        self,
+        argv: Sequence[str],
+        *,
+        sudo: bool = False,
+        env: Mapping[str, str] | None = None,
+        input: bytes | None = None,
+    ) -> bytes:
+        self._show(argv, sudo, env)
+        full = self.remote_argv(argv, sudo, env)
+        try:
+            p = subprocess.run(
+                full,
+                input=input,
+                env=_base_env(*SSH_PASS_THROUGH),
+                capture_output=True,
+                check=False,
+            )
+        except FileNotFoundError:
+            raise HostError(full, 127, f"{full[0]}: command not found") from None
+        if p.returncode != 0:
+            raise HostError(full, p.returncode, p.stderr.decode(errors="replace"))
+        return p.stdout
+
+    def write(self, path: Path, content: str, *, sudo: bool = False, mode: int = 0o644) -> None:
+        self.run(
+            ["install", "-D", "-m", f"{mode:o}", "/dev/stdin", str(path)],
+            sudo=sudo,
+            input=content,
+            capture=True,
+        )
+
+    def read(self, path: Path, *, sudo: bool = False) -> str | None:
+        r = self.run(["cat", str(path)], sudo=sudo, capture=True, check=False)
+        return r.stdout if r.returncode == 0 else None
+
+    def read_bytes(self, path: Path) -> bytes | None:
+        try:
+            return self.run_bytes(["cat", str(path)])
+        except HostError:
+            return None
+
+    def remove(self, path: Path) -> None:
+        self.run(["rm", "-f", str(path)], capture=True)
+
+    def exists(self, path: Path) -> bool:
+        return self.run(["test", "-e", str(path)], check=False).returncode == 0
+
+    def listdir(self, path: Path) -> list[str]:
+        r = self.run(["ls", "-1A", str(path)], capture=True, check=False)
+        return sorted(r.stdout.split()) if r.returncode == 0 else []
+
+    def writable(self, path: Path) -> bool:
+        return self.run(["test", "-w", str(path)], check=False).returncode == 0
+
+    def mkdir(self, path: Path, *, sudo: bool = False, owner: str | None = None) -> None:
+        if sudo:
+            own = ["-o", owner.split(":")[0], "-g", owner.split(":")[1]] if owner else []
+            self.run(["install", "-d", *own, str(path)], sudo=True, capture=True)
+        else:
+            self.run(["mkdir", "-p", str(path)], capture=True)
+
+    def symlink(self, path: Path, target: Path) -> None:
+        if self.readlink(path) == target:
+            return
+        self.run(["mkdir", "-p", str(path.parent)], capture=True)
+        self.run(["rm", "-rf", str(path)], capture=True)
+        self.run(["ln", "-s", str(target), str(path)], capture=True)
+
+    def readlink(self, path: Path) -> Path | None:
+        r = self.run(["readlink", str(path)], capture=True, check=False)
+        return Path(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else None
+
+
 class DryRunHost(Host):
     """Prints what would happen: commands as `$` lines, files as `# ---- path` + content (the
     golden format). Questions about the host answer "nothing there"."""
+
+    def __init__(
+        self, say: Callable[[str], None], *, quiet: bool = False, label: str | None = None
+    ) -> None:
+        super().__init__(say, quiet=quiet, label=label)
 
     def run(
         self,
@@ -206,7 +395,8 @@ class DryRunHost(Host):
         return b""
 
     def write(self, path: Path, content: str, *, sudo: bool = False, mode: int = 0o644) -> None:
-        self._say(f"# ---- {path}")
+        where = path if self.label is None else f"{self.label}:{path}"
+        self._say(f"# ---- {where}")
         self._say(content.rstrip("\n"))
         self._say("")
 
@@ -269,9 +459,10 @@ class FakeHost(Host):
     podman: set[str] = field(default_factory=set)
     lines: list[str] = field(default_factory=list)
     links: dict[Path, Path] = field(default_factory=dict)  # symlink path -> target
+    label: str | None = None  # a remote host: `$` lines take the ssh form
 
     def __post_init__(self) -> None:
-        super().__init__(self.lines.append)
+        super().__init__(self.lines.append, label=self.label)
 
     def _answer(self, argv: Sequence[str]) -> object:
         for prefix, a in self.responses.items():

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tk8s.host import DryRunHost, FakeHost, Host, HostError, Result
+from tk8s.host import DryRunHost, FakeHost, Host, HostError, Result, SshHost, SshTarget, parse_ssh
 
 
 def test_run_prints_a_pasteable_line_before_running() -> None:
@@ -235,3 +235,93 @@ def test_fake_host_listdir_and_remove_see_symlinks() -> None:
     assert h.listdir(Path("/x/node0")) == ["cpu0", "cpulist"]
     h.remove(Path("/x/node0/cpu0"))
     assert h.readlink(Path("/x/node0/cpu0")) is None
+
+
+# ---- SshHost
+
+
+def stub_ssh(tmp_path: Path, body: str) -> Path:
+    """A fake ssh: records its argv and stdin under tmp_path, then runs `body`."""
+    stub = tmp_path / "ssh"
+    stub.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$@\" > {tmp_path / 'argv'}\n"
+        f"cat > {tmp_path / 'stdin'}\n"
+        f"{body}\n"
+    )
+    stub.chmod(0o755)
+    return stub
+
+
+def test_parse_ssh_accepts_user_host_port_and_refuses_garbage() -> None:
+    assert parse_ssh("tux@192.168.1.231:2222") == SshTarget("tux", "192.168.1.231", 2222)
+    assert parse_ssh("pve-b") == SshTarget(None, "pve-b", None)
+    assert str(parse_ssh("tux@h")) == "tux@h" and str(parse_ssh("h:22")) == "h"
+    for bad in ("", "a b", "h:x", "@h", "u@"):
+        with pytest.raises(ValueError):
+            parse_ssh(bad)
+
+
+def test_ssh_host_prints_a_pasteable_ssh_line_and_runs_through_a_stub(tmp_path: Path) -> None:
+    stub = stub_ssh(tmp_path, "echo out")
+    lines: list[str] = []
+    h = SshHost(lines.append, parse_ssh("tux@h:2222"), ssh=str(stub), control_dir=tmp_path / "cm")
+    r = h.run(["podman", "ps"], sudo=True, capture=True)
+    assert r == Result(0, "out\n", "")
+    assert lines == ["  $ ssh tux@h 'sudo -n podman ps'"]
+    argv = (tmp_path / "argv").read_text().splitlines()
+    assert argv[:2] == ["-o", "BatchMode=yes"]
+    assert argv[argv.index("-p") + 1] == "2222"
+    assert argv[-2:] == ["tux@h", "sudo -n podman ps"]
+    assert f"ControlPath={tmp_path / 'cm'}/ssh-%C" in argv
+    assert (tmp_path / "cm").stat().st_mode & 0o777 == 0o700
+
+
+def test_ssh_host_write_goes_through_install_from_stdin(tmp_path: Path) -> None:
+    stub = stub_ssh(tmp_path, "")
+    h = SshHost(lambda _: None, parse_ssh("h"), ssh=str(stub), control_dir=tmp_path / "cm")
+    h.write(Path("/x/y"), "hi\n", mode=0o600)
+    argv = (tmp_path / "argv").read_text().splitlines()
+    assert argv[-2:] == ["h", "install -D -m 600 /dev/stdin /x/y"]
+    assert (tmp_path / "stdin").read_text() == "hi\n"
+    h.write(Path("/etc/z"), "v", sudo=True)
+    assert (tmp_path / "argv").read_text().splitlines()[
+        -1
+    ] == "sudo -n install -D -m 644 /dev/stdin /etc/z"
+
+
+def test_ssh_host_questions_map_to_test_cat_ls_and_readlink(tmp_path: Path) -> None:
+    stub = stub_ssh(
+        tmp_path, 'case "$*" in *"ls -1A"*) echo b; echo a;; *readlink*) echo /t;; *) echo c;; esac'
+    )
+    h = SshHost(lambda _: None, parse_ssh("h"), ssh=str(stub), control_dir=tmp_path / "cm")
+    assert h.read(Path("/f")) == "c\n" and h.exists(Path("/f"))
+    assert h.listdir(Path("/d")) == ["a", "b"]
+    assert h.readlink(Path("/l")) == Path("/t")
+    assert (tmp_path / "argv").read_text().splitlines()[-1] == "readlink /l"
+    h.symlink(Path("/d/l"), Path("/t"))  # readlink already answers /t: nothing more is run
+    assert (tmp_path / "argv").read_text().splitlines()[-1] == "readlink /d/l"
+    h.mkdir(Path("/d/e"), sudo=True, owner="1000:1000")
+    assert (tmp_path / "argv").read_text().splitlines()[
+        -1
+    ] == "sudo -n install -d -o 1000 -g 1000 /d/e"
+
+
+def test_ssh_failure_is_a_host_error_with_the_stderr(tmp_path: Path) -> None:
+    stub = stub_ssh(tmp_path, 'echo "Host key verification failed." >&2; exit 255')
+    h = SshHost(lambda _: None, parse_ssh("h"), ssh=str(stub), control_dir=tmp_path / "cm")
+    with pytest.raises(HostError, match="exited 255: Host key verification failed") as e:
+        h.run(["true"], capture=True)
+    assert e.value.returncode == 255
+    assert h.read(Path("/f")) is None and not h.exists(Path("/f")) and h.listdir(Path("/d")) == []
+
+
+def test_fake_and_dry_run_hosts_with_a_label_print_ssh_lines() -> None:
+    f = FakeHost(label="tux@h")
+    f.run(["true"])
+    assert f.lines == ["  $ ssh tux@h true"]
+    lines: list[str] = []
+    d = DryRunHost(lines.append, label="tux@h")
+    d.run(["podman", "ps"], sudo=True)
+    d.write(Path("/etc/x"), "v\n")
+    assert lines == ["  $ ssh tux@h 'sudo -n podman ps'", "# ---- tux@h:/etc/x", "v", ""]
