@@ -7,7 +7,7 @@ and the chart are vendored under manifests/, so nothing here fetches from helm.c
 from pathlib import Path
 from typing import Literal
 
-from .. import images, model
+from .. import images
 from ..phases import Context, Phase, PhaseFailed, wait_for
 from .kubeadm import kubectl, kubectl_env
 
@@ -63,8 +63,7 @@ def record_datapath(ctx: Context, datapath: Datapath) -> None:
     """cni records the datapath it resolved; a resume must not lose it when rewriting the file."""
     c = ctx.require_cluster()
     spec = c.spec.model_copy(update={"datapath_resolved": datapath})
-    ctx.cluster = c.model_copy(update={"spec": spec})
-    ctx.host.write(ctx.state_dir / "cluster.yaml", model.dumps(ctx.cluster))
+    ctx.save_cluster(c.model_copy(update={"spec": spec}))
 
 
 def _kubectl(ctx: Context, *args: str, input: str | None = None, check: bool = True) -> int:

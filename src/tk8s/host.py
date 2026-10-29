@@ -8,6 +8,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -217,12 +218,21 @@ def default_control_dir() -> Path:
     is none to create it in, a private directory under the temp dir (XDG's own fallback)."""
     runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
     for d in (Path(runtime) / "tk8s", Path(tempfile.gettempdir()) / f"tk8s-{os.getuid()}"):
-        try:
-            d.mkdir(mode=0o700, parents=True, exist_ok=True)
-        except OSError:
-            continue
-        return d
-    raise HostError(["mkdir", str(runtime)], 1, "no runtime directory for ssh control sockets")
+        if _private_dir(d):
+            return d
+    raise HostError(["mkdir", str(runtime)], 1, "no private directory for ssh control sockets")
+
+
+def _private_dir(d: Path) -> bool:
+    """d exists (created if needed) as a real directory of ours that nobody else can enter: a
+    socket directory someone else planted (a symlink, a world-writable one) would let them
+    hijack the ssh connections."""
+    try:
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
+        st = os.lstat(d)
+    except OSError:
+        return False
+    return stat.S_ISDIR(st.st_mode) and st.st_uid == os.getuid() and (st.st_mode & 0o077) == 0
 
 
 class SshHost(Host):

@@ -3,7 +3,17 @@ from pathlib import Path
 
 import pytest
 
-from tk8s.host import DryRunHost, FakeHost, Host, HostError, Result, SshHost, SshTarget, parse_ssh
+from tk8s.host import (
+    DryRunHost,
+    FakeHost,
+    Host,
+    HostError,
+    Result,
+    SshHost,
+    SshTarget,
+    default_control_dir,
+    parse_ssh,
+)
 
 
 def test_run_prints_a_pasteable_line_before_running() -> None:
@@ -325,3 +335,17 @@ def test_fake_and_dry_run_hosts_with_a_label_print_ssh_lines() -> None:
     d.run(["podman", "ps"], sudo=True)
     d.write(Path("/etc/x"), "v\n")
     assert lines == ["  $ ssh tux@h 'sudo -n podman ps'", "# ---- tux@h:/etc/x", "v", ""]
+
+
+def test_control_dir_refuses_a_planted_or_shared_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    assert default_control_dir() == tmp_path / "run" / "tk8s"
+    (tmp_path / "run" / "tk8s").chmod(0o755)  # someone opened it up: not ours to use any more
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path / "tmp"))
+    assert default_control_dir() == tmp_path / "tmp" / f"tk8s-{os.getuid()}"
+    (tmp_path / "tmp" / f"tk8s-{os.getuid()}").rmdir()
+    (tmp_path / "tmp" / f"tk8s-{os.getuid()}").symlink_to(tmp_path)  # a planted symlink
+    with pytest.raises(HostError, match="no private directory"):
+        default_control_dir()

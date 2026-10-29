@@ -53,3 +53,15 @@ def test_must_raises_with_the_node_the_command_and_stderr(ctx: Context, host: Fa
     with pytest.raises(PhaseFailed, match="n1: sed -i failed: sed: no such file"):
         podman.must(ctx, "n1", "sed", "-i", "s/a/b/", "/etc/x")
     assert podman.must(ctx, "n1", "true").returncode == 0
+
+
+def test_exec_and_container_exists_run_on_the_nodes_host(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    podman.exec_(ctx, "demo-worker-2", "true")
+    assert hosts["b"].calls[-1].argv[:3] == ["podman", "exec", "demo-worker-2"]
+    hosts["c"].podman.add("container:demo-control-plane-3")
+    assert podman.exists(ctx, "container", "demo-control-plane-3")
+    podman.exists(ctx, "image", "img")  # images are the operator's question
+    assert hosts["a"].calls[-1].argv == ["podman", "image", "exists", "img"]

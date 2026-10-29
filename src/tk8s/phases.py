@@ -8,6 +8,7 @@ tk8s_version() is the one command outside host.py: it only reads git, and going 
 host would make the version an empty string under --dry-run.
 """
 
+import dataclasses
 import subprocess
 import time
 from collections.abc import Callable, Iterator
@@ -40,7 +41,7 @@ class PhaseFailed(Exception):
 
 @dataclass
 class Context:
-    host: Host
+    host: Host  # the operator: where tkctl runs, where cluster.yaml and the kubeconfig live
     paths: Paths
     versions: Versions
     options: Options
@@ -49,6 +50,36 @@ class Context:
     name: str | None = None  # the cluster named on the command line (delete works without a file)
     node: str | None = None  # the node a node verb works on (add node's plan phase sets it)
     request: model.NodeRequest | None = None  # what add node was asked for
+    # multi-host: name -> Host for every host of the cluster (the operator's own entry is
+    # `host` itself); empty on a single-host cluster
+    hosts: dict[str, Host] = field(default_factory=dict)
+
+    def host_for(self, container: str) -> Host:
+        """The host running this node or router container; the operator on a single-host
+        cluster or for a name the cluster does not have."""
+        where = self.cluster.host_of(container) if self.cluster is not None else None
+        return self.hosts.get(where, self.host) if where is not None else self.host
+
+    def node_hosts(self) -> list[tuple[str, Host]]:
+        """Every host nodes run on, in cluster.yaml order; a single-host cluster is [("", host)]."""
+        if self.cluster is None or not self.cluster.multi_host:
+            return [("", self.host)]
+        return [(n, self.hosts[n]) for n in self.cluster.host_names if n in self.hosts]
+
+    def remote_hosts(self) -> list[tuple[str, Host]]:
+        return [(n, h) for n, h in self.node_hosts() if h is not self.host]
+
+    def on(self, host: Host) -> Context:
+        """This context with `host` as the one commands go to (the cluster's hosts shared)."""
+        return dataclasses.replace(self, host=host)
+
+    def save_cluster(self, cluster: model.Cluster) -> None:
+        """cluster.yaml on the operator, and a copy on every other host of the cluster."""
+        self.cluster = cluster
+        text = model.dumps(cluster)
+        self.host.write(self.state_dir / "cluster.yaml", text)
+        for _, h in self.remote_hosts():
+            h.write(self.state_dir / "cluster.yaml", text)
 
     def require_cluster(self) -> model.Cluster:
         if self.cluster is None:
@@ -137,8 +168,7 @@ class Runner:
             return
         completed = {**ctx.cluster.status.completed, full: datetime.now(UTC)}
         status = ctx.cluster.status.model_copy(update={"completed": completed})
-        ctx.cluster = ctx.cluster.model_copy(update={"status": status})
-        ctx.host.write(ctx.state_dir / "cluster.yaml", model.dumps(ctx.cluster))
+        ctx.save_cluster(ctx.cluster.model_copy(update={"status": status}))
 
 
 def tree(phases: list[Phase], indent: str = "") -> list[str]:

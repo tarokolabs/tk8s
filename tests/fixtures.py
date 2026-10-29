@@ -2,12 +2,14 @@
 
 import json
 from collections.abc import Callable
+from ipaddress import IPv4Address, IPv4Network
 from pathlib import Path
 
 from tk8s import kubeconfig, model, versions
 from tk8s.create import kubeadm, units
 from tk8s.create.plan import resolve
 from tk8s.host import FakeHost, Result
+from tk8s.hosts import LanFacts
 from tk8s.paths import Paths
 from tk8s.phases import Context, Options
 
@@ -152,6 +154,42 @@ status:
   node_capacity: true
   operator: op
 """
+
+
+MULTI_LAN = LanFacts("ens18", IPv4Network("192.168.1.0/24"), IPv4Address("192.168.1.1"))
+
+
+def multi_user() -> model.UserCluster:
+    """demo over three hosts: what MULTI_YAML is resolved from."""
+    return model.UserCluster(
+        metadata=model.Metadata(name="demo"),
+        spec=model.UserSpec(
+            hosts=[
+                model.UserHost(name="a"),
+                model.UserHost(name="b", ssh="tux@192.168.1.231"),
+                model.UserHost(name="c", ssh="192.168.1.232"),
+            ],
+            network=model.UserNetwork(ha="bgp", routers=2, range="192.168.1.64-192.168.1.95"),
+            nodes=[
+                model.NodeGroup(role="control-plane", count=3),
+                model.NodeGroup(role="worker", count=2),
+            ],
+        ),
+    )
+
+
+def make_multi_ctx(host: FakeHost, data_dir: Path) -> tuple[Context, dict[str, FakeHost]]:
+    """The MULTI_YAML cluster on three fake hosts: a is the operator (`host`), b and c are
+    labelled like ssh hosts."""
+    ctx = make_ctx(host, data_dir, user=None)
+    ctx.cluster = model.load_text(MULTI_YAML)
+    hosts = {
+        "a": host,
+        "b": FakeHost(label="tux@192.168.1.231"),
+        "c": FakeHost(label="192.168.1.232"),
+    }
+    ctx.hosts = dict(hosts)
+    return ctx, hosts
 
 
 def resolved(

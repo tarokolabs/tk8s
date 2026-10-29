@@ -31,8 +31,7 @@ def load_cluster(ctx: Context, name: str) -> model.Cluster:
 
 
 def save_cluster(ctx: Context, cluster: model.Cluster) -> None:
-    ctx.cluster = cluster
-    ctx.host.write(ctx.state_dir / "cluster.yaml", model.dumps(cluster))
+    ctx.save_cluster(cluster)
 
 
 def state_of(ctx: Context, c: model.Cluster) -> str:

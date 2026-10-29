@@ -228,3 +228,52 @@ def test_wait_for_polls_rounds_times_then_fails_with_the_callers_message(
         wait_for(ctx, lambda: False, rounds=3, delay=0.5, failure=lambda: "gave up after 3")
     assert slept == [2.0, 2.0, 0.5, 0.5]  # rounds - 1 sleeps, none after the last probe
     assert poll_until(lambda: False, rounds=0, delay=0) is False
+
+
+# ---- several hosts
+
+
+def test_host_for_picks_the_hosts_entry_or_falls_back_to_the_operator(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    assert ctx.host_for("demo-control-plane-2") is hosts["b"]
+    assert ctx.host_for("demo-router-1") is hosts["a"] is ctx.host
+    assert ctx.host_for("unknown") is ctx.host
+    assert [n for n, _ in ctx.node_hosts()] == ["a", "b", "c"]
+    assert [n for n, _ in ctx.remote_hosts()] == ["b", "c"]
+    sub = ctx.on(hosts["c"])
+    assert sub.host is hosts["c"] and sub.hosts is ctx.hosts and sub.cluster is ctx.cluster
+
+
+def test_single_host_context_has_one_host_and_no_remotes(tmp_path: Path) -> None:
+    ctx, host = make_ctx(tmp_path)
+    assert ctx.host_for("anything") is host
+    assert ctx.node_hosts() == [("", host)] and ctx.remote_hosts() == []
+
+
+def test_save_cluster_writes_the_operator_and_every_remote_copy(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    ctx.save_cluster(ctx.require_cluster())
+    for h in hosts.values():
+        assert "operator: op" in h.files[ctx.state_dir / "cluster.yaml"]
+    assert [c.argv[0] for c in hosts["a"].calls] == ["write"]  # the operator wrote once
+
+
+def test_single_host_save_cluster_writes_only_the_operator(tmp_path: Path) -> None:
+    ctx, host = make_ctx(tmp_path)
+    ctx.cluster = fixture_ctx(host, tmp_path).cluster
+    ctx.save_cluster(ctx.require_cluster())
+    assert [c.argv[0] for c in host.calls] == ["write"]
+
+
+def test_runner_record_updates_every_copy(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    ctx.save_cluster(ctx.require_cluster())
+    Runner([Phase("x", "x", None, lambda ctx: None)]).run(ctx)
+    for h in hosts.values():
+        assert "  x: " in h.files[ctx.state_dir / "cluster.yaml"]

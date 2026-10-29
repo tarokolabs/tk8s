@@ -78,8 +78,7 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
         return 0
     if c.status is not None and c.status.phase != "Ready":
         status = c.status.model_copy(update={"phase": "Ready"})
-        ctx.cluster = c.model_copy(update={"status": status})
-        ctx.host.write(ctx.state_dir / "cluster.yaml", model.dumps(ctx.cluster))
+        ctx.save_cluster(c.model_copy(update={"status": status}))
     print()
     print(f"cluster {c.name} is ready")
     print(f"  kubeconfig: {ctx.state_dir}/kubeconfig   (tkctl use cluster {c.name})")

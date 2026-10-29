@@ -248,7 +248,7 @@ def run(ctx: Context) -> None:
         f"  cluster {c.name}: {n} control plane{'s' if n > 1 else ''} + "
         f"{len(c.workers)} workers, K8s {c.spec.kubernetes}, subnet {c.spec.network.nodes}"
     )
-    ctx.host.write(ctx.state_dir / "cluster.yaml", model.dumps(c))
+    ctx.save_cluster(c)
 
 
 PHASE = Phase("plan", "resolve cluster.yaml: defaults, subnet, node names", done, run)
