@@ -29,7 +29,7 @@ from .verbs import (
 )
 
 USAGE = """\
-tkctl: create and manage tk8s Kubernetes clusters on a single podman host.
+tkctl: create and manage tk8s Kubernetes clusters on one podman host or several (--hosts).
 
 Usage:
   tkctl create cluster [NAME] [flags]

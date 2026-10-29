@@ -1,6 +1,6 @@
 # Taroko Kubernetes
 
-在單一 Linux 主機上，以 podman 容器作為節點建立多節點 Kubernetes 叢集。一道指令完成建立，不需要事先修改任何設定檔。
+在一台或多台 Linux 主機上，以 podman 容器作為節點建立多節點 Kubernetes 叢集。一道指令完成建立，不需要事先修改任何設定檔。
 
 > **這個 repo 只有平台本身。** 教材、工作負載與技術文件在 [tarokolabs/wulin](https://github.com/tarokolabs/wulin)。
 > `main` 是開發分支；穩定版用最新 [Release](https://github.com/tarokolabs/tk8s/releases) 的 tag。
@@ -16,6 +16,7 @@
 | 權限 | `sudo` 免密碼；每一道 sudo 指令執行時都會印出 |
 | 網路 | 第一次需要對外連線，下載約 3 GB（含 router image）；之後建叢集不需要網路 |
 | 其他 | `curl`、`git` |
+| 多主機（`--hosts`） | 每台主機都符合以上條件、在同一個 L2 網段，跑 `tkctl` 的機器能以金鑰 ssh 到每台並 `sudo -n`；LAN 上保留一段位址給叢集（`--ip-range`）；每台主機有 `arping` |
 
 ## 安裝
 
@@ -49,6 +50,8 @@ tkctl create cluster ha --control-planes 3 --defer-join # 額外的 control plan
 tkctl create cluster ha --control-planes 3 --ha bgp     # 同樣三台，apiserver 入口改走 BGP + ECMP 的 anycast VIP
 tkctl create cluster ha --preset ha                      # 3 control plane + 3 worker、bgp、兩台 router；[plan] 會印出展開的旗標
 tkctl create cluster demo --routers 2                    # 兩台 VyOS router 跑 VRRP，.253 在兩台之間漂移；停一台叢集照常
+tkctl create cluster ha --preset ha --hosts a,b=tux@192.168.1.231,c=192.168.1.232 --ip-range 192.168.1.64-192.168.1.95
+                                                         # 節點、router 分散到三台主機（macvlan，節點拿 LAN 的位址），任一台主機掛掉叢集照常
 tkctl create cluster sandbox --gvisor                   # 多一個 gvisor 的 RuntimeClass
 tkctl create cluster old --k8s 1.36.5                   # 次新版
 tkctl create cluster big --cpu 4 --memory 8G
@@ -123,6 +126,7 @@ tkctl delete cluster demo          # 連同狀態目錄與 PVC 資料一併刪�
 tkctl add node demo --role worker                        # demo-worker-3
 tkctl add node demo --role control-plane --cpu 4         # demo-control-plane-2
 tkctl add node demo --role worker --no-join              # 建立並啟動，但不加入叢集
+tkctl add node demo --role worker --host c               # 多主機叢集：放到主機 c（省略就放節點最少的那台）
 tkctl join node demo demo-worker-4                       # 對它執行 kubeadm join
 tkctl delete node demo demo-worker-3                     # drain、停止、移除容器與 volume、自 cluster.yaml 移除
 ```
@@ -149,6 +153,20 @@ sudo ip route add 172.22.0.0/24 via <主機 IP>      # Linux；tkctl describe cl
 sudo route -n add 172.22.0.0/24 <主機 IP>          # macOS
 route add 172.22.0.0 mask 255.255.255.0 <主機 IP>  # Windows
 ```
+
+多主機叢集的節點與 LoadBalancer IP 本來就在 LAN 上，區網內任何機器直接連得到，不用加路由；ClusterIP 只有叢集的主機（經 `tk8s-<名稱>` 這個 shim 介面）連得到。
+
+### 多主機
+
+`--hosts` 把節點容器與 router 分散到同一個 L2 的多台主機上，目的是沒有任何一台主機是單點。跑 `tkctl` 的機器是操作台，`cluster.yaml` 與 kubeconfig 在它上面；對其他主機的每一道指令都走 ssh，印出來的是 `$ ssh tux@192.168.1.231 'sudo -n podman …'`，一樣可以手動重現。叢集跑起來後不依賴操作台：每台主機的 unit 重開機自己起來。
+
+- 主機清單 `[名稱=][使用者@]主機[:port]` 以逗號分隔；第一項沒寫 `使用者@` 就是操作台自己。ssh 的金鑰、ProxyJump 等由 `~/.ssh/config` 管，host key 要先手動 ssh 一次信任。
+- `--ip-range A-B` 是 LAN 上保留給這個叢集的位址，依固定順序切：第一個是 router 的浮動位址（節點的閘道），`--routers 2` 時接著兩台 router 各一個，再每台主機一個 shim、每個節點一個，最後 20 個是 LoadBalancer 池。preflight 會對整段 ARP 探測，有人在用就拒絕。範圍要在主機的網段內，網段與閘道由主機的預設路由查出。
+- 放置：control plane 從第一台主機輪流、worker 接著輪、router 從第一台輪；`-f` 裡每個節點群組可寫 `host:` 固定在某台（省略或 `auto` 就輪流），router 用 `network.router_hosts`。三台 control plane 放兩台主機時總有一台持有多數，那台掉了 apiserver 就停，`plan` 與 preflight 會印警告（不拒絕）。
+- 節點網路是 Quadlet 的 macvlan network，節點與 router 拿 LAN 的位址、固定的 MAC；router 仍是節點的預設閘道（它扮演 ToR），再轉給 LAN 的閘道。
+- 每台主機各有一份 `cluster.yaml` 副本（`status.operator` 記著操作台）；在不是操作台的主機上 `get clusters` 會列出它並標 `managed from <操作台>`，其他動詞拒絕。
+- `tkctl stop`／`start`、`delete cluster`、`add node`（`--host` 指定主機）、`delete node`、`verify`（多一段 `[hosts]`）都支援多主機；沒有 `cluster.yaml` 的 `delete cluster` 只清操作台這台。
+- 不支援：`--gvisor`、`spec.network.nodes`／`router` 明寫、建立後增減主機、不在同一個 L2 的操作台；`tkctl pull images` 一次只對一台主機（create 的 images phase 會對每台做）。
 
 ## 叢集定義檔
 
@@ -184,6 +202,29 @@ spec:
     ha: proxy                # 目前只有 proxy
 ```
 
+多主機時多一段 `hosts`，`network` 改寫保留範圍（`nodes`、`router` 由 tkctl 從主機的 LAN 查出與切出，不能寫）：
+
+```yaml
+spec:
+  hosts:
+    - name: pve-a              # 沒有 ssh：操作台自己
+    - name: pve-b
+      ssh: tux@192.168.1.231   # [使用者@]主機[:port]
+    - name: pve-c
+      ssh: 192.168.1.232
+  network:
+    range: 192.168.1.64-192.168.1.95
+    ha: bgp
+    routers: 2
+    router_hosts: [pve-a, pve-b]   # 省略就輪流
+  nodes:
+    - role: control-plane
+      count: 3                 # 沒寫 host 就輪流：pve-a、pve-b、pve-c
+    - role: worker
+      count: 2
+      host: pve-c              # 固定放這台
+```
+
 ```bash
 tkctl create cluster -f tkdt.yaml
 ```
@@ -197,8 +238,8 @@ kubectl 風格，動詞在前。全部如下：
 ```
 tkctl create cluster [名稱] [--control-planes N] [--workers N] [--cpu N] [--memory SIZE]
                      [--k8s 版本] [--datapath auto|netkit|veth] [--gvisor] [--ha proxy|bgp] [--defer-join]
-                     [--routers 1|2] [--preset lab|ha] [-f cluster.yaml] [--allow-overlap] [--dry-run]
-                     [--phase P] [--skip-phases P,...] [--list-phases] [--quiet]
+                     [--routers 1|2] [--hosts 清單] [--ip-range A-B] [--preset lab|ha] [-f cluster.yaml]
+                     [--allow-overlap] [--dry-run] [--phase P] [--skip-phases P,...] [--list-phases] [--quiet]
 tkctl delete cluster <名稱> [--yes] [--phase P] [--list-phases]
 tkctl get clusters
 tkctl describe cluster <名稱> [-o yaml]
@@ -206,7 +247,7 @@ tkctl stop cluster <名稱>
 tkctl start cluster <名稱>
 tkctl use cluster <名稱>
 tkctl verify cluster <名稱> [--phase P] [--list-phases]
-tkctl add node <叢集> --role worker|control-plane [--cpu N] [--memory SIZE] [--no-join]
+tkctl add node <叢集> --role worker|control-plane [--cpu N] [--memory SIZE] [--host 名稱] [--no-join]
 tkctl join node <叢集> <節點>
 tkctl delete node <叢集> <節點> [--yes] [--phase P] [--list-phases]
 tkctl pull images [--k8s 版本] [--refresh]
@@ -220,6 +261,7 @@ tkctl version
 - 名稱格式 `^[a-z][a-z0-9-]{0,15}$`，用於節點名稱與叢集 DNS 網域（`<名稱>.k8s`）。
 - `--control-planes` 要是奇數、最多 5；不論幾台，apiserver 的入口都是 `api.<名稱>.k8s:6443`，由 `.253` 的 VyOS router 服務。`--ha bgp` 時入口不是 router 本身而是 VIP `172.23.N.1`：每台 control plane 的 FRR 只在自己的 apiserver ready 時宣告它，router 對宣告中的 control plane 做 ECMP，整台 control plane 消失靠 BFD 約 1 秒收斂；`describe` 的 `Router:` 段列出 peers 與 next hop 數。
 - `--routers 2`：兩台 router `<名稱>-router-1`（.251）與 `-2`（.252）跑 VRRP，節點的閘道與 apiserver 入口仍是 `.253`，在兩台之間漂移（切換約 3 秒）。停一台用 `sudo systemctl stop <名稱>-router-1.service`（`podman stop` 幾秒後會被 systemd 拉回來）；一台停著時 `add node`／`delete node` 只重載跑著的那台，停著的回來時自己拿到新設定。`describe` 的 `Router:` 段列出兩台與 VRRP 狀態，`verify` 的 `[router]` 多一行檢查剛好一台 MASTER、一台 BACKUP。
+- `--hosts` 與 `--ip-range` 要一起給，把叢集分散到多台主機（見「多主機」）；`-f` 的對應寫法是 `spec.hosts` 與 `spec.network.range`。
 - `--preset lab|ha` 是拓樸縮寫，`[plan]` 會印出展開的旗標；不能跟 `--control-planes`、`--workers`、`--ha`、`--routers`、`--defer-join`、`-f` 混用。`ha` = `--control-planes 3 --workers 3 --ha bgp --routers 2`，`lab` = 預設的 `--control-planes 1 --workers 2 --ha proxy --routers 1`。
 - `--gvisor` 需要 veth datapath，會自動選；明確指定 `--datapath netkit` 加 `--gvisor` 會被拒絕。
 - `--memory` 接受 `4G`、`4096M`，`4Gi` 不行。
@@ -238,7 +280,10 @@ tkctl version
 /opt/taroko/cni/                 # CNI plugins
 /opt/taroko/clusters/<名稱>/nodes/<節點>/  # 節點掛進去的 meminfo、NUMA node 與 kubelet 的保留量設定
 /etc/containers/systemd/<名稱>/  # 節點與 router 的 Quadlet unit；systemctl status <名稱>.target
+/etc/systemd/system/<名稱>-routes.service  # 主機到 pod／service 網段的路由；多主機時也建 tk8s-<名稱> 這個 macvlan shim
 ```
+
+多主機時每台主機都有這棵樹，但各放自己節點與 router 的檔；`cluster.yaml` 正本在操作台，其他主機是副本，kubeconfig 只在操作台。
 
 ## 延伸閱讀
 
