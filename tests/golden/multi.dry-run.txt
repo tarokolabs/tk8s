@@ -1,0 +1,1402 @@
+[plan] resolve cluster.yaml: defaults, subnet, node names
+  preset ha: --control-planes 3 --workers 3 --ha bgp --routers 2
+  cluster multi: 3 control planes + 3 workers, K8s 1.37.1, subnet 192.168.1.0/24
+  host a: eth0 (this host, shim 192.168.1.67)
+  host b: eth0
+  host c: eth0
+  placement: multi-control-plane-1 a, multi-control-plane-2 b, multi-control-plane-3 c, multi-worker-1 a, multi-worker-2 b, multi-worker-3 c
+  routers: multi-router-1 a, multi-router-2 b
+# ---- <TMP>/clusters/multi/cluster.yaml
+apiVersion: taroko.io/v1alpha1
+kind: Cluster
+metadata:
+  name: multi
+spec:
+  kubernetes: "1.37.1"
+  cni: cilium
+  datapath: auto
+  gvisor: false
+  network:
+    index: 0
+    nodes: 192.168.1.0/24
+    gateway: 192.168.1.1
+    router: 192.168.1.64
+    ha: bgp
+    routers: 2
+    vip: 172.23.0.1
+    lb_range: 192.168.1.85-192.168.1.89
+    pods: 10.244.0.0/21
+    services: 10.98.0.0/24
+    range: 192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.89
+    router_hosts:
+      - a
+      - b
+    shim: 192.168.1.67
+  nodes:
+    - role: control-plane
+      name: multi-control-plane-1
+      ip: 192.168.1.68
+      cpu: 2
+      memory: 4g
+      join: true
+      host: a
+    - role: control-plane
+      name: multi-control-plane-2
+      ip: 192.168.1.69
+      cpu: 2
+      memory: 4g
+      join: true
+      host: b
+    - role: control-plane
+      name: multi-control-plane-3
+      ip: 192.168.1.70
+      cpu: 2
+      memory: 4g
+      join: true
+      host: c
+    - role: worker
+      name: multi-worker-1
+      ip: 192.168.1.80
+      cpu: 2
+      memory: 4g
+      join: true
+      host: a
+    - role: worker
+      name: multi-worker-2
+      ip: 192.168.1.81
+      cpu: 2
+      memory: 4g
+      join: true
+      host: b
+    - role: worker
+      name: multi-worker-3
+      ip: 192.168.1.82
+      cpu: 2
+      memory: 4g
+      join: true
+      host: c
+  hosts:
+    - name: a
+      iface: eth0
+    - name: b
+      ssh: tux@192.168.1.231
+      iface: eth0
+    - name: c
+      ssh: 192.168.1.232
+      iface: eth0
+status:
+  phase: Creating
+  completed: {}
+  tk8s: <VERSION>
+  node_capacity: true
+  operator: dry-run
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/cluster.yaml
+apiVersion: taroko.io/v1alpha1
+kind: Cluster
+metadata:
+  name: multi
+spec:
+  kubernetes: "1.37.1"
+  cni: cilium
+  datapath: auto
+  gvisor: false
+  network:
+    index: 0
+    nodes: 192.168.1.0/24
+    gateway: 192.168.1.1
+    router: 192.168.1.64
+    ha: bgp
+    routers: 2
+    vip: 172.23.0.1
+    lb_range: 192.168.1.85-192.168.1.89
+    pods: 10.244.0.0/21
+    services: 10.98.0.0/24
+    range: 192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.89
+    router_hosts:
+      - a
+      - b
+    shim: 192.168.1.67
+  nodes:
+    - role: control-plane
+      name: multi-control-plane-1
+      ip: 192.168.1.68
+      cpu: 2
+      memory: 4g
+      join: true
+      host: a
+    - role: control-plane
+      name: multi-control-plane-2
+      ip: 192.168.1.69
+      cpu: 2
+      memory: 4g
+      join: true
+      host: b
+    - role: control-plane
+      name: multi-control-plane-3
+      ip: 192.168.1.70
+      cpu: 2
+      memory: 4g
+      join: true
+      host: c
+    - role: worker
+      name: multi-worker-1
+      ip: 192.168.1.80
+      cpu: 2
+      memory: 4g
+      join: true
+      host: a
+    - role: worker
+      name: multi-worker-2
+      ip: 192.168.1.81
+      cpu: 2
+      memory: 4g
+      join: true
+      host: b
+    - role: worker
+      name: multi-worker-3
+      ip: 192.168.1.82
+      cpu: 2
+      memory: 4g
+      join: true
+      host: c
+  hosts:
+    - name: a
+      iface: eth0
+    - name: b
+      ssh: tux@192.168.1.231
+      iface: eth0
+    - name: c
+      ssh: 192.168.1.232
+      iface: eth0
+status:
+  phase: Creating
+  completed: {}
+  tk8s: <VERSION>
+  node_capacity: true
+  operator: dry-run
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/cluster.yaml
+apiVersion: taroko.io/v1alpha1
+kind: Cluster
+metadata:
+  name: multi
+spec:
+  kubernetes: "1.37.1"
+  cni: cilium
+  datapath: auto
+  gvisor: false
+  network:
+    index: 0
+    nodes: 192.168.1.0/24
+    gateway: 192.168.1.1
+    router: 192.168.1.64
+    ha: bgp
+    routers: 2
+    vip: 172.23.0.1
+    lb_range: 192.168.1.85-192.168.1.89
+    pods: 10.244.0.0/21
+    services: 10.98.0.0/24
+    range: 192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.89
+    router_hosts:
+      - a
+      - b
+    shim: 192.168.1.67
+  nodes:
+    - role: control-plane
+      name: multi-control-plane-1
+      ip: 192.168.1.68
+      cpu: 2
+      memory: 4g
+      join: true
+      host: a
+    - role: control-plane
+      name: multi-control-plane-2
+      ip: 192.168.1.69
+      cpu: 2
+      memory: 4g
+      join: true
+      host: b
+    - role: control-plane
+      name: multi-control-plane-3
+      ip: 192.168.1.70
+      cpu: 2
+      memory: 4g
+      join: true
+      host: c
+    - role: worker
+      name: multi-worker-1
+      ip: 192.168.1.80
+      cpu: 2
+      memory: 4g
+      join: true
+      host: a
+    - role: worker
+      name: multi-worker-2
+      ip: 192.168.1.81
+      cpu: 2
+      memory: 4g
+      join: true
+      host: b
+    - role: worker
+      name: multi-worker-3
+      ip: 192.168.1.82
+      cpu: 2
+      memory: 4g
+      join: true
+      host: c
+  hosts:
+    - name: a
+      iface: eth0
+    - name: b
+      ssh: tux@192.168.1.231
+      iface: eth0
+    - name: c
+      ssh: 192.168.1.232
+      iface: eth0
+status:
+  phase: Creating
+  completed: {}
+  tk8s: <VERSION>
+  node_capacity: true
+  operator: dry-run
+
+
+[units] write the Quadlet units, the target, the routes and the router config
+# ---- /etc/containers/systemd/multi/multi.network
+# Generated by tkctl for cluster multi: the nodes on the hosts' LAN, macvlan on eth0.
+# Edit cluster.yaml and re-run tkctl instead.
+[Network]
+NetworkName=multi
+Driver=macvlan
+Options=parent=eth0
+Subnet=192.168.1.0/24
+Gateway=192.168.1.1
+# The nodes' default route is the cluster's router (its address floats between the routers on
+# the LAN), not the LAN gateway. no_default_route keeps netavark from adding the gateway too.
+Options=no_default_route=1
+PodmanArgs=--route 0.0.0.0/0,192.168.1.64
+# No resolvers here: netavark serves no DNS on a macvlan network and refuses the setting; the
+# containers carry their own resolvers (set in each .container).
+
+# ---- <TMP>/clusters/multi/router-1/tkctl.boot
+high-availability {
+    vrrp {
+        group tk8s {
+            address 192.168.1.64/24 {
+            }
+            interface "eth0"
+            preempt-delay "10"
+            priority "200"
+            vrid "64"
+        }
+    }
+}
+interfaces {
+    ethernet eth0 {
+        address "192.168.1.65/24"
+    }
+    loopback lo {
+    }
+}
+protocols {
+    bfd {
+        peer 192.168.1.68 {
+            interval {
+                multiplier "3"
+                receive "300"
+                transmit "300"
+            }
+        }
+        peer 192.168.1.69 {
+            interval {
+                multiplier "3"
+                receive "300"
+                transmit "300"
+            }
+        }
+        peer 192.168.1.70 {
+            interval {
+                multiplier "3"
+                receive "300"
+                transmit "300"
+            }
+        }
+    }
+    bgp {
+        address-family {
+            ipv4-unicast {
+                maximum-paths {
+                    ebgp "8"
+                }
+            }
+        }
+        neighbor 192.168.1.68 {
+            address-family {
+                ipv4-unicast {
+                }
+            }
+            bfd {
+            }
+            remote-as "65001"
+            timers {
+                holdtime "9"
+                keepalive "3"
+            }
+        }
+        neighbor 192.168.1.69 {
+            address-family {
+                ipv4-unicast {
+                }
+            }
+            bfd {
+            }
+            remote-as "65001"
+            timers {
+                holdtime "9"
+                keepalive "3"
+            }
+        }
+        neighbor 192.168.1.70 {
+            address-family {
+                ipv4-unicast {
+                }
+            }
+            bfd {
+            }
+            remote-as "65001"
+            timers {
+                holdtime "9"
+                keepalive "3"
+            }
+        }
+        system-as "65000"
+    }
+    static {
+        route 0.0.0.0/0 {
+            next-hop 192.168.1.1 {
+            }
+        }
+        route 172.23.0.1/32 {
+            reject {
+                distance "254"
+            }
+        }
+    }
+}
+system {
+    config-management {
+        commit-revisions "20"
+    }
+    host-name "multi-router-1"
+    login {
+        user vyos {
+            authentication {
+                encrypted-password "$6$QxPS.uk6mfo$9QBSo8u1FkH16gMyAVhus6fU3LOzvLR9Z9.82m3tiHFAxTtIkhaZSWssSgzt4v4dGAL8rhVQxTg0oAG9/q11h/"
+                plaintext-password ""
+            }
+        }
+    }
+}
+
+# ---- <TMP>/clusters/multi/router-1/scripts/vyos-preconfig-bootup.script
+#!/bin/sh
+# Generated by tkctl for cluster multi. VyOS runs this before it loads config.boot. tkctl
+# renders tkctl.boot; a config.boot without VyOS's own version footer would be migrated at
+# every boot (blocks added, the file rewritten), so the footer is appended here, taken from the
+# default config of the VyOS build that is about to load it.
+cp /opt/vyatta/etc/config/tkctl.boot /opt/vyatta/etc/config/config.boot
+grep '^// ' /opt/vyatta/etc/config.boot.default >> /opt/vyatta/etc/config/config.boot
+
+# ---- <TMP>/clusters/multi/router-1/scripts/vyos-postconfig-bootup.script
+#!/bin/sh
+# Generated by tkctl for cluster multi. podman gives every container on the cluster network a
+# default route to the router; this container is the router, and that route would shadow the
+# static default to the host (VyOS's zebra ranks a kernel route above its own static one).
+ip route del default via 192.168.1.64 2>/dev/null || true
+# When the container stops, netavark deletes exactly that route (gateway, metric 100, proto
+# static) and fails the unit when it is gone. A transient unit puts it back at shutdown; by then
+# nothing routes through here any more.
+# The host bridge sits on the same link as the nodes, so for every packet it forwards the
+# router would send the node an ICMP redirect to the host (ping shows them as errors, and a
+# node that accepted them would bypass the router). VyOS has no CLI knob for this.
+sysctl -qw net.ipv4.conf.all.send_redirects=0 net.ipv4.conf.eth0.send_redirects=0
+systemd-run --quiet --unit=tk8s-podman-route -p RemainAfterExit=yes -p "ExecStop=/usr/sbin/ip route replace default via 192.168.1.64 metric 100 proto static" /bin/true
+
+# ---- /etc/containers/systemd/multi/multi-router-1.container
+# Generated by tkctl for cluster multi. Edit cluster.yaml and re-run tkctl instead.
+[Unit]
+Description=tk8s cluster multi router (VyOS at 192.168.1.65: the nodes' gateway and the apiserver load balancer)
+PartOf=multi.target
+
+[Container]
+ContainerName=multi-router-1
+Image=ghcr.io/tarokolabs/tk8s/router:2026.10.07-0712
+# The container's hostname must be the one config.boot sets: VyOS runs sudo at every commit and a
+# hostname it cannot resolve stalls the boot for minutes.
+HostName=multi-router-1
+Network=multi.network
+IP=192.168.1.65
+DNS=1.1.1.1
+DNS=1.0.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
+# tkctl.boot and the bootup scripts, rendered from cluster.yaml; VyOS writes config.boot and its archive here.
+Volume=<TMP>/clusters/multi/router-1:/opt/vyatta/etc/config
+# VyOS wants the network stack and systemd as PID 1 (podman's systemd mode).
+PodmanArgs=--privileged --systemd=always --mac-address 02:54:4b:a8:01:41
+# systemd's shutdown signal; the image sets it too.
+StopSignal=SIGRTMIN+3
+StopTimeout=30
+
+[Service]
+# VyOS's systemd exits 130 on SIGRTMIN+3, like the node image's.
+SuccessExitStatus=130
+Restart=always
+
+[Install]
+WantedBy=multi.target
+
+# ---- <TMP>/clusters/multi/logs/apiserver/audit-policy.yaml
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+  - "RequestReceived"
+rules:
+  - level: Request
+    verbs: ["create","update","patch","delete","watch","get","list","deletecollection"]
+    resources:
+      - group: ""  # core
+        resources: ["pods", "services", "secrets", "configmaps"]
+      - group: "apps"
+        resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
+      - group: "batch"
+        resources: ["jobs", "cronjobs"]
+
+# ---- <TMP>/clusters/multi/nodes/multi-control-plane-1/meminfo
+MemTotal: 4194304 kB
+SwapTotal: 0 kB
+
+# ---- <TMP>/clusters/multi/nodes/multi-control-plane-1/kubelet-reserved.conf
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+kubeReserved:
+  cpu: 500m
+  memory: 512Mi
+
+# ---- <TMP>/clusters/multi/nodes/multi-control-plane-1/kubelet-config-dir.conf
+# tkctl: the kubelet also reads /etc/kubernetes/kubelet.conf.d (kubeReserved)
+[Service]
+Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml --config-dir=/etc/kubernetes/kubelet.conf.d"
+
+# ---- <TMP>/clusters/multi/nodes/multi-control-plane-1/sys-node/node0/cpulist
+0-1
+
+# ---- <TMP>/clusters/multi/nodes/multi-control-plane-1/sys-node/node0/cpumap
+3
+
+# ---- <TMP>/clusters/multi/nodes/multi-control-plane-1/sys-node/node0/distance
+10
+
+# ---- <TMP>/clusters/multi/nodes/multi-control-plane-1/sys-node/node0/meminfo
+Node 0 MemTotal: 4194304 kB
+Node 0 MemFree: 4194304 kB
+Node 0 MemUsed: 0 kB
+
+# ---- <TMP>/clusters/multi/nodes/multi-control-plane-1/sys-node/node0/hugepages/hugepages-2048kB/nr_hugepages
+0
+
+# ---- <TMP>/clusters/multi/nodes/multi-control-plane-1/sys-node/node0/hugepages/hugepages-1048576kB/nr_hugepages
+0
+
+# ---- /etc/containers/systemd/multi/multi-control-plane-1.container
+# Generated by tkctl for cluster multi (control-plane). Edit cluster.yaml and re-run tkctl instead.
+[Unit]
+Description=tk8s node multi-control-plane-1 (control-plane) of cluster multi
+PartOf=multi.target
+
+[Container]
+ContainerName=multi-control-plane-1
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
+HostName=multi-control-plane-1
+Network=multi.network
+IP=192.168.1.68
+DNS=1.1.1.1
+DNS=1.0.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
+Environment=TZ=Asia/Taipei
+# api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
+# mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
+# anycast VIP the control planes announce to the router (bgp mode).
+AddHost=api.multi.k8s:172.23.0.1
+Volume=<TMP>/cni:/opt/cni/bin
+Volume=/lib/modules:/lib/modules:ro
+# Quadlet recreates the container on every start (--rm --replace). Everything the node
+# must keep across restarts and reboots lives in named volumes; podman copies the image
+# content into an empty volume on first use.
+Volume=multi-control-plane-1-var:/var:suid,exec,dev,rbind
+Volume=multi-control-plane-1-etc:/etc
+Volume=multi-control-plane-1-usr-local-bin:/usr/local/bin
+# The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
+# reads it as an additional image store, so nothing a create needs is pulled; read-only
+# because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
+Volume=<TMP>/images/1.37.1:/var/lib/containers/shared:ro
+Volume=<TMP>/clusters/multi:/opt/taroko
+Volume=<TMP>/wulin:/opt/taroko/wulin
+Volume=<TMP>/clusters/multi/nodes/multi-control-plane-1/meminfo:/proc/meminfo:ro
+Volume=<TMP>/clusters/multi/nodes/multi-control-plane-1/sys-node:/sys/devices/system/node:ro
+Volume=<TMP>/clusters/multi/nodes/multi-control-plane-1/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
+Volume=<TMP>/clusters/multi/nodes/multi-control-plane-1/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
+StopTimeout=60
+PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:44
+
+[Service]
+# The node image stops with SIGRTMIN+3; systemd inside exits 130 on halt.
+SuccessExitStatus=130 143
+Restart=on-failure
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+
+# ---- <TMP>/clusters/multi/nodes/multi-worker-1/meminfo
+MemTotal: 4194304 kB
+SwapTotal: 0 kB
+
+# ---- <TMP>/clusters/multi/nodes/multi-worker-1/kubelet-reserved.conf
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+kubeReserved:
+  cpu: 500m
+  memory: 512Mi
+
+# ---- <TMP>/clusters/multi/nodes/multi-worker-1/kubelet-config-dir.conf
+# tkctl: the kubelet also reads /etc/kubernetes/kubelet.conf.d (kubeReserved)
+[Service]
+Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml --config-dir=/etc/kubernetes/kubelet.conf.d"
+
+# ---- <TMP>/clusters/multi/nodes/multi-worker-1/sys-node/node0/cpulist
+0-1
+
+# ---- <TMP>/clusters/multi/nodes/multi-worker-1/sys-node/node0/cpumap
+3
+
+# ---- <TMP>/clusters/multi/nodes/multi-worker-1/sys-node/node0/distance
+10
+
+# ---- <TMP>/clusters/multi/nodes/multi-worker-1/sys-node/node0/meminfo
+Node 0 MemTotal: 4194304 kB
+Node 0 MemFree: 4194304 kB
+Node 0 MemUsed: 0 kB
+
+# ---- <TMP>/clusters/multi/nodes/multi-worker-1/sys-node/node0/hugepages/hugepages-2048kB/nr_hugepages
+0
+
+# ---- <TMP>/clusters/multi/nodes/multi-worker-1/sys-node/node0/hugepages/hugepages-1048576kB/nr_hugepages
+0
+
+# ---- /etc/containers/systemd/multi/multi-worker-1.container
+# Generated by tkctl for cluster multi (worker). Edit cluster.yaml and re-run tkctl instead.
+[Unit]
+Description=tk8s node multi-worker-1 (worker) of cluster multi
+PartOf=multi.target
+After=multi-control-plane-1.service
+
+[Container]
+ContainerName=multi-worker-1
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
+HostName=multi-worker-1
+Network=multi.network
+IP=192.168.1.80
+DNS=1.1.1.1
+DNS=1.0.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
+Environment=TZ=Asia/Taipei
+# api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
+# mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
+# anycast VIP the control planes announce to the router (bgp mode).
+AddHost=api.multi.k8s:172.23.0.1
+Volume=<TMP>/cni:/opt/cni/bin
+Volume=/lib/modules:/lib/modules:ro
+# Quadlet recreates the container on every start (--rm --replace). Everything the node
+# must keep across restarts and reboots lives in named volumes; podman copies the image
+# content into an empty volume on first use.
+Volume=multi-worker-1-var:/var:suid,exec,dev,rbind
+Volume=multi-worker-1-etc:/etc
+Volume=multi-worker-1-usr-local-bin:/usr/local/bin
+# The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
+# reads it as an additional image store, so nothing a create needs is pulled; read-only
+# because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
+Volume=<TMP>/images/1.37.1:/var/lib/containers/shared:ro
+Volume=<TMP>/clusters/multi:/opt/taroko
+Volume=<TMP>/wulin:/opt/taroko/wulin
+Volume=<TMP>/clusters/multi/nodes/multi-worker-1/meminfo:/proc/meminfo:ro
+Volume=<TMP>/clusters/multi/nodes/multi-worker-1/sys-node:/sys/devices/system/node:ro
+Volume=<TMP>/clusters/multi/nodes/multi-worker-1/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
+Volume=<TMP>/clusters/multi/nodes/multi-worker-1/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
+StopTimeout=60
+PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:50
+
+[Service]
+# The node image stops with SIGRTMIN+3; systemd inside exits 130 on halt.
+SuccessExitStatus=130 143
+Restart=on-failure
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+
+# ---- /etc/systemd/system/multi.target
+# Generated by tkctl. Start or stop every node of cluster multi together.
+[Unit]
+Description=tk8s cluster multi
+Wants=multi-router-1.service multi-control-plane-1.service multi-worker-1.service multi-routes.service
+
+[Install]
+WantedBy=multi-user.target
+
+# ---- /etc/systemd/system/multi-routes.service
+# Generated by tkctl. A macvlan shim so this host can reach the containers of cluster multi on
+# its own LAN interface (macvlan keeps the parent interface and its children apart), the routes to
+# the cluster's addresses through it, and the routes to the pod and service subnets through the
+# first control plane (bgp mode adds the apiserver VIP through the router). Started with the
+# target, so they survive a reboot.
+[Unit]
+Description=tk8s cluster multi host routes (shim tk8s-multi on eth0)
+PartOf=multi.target
+# the shim hangs off eth0: it has to be up and addressed first (a reboot)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=-ip link add tk8s-multi link eth0 type macvlan mode bridge
+ExecStart=ip link set tk8s-multi up
+ExecStart=ip addr replace 192.168.1.67/32 dev tk8s-multi
+ExecStart=ip route replace 192.168.1.64/30 dev tk8s-multi src 192.168.1.67
+ExecStart=ip route replace 192.168.1.68/31 dev tk8s-multi src 192.168.1.67
+ExecStart=ip route replace 192.168.1.70/32 dev tk8s-multi src 192.168.1.67
+ExecStart=ip route replace 192.168.1.80/29 dev tk8s-multi src 192.168.1.67
+ExecStart=ip route replace 192.168.1.88/31 dev tk8s-multi src 192.168.1.67
+ExecStart=ip route replace 10.244.0.0/21 via 192.168.1.68 dev tk8s-multi
+ExecStart=ip route replace 10.98.0.0/24 via 192.168.1.68 dev tk8s-multi
+ExecStart=ip route replace 172.23.0.1/32 via 192.168.1.64 dev tk8s-multi
+ExecStop=-ip route del 10.244.0.0/21 via 192.168.1.68 dev tk8s-multi
+ExecStop=-ip route del 10.98.0.0/24 via 192.168.1.68 dev tk8s-multi
+ExecStop=-ip route del 172.23.0.1/32 via 192.168.1.64 dev tk8s-multi
+ExecStop=-ip route del 192.168.1.64/30 dev tk8s-multi
+ExecStop=-ip route del 192.168.1.68/31 dev tk8s-multi
+ExecStop=-ip route del 192.168.1.70/32 dev tk8s-multi
+ExecStop=-ip route del 192.168.1.80/29 dev tk8s-multi
+ExecStop=-ip route del 192.168.1.88/31 dev tk8s-multi
+ExecStop=-ip link del tk8s-multi
+
+  $ ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/multi/nodes/multi-control-plane-1/sys-node/node0/cpu0
+  $ ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/multi/nodes/multi-control-plane-1/sys-node/node0/cpu1
+  $ ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/multi/nodes/multi-worker-1/sys-node/node0/cpu0
+  $ ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/multi/nodes/multi-worker-1/sys-node/node0/cpu1
+# ---- tux@192.168.1.231:/etc/containers/systemd/multi/multi.network
+# Generated by tkctl for cluster multi: the nodes on the hosts' LAN, macvlan on eth0.
+# Edit cluster.yaml and re-run tkctl instead.
+[Network]
+NetworkName=multi
+Driver=macvlan
+Options=parent=eth0
+Subnet=192.168.1.0/24
+Gateway=192.168.1.1
+# The nodes' default route is the cluster's router (its address floats between the routers on
+# the LAN), not the LAN gateway. no_default_route keeps netavark from adding the gateway too.
+Options=no_default_route=1
+PodmanArgs=--route 0.0.0.0/0,192.168.1.64
+# No resolvers here: netavark serves no DNS on a macvlan network and refuses the setting; the
+# containers carry their own resolvers (set in each .container).
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/router-2/tkctl.boot
+high-availability {
+    vrrp {
+        group tk8s {
+            address 192.168.1.64/24 {
+            }
+            interface "eth0"
+            priority "100"
+            vrid "64"
+        }
+    }
+}
+interfaces {
+    ethernet eth0 {
+        address "192.168.1.66/24"
+    }
+    loopback lo {
+    }
+}
+protocols {
+    bfd {
+        peer 192.168.1.68 {
+            interval {
+                multiplier "3"
+                receive "300"
+                transmit "300"
+            }
+        }
+        peer 192.168.1.69 {
+            interval {
+                multiplier "3"
+                receive "300"
+                transmit "300"
+            }
+        }
+        peer 192.168.1.70 {
+            interval {
+                multiplier "3"
+                receive "300"
+                transmit "300"
+            }
+        }
+    }
+    bgp {
+        address-family {
+            ipv4-unicast {
+                maximum-paths {
+                    ebgp "8"
+                }
+            }
+        }
+        neighbor 192.168.1.68 {
+            address-family {
+                ipv4-unicast {
+                }
+            }
+            bfd {
+            }
+            remote-as "65001"
+            timers {
+                holdtime "9"
+                keepalive "3"
+            }
+        }
+        neighbor 192.168.1.69 {
+            address-family {
+                ipv4-unicast {
+                }
+            }
+            bfd {
+            }
+            remote-as "65001"
+            timers {
+                holdtime "9"
+                keepalive "3"
+            }
+        }
+        neighbor 192.168.1.70 {
+            address-family {
+                ipv4-unicast {
+                }
+            }
+            bfd {
+            }
+            remote-as "65001"
+            timers {
+                holdtime "9"
+                keepalive "3"
+            }
+        }
+        system-as "65000"
+    }
+    static {
+        route 0.0.0.0/0 {
+            next-hop 192.168.1.1 {
+            }
+        }
+        route 172.23.0.1/32 {
+            reject {
+                distance "254"
+            }
+        }
+    }
+}
+system {
+    config-management {
+        commit-revisions "20"
+    }
+    host-name "multi-router-2"
+    login {
+        user vyos {
+            authentication {
+                encrypted-password "$6$QxPS.uk6mfo$9QBSo8u1FkH16gMyAVhus6fU3LOzvLR9Z9.82m3tiHFAxTtIkhaZSWssSgzt4v4dGAL8rhVQxTg0oAG9/q11h/"
+                plaintext-password ""
+            }
+        }
+    }
+}
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/router-2/scripts/vyos-preconfig-bootup.script
+#!/bin/sh
+# Generated by tkctl for cluster multi. VyOS runs this before it loads config.boot. tkctl
+# renders tkctl.boot; a config.boot without VyOS's own version footer would be migrated at
+# every boot (blocks added, the file rewritten), so the footer is appended here, taken from the
+# default config of the VyOS build that is about to load it.
+cp /opt/vyatta/etc/config/tkctl.boot /opt/vyatta/etc/config/config.boot
+grep '^// ' /opt/vyatta/etc/config.boot.default >> /opt/vyatta/etc/config/config.boot
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/router-2/scripts/vyos-postconfig-bootup.script
+#!/bin/sh
+# Generated by tkctl for cluster multi. podman gives every container on the cluster network a
+# default route to the router; this container is the router, and that route would shadow the
+# static default to the host (VyOS's zebra ranks a kernel route above its own static one).
+ip route del default via 192.168.1.64 2>/dev/null || true
+# When the container stops, netavark deletes exactly that route (gateway, metric 100, proto
+# static) and fails the unit when it is gone. A transient unit puts it back at shutdown; by then
+# nothing routes through here any more.
+# The host bridge sits on the same link as the nodes, so for every packet it forwards the
+# router would send the node an ICMP redirect to the host (ping shows them as errors, and a
+# node that accepted them would bypass the router). VyOS has no CLI knob for this.
+sysctl -qw net.ipv4.conf.all.send_redirects=0 net.ipv4.conf.eth0.send_redirects=0
+systemd-run --quiet --unit=tk8s-podman-route -p RemainAfterExit=yes -p "ExecStop=/usr/sbin/ip route replace default via 192.168.1.64 metric 100 proto static" /bin/true
+
+# ---- tux@192.168.1.231:/etc/containers/systemd/multi/multi-router-2.container
+# Generated by tkctl for cluster multi. Edit cluster.yaml and re-run tkctl instead.
+[Unit]
+Description=tk8s cluster multi router (VyOS at 192.168.1.66: the nodes' gateway and the apiserver load balancer)
+PartOf=multi.target
+
+[Container]
+ContainerName=multi-router-2
+Image=ghcr.io/tarokolabs/tk8s/router:2026.10.07-0712
+# The container's hostname must be the one config.boot sets: VyOS runs sudo at every commit and a
+# hostname it cannot resolve stalls the boot for minutes.
+HostName=multi-router-2
+Network=multi.network
+IP=192.168.1.66
+DNS=1.1.1.1
+DNS=1.0.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
+# tkctl.boot and the bootup scripts, rendered from cluster.yaml; VyOS writes config.boot and its archive here.
+Volume=<TMP>/clusters/multi/router-2:/opt/vyatta/etc/config
+# VyOS wants the network stack and systemd as PID 1 (podman's systemd mode).
+PodmanArgs=--privileged --systemd=always --mac-address 02:54:4b:a8:01:42
+# systemd's shutdown signal; the image sets it too.
+StopSignal=SIGRTMIN+3
+StopTimeout=30
+
+[Service]
+# VyOS's systemd exits 130 on SIGRTMIN+3, like the node image's.
+SuccessExitStatus=130
+Restart=always
+
+[Install]
+WantedBy=multi.target
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/logs/apiserver/audit-policy.yaml
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+  - "RequestReceived"
+rules:
+  - level: Request
+    verbs: ["create","update","patch","delete","watch","get","list","deletecollection"]
+    resources:
+      - group: ""  # core
+        resources: ["pods", "services", "secrets", "configmaps"]
+      - group: "apps"
+        resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
+      - group: "batch"
+        resources: ["jobs", "cronjobs"]
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-control-plane-2/meminfo
+MemTotal: 4194304 kB
+SwapTotal: 0 kB
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-control-plane-2/kubelet-reserved.conf
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+kubeReserved:
+  cpu: 500m
+  memory: 512Mi
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-control-plane-2/kubelet-config-dir.conf
+# tkctl: the kubelet also reads /etc/kubernetes/kubelet.conf.d (kubeReserved)
+[Service]
+Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml --config-dir=/etc/kubernetes/kubelet.conf.d"
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-control-plane-2/sys-node/node0/cpulist
+0-1
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-control-plane-2/sys-node/node0/cpumap
+3
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-control-plane-2/sys-node/node0/distance
+10
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-control-plane-2/sys-node/node0/meminfo
+Node 0 MemTotal: 4194304 kB
+Node 0 MemFree: 4194304 kB
+Node 0 MemUsed: 0 kB
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-control-plane-2/sys-node/node0/hugepages/hugepages-2048kB/nr_hugepages
+0
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-control-plane-2/sys-node/node0/hugepages/hugepages-1048576kB/nr_hugepages
+0
+
+# ---- tux@192.168.1.231:/etc/containers/systemd/multi/multi-control-plane-2.container
+# Generated by tkctl for cluster multi (control-plane). Edit cluster.yaml and re-run tkctl instead.
+[Unit]
+Description=tk8s node multi-control-plane-2 (control-plane) of cluster multi
+PartOf=multi.target
+
+[Container]
+ContainerName=multi-control-plane-2
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
+HostName=multi-control-plane-2
+Network=multi.network
+IP=192.168.1.69
+DNS=1.1.1.1
+DNS=1.0.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
+Environment=TZ=Asia/Taipei
+# api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
+# mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
+# anycast VIP the control planes announce to the router (bgp mode).
+AddHost=api.multi.k8s:172.23.0.1
+Volume=<TMP>/cni:/opt/cni/bin
+Volume=/lib/modules:/lib/modules:ro
+# Quadlet recreates the container on every start (--rm --replace). Everything the node
+# must keep across restarts and reboots lives in named volumes; podman copies the image
+# content into an empty volume on first use.
+Volume=multi-control-plane-2-var:/var:suid,exec,dev,rbind
+Volume=multi-control-plane-2-etc:/etc
+Volume=multi-control-plane-2-usr-local-bin:/usr/local/bin
+# The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
+# reads it as an additional image store, so nothing a create needs is pulled; read-only
+# because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
+Volume=<TMP>/images/1.37.1:/var/lib/containers/shared:ro
+Volume=<TMP>/clusters/multi:/opt/taroko
+Volume=<TMP>/wulin:/opt/taroko/wulin
+Volume=<TMP>/clusters/multi/nodes/multi-control-plane-2/meminfo:/proc/meminfo:ro
+Volume=<TMP>/clusters/multi/nodes/multi-control-plane-2/sys-node:/sys/devices/system/node:ro
+Volume=<TMP>/clusters/multi/nodes/multi-control-plane-2/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
+Volume=<TMP>/clusters/multi/nodes/multi-control-plane-2/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
+StopTimeout=60
+PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:45
+
+[Service]
+# The node image stops with SIGRTMIN+3; systemd inside exits 130 on halt.
+SuccessExitStatus=130 143
+Restart=on-failure
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-worker-2/meminfo
+MemTotal: 4194304 kB
+SwapTotal: 0 kB
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-worker-2/kubelet-reserved.conf
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+kubeReserved:
+  cpu: 500m
+  memory: 512Mi
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-worker-2/kubelet-config-dir.conf
+# tkctl: the kubelet also reads /etc/kubernetes/kubelet.conf.d (kubeReserved)
+[Service]
+Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml --config-dir=/etc/kubernetes/kubelet.conf.d"
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-worker-2/sys-node/node0/cpulist
+0-1
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-worker-2/sys-node/node0/cpumap
+3
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-worker-2/sys-node/node0/distance
+10
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-worker-2/sys-node/node0/meminfo
+Node 0 MemTotal: 4194304 kB
+Node 0 MemFree: 4194304 kB
+Node 0 MemUsed: 0 kB
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-worker-2/sys-node/node0/hugepages/hugepages-2048kB/nr_hugepages
+0
+
+# ---- tux@192.168.1.231:<TMP>/clusters/multi/nodes/multi-worker-2/sys-node/node0/hugepages/hugepages-1048576kB/nr_hugepages
+0
+
+# ---- tux@192.168.1.231:/etc/containers/systemd/multi/multi-worker-2.container
+# Generated by tkctl for cluster multi (worker). Edit cluster.yaml and re-run tkctl instead.
+[Unit]
+Description=tk8s node multi-worker-2 (worker) of cluster multi
+PartOf=multi.target
+
+[Container]
+ContainerName=multi-worker-2
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
+HostName=multi-worker-2
+Network=multi.network
+IP=192.168.1.81
+DNS=1.1.1.1
+DNS=1.0.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
+Environment=TZ=Asia/Taipei
+# api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
+# mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
+# anycast VIP the control planes announce to the router (bgp mode).
+AddHost=api.multi.k8s:172.23.0.1
+Volume=<TMP>/cni:/opt/cni/bin
+Volume=/lib/modules:/lib/modules:ro
+# Quadlet recreates the container on every start (--rm --replace). Everything the node
+# must keep across restarts and reboots lives in named volumes; podman copies the image
+# content into an empty volume on first use.
+Volume=multi-worker-2-var:/var:suid,exec,dev,rbind
+Volume=multi-worker-2-etc:/etc
+Volume=multi-worker-2-usr-local-bin:/usr/local/bin
+# The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
+# reads it as an additional image store, so nothing a create needs is pulled; read-only
+# because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
+Volume=<TMP>/images/1.37.1:/var/lib/containers/shared:ro
+Volume=<TMP>/clusters/multi:/opt/taroko
+Volume=<TMP>/wulin:/opt/taroko/wulin
+Volume=<TMP>/clusters/multi/nodes/multi-worker-2/meminfo:/proc/meminfo:ro
+Volume=<TMP>/clusters/multi/nodes/multi-worker-2/sys-node:/sys/devices/system/node:ro
+Volume=<TMP>/clusters/multi/nodes/multi-worker-2/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
+Volume=<TMP>/clusters/multi/nodes/multi-worker-2/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
+StopTimeout=60
+PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:51
+
+[Service]
+# The node image stops with SIGRTMIN+3; systemd inside exits 130 on halt.
+SuccessExitStatus=130 143
+Restart=on-failure
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+
+# ---- tux@192.168.1.231:/etc/systemd/system/multi.target
+# Generated by tkctl. Start or stop every node of cluster multi together.
+[Unit]
+Description=tk8s cluster multi
+Wants=multi-router-2.service multi-control-plane-2.service multi-worker-2.service
+
+[Install]
+WantedBy=multi-user.target
+
+  $ ssh tux@192.168.1.231 'ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/multi/nodes/multi-control-plane-2/sys-node/node0/cpu0'
+  $ ssh tux@192.168.1.231 'ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/multi/nodes/multi-control-plane-2/sys-node/node0/cpu1'
+  $ ssh tux@192.168.1.231 'ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/multi/nodes/multi-worker-2/sys-node/node0/cpu0'
+  $ ssh tux@192.168.1.231 'ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/multi/nodes/multi-worker-2/sys-node/node0/cpu1'
+# ---- 192.168.1.232:/etc/containers/systemd/multi/multi.network
+# Generated by tkctl for cluster multi: the nodes on the hosts' LAN, macvlan on eth0.
+# Edit cluster.yaml and re-run tkctl instead.
+[Network]
+NetworkName=multi
+Driver=macvlan
+Options=parent=eth0
+Subnet=192.168.1.0/24
+Gateway=192.168.1.1
+# The nodes' default route is the cluster's router (its address floats between the routers on
+# the LAN), not the LAN gateway. no_default_route keeps netavark from adding the gateway too.
+Options=no_default_route=1
+PodmanArgs=--route 0.0.0.0/0,192.168.1.64
+# No resolvers here: netavark serves no DNS on a macvlan network and refuses the setting; the
+# containers carry their own resolvers (set in each .container).
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/logs/apiserver/audit-policy.yaml
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+  - "RequestReceived"
+rules:
+  - level: Request
+    verbs: ["create","update","patch","delete","watch","get","list","deletecollection"]
+    resources:
+      - group: ""  # core
+        resources: ["pods", "services", "secrets", "configmaps"]
+      - group: "apps"
+        resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
+      - group: "batch"
+        resources: ["jobs", "cronjobs"]
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-control-plane-3/meminfo
+MemTotal: 4194304 kB
+SwapTotal: 0 kB
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-control-plane-3/kubelet-reserved.conf
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+kubeReserved:
+  cpu: 500m
+  memory: 512Mi
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-control-plane-3/kubelet-config-dir.conf
+# tkctl: the kubelet also reads /etc/kubernetes/kubelet.conf.d (kubeReserved)
+[Service]
+Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml --config-dir=/etc/kubernetes/kubelet.conf.d"
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-control-plane-3/sys-node/node0/cpulist
+0-1
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-control-plane-3/sys-node/node0/cpumap
+3
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-control-plane-3/sys-node/node0/distance
+10
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-control-plane-3/sys-node/node0/meminfo
+Node 0 MemTotal: 4194304 kB
+Node 0 MemFree: 4194304 kB
+Node 0 MemUsed: 0 kB
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-control-plane-3/sys-node/node0/hugepages/hugepages-2048kB/nr_hugepages
+0
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-control-plane-3/sys-node/node0/hugepages/hugepages-1048576kB/nr_hugepages
+0
+
+# ---- 192.168.1.232:/etc/containers/systemd/multi/multi-control-plane-3.container
+# Generated by tkctl for cluster multi (control-plane). Edit cluster.yaml and re-run tkctl instead.
+[Unit]
+Description=tk8s node multi-control-plane-3 (control-plane) of cluster multi
+PartOf=multi.target
+
+[Container]
+ContainerName=multi-control-plane-3
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
+HostName=multi-control-plane-3
+Network=multi.network
+IP=192.168.1.70
+DNS=1.1.1.1
+DNS=1.0.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
+Environment=TZ=Asia/Taipei
+# api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
+# mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
+# anycast VIP the control planes announce to the router (bgp mode).
+AddHost=api.multi.k8s:172.23.0.1
+Volume=<TMP>/cni:/opt/cni/bin
+Volume=/lib/modules:/lib/modules:ro
+# Quadlet recreates the container on every start (--rm --replace). Everything the node
+# must keep across restarts and reboots lives in named volumes; podman copies the image
+# content into an empty volume on first use.
+Volume=multi-control-plane-3-var:/var:suid,exec,dev,rbind
+Volume=multi-control-plane-3-etc:/etc
+Volume=multi-control-plane-3-usr-local-bin:/usr/local/bin
+# The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
+# reads it as an additional image store, so nothing a create needs is pulled; read-only
+# because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
+Volume=<TMP>/images/1.37.1:/var/lib/containers/shared:ro
+Volume=<TMP>/clusters/multi:/opt/taroko
+Volume=<TMP>/wulin:/opt/taroko/wulin
+Volume=<TMP>/clusters/multi/nodes/multi-control-plane-3/meminfo:/proc/meminfo:ro
+Volume=<TMP>/clusters/multi/nodes/multi-control-plane-3/sys-node:/sys/devices/system/node:ro
+Volume=<TMP>/clusters/multi/nodes/multi-control-plane-3/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
+Volume=<TMP>/clusters/multi/nodes/multi-control-plane-3/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
+StopTimeout=60
+PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:46
+
+[Service]
+# The node image stops with SIGRTMIN+3; systemd inside exits 130 on halt.
+SuccessExitStatus=130 143
+Restart=on-failure
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-worker-3/meminfo
+MemTotal: 4194304 kB
+SwapTotal: 0 kB
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-worker-3/kubelet-reserved.conf
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+kubeReserved:
+  cpu: 500m
+  memory: 512Mi
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-worker-3/kubelet-config-dir.conf
+# tkctl: the kubelet also reads /etc/kubernetes/kubelet.conf.d (kubeReserved)
+[Service]
+Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml --config-dir=/etc/kubernetes/kubelet.conf.d"
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-worker-3/sys-node/node0/cpulist
+0-1
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-worker-3/sys-node/node0/cpumap
+3
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-worker-3/sys-node/node0/distance
+10
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-worker-3/sys-node/node0/meminfo
+Node 0 MemTotal: 4194304 kB
+Node 0 MemFree: 4194304 kB
+Node 0 MemUsed: 0 kB
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-worker-3/sys-node/node0/hugepages/hugepages-2048kB/nr_hugepages
+0
+
+# ---- 192.168.1.232:<TMP>/clusters/multi/nodes/multi-worker-3/sys-node/node0/hugepages/hugepages-1048576kB/nr_hugepages
+0
+
+# ---- 192.168.1.232:/etc/containers/systemd/multi/multi-worker-3.container
+# Generated by tkctl for cluster multi (worker). Edit cluster.yaml and re-run tkctl instead.
+[Unit]
+Description=tk8s node multi-worker-3 (worker) of cluster multi
+PartOf=multi.target
+
+[Container]
+ContainerName=multi-worker-3
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
+HostName=multi-worker-3
+Network=multi.network
+IP=192.168.1.82
+DNS=1.1.1.1
+DNS=1.0.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
+Environment=TZ=Asia/Taipei
+# api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
+# mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
+# anycast VIP the control planes announce to the router (bgp mode).
+AddHost=api.multi.k8s:172.23.0.1
+Volume=<TMP>/cni:/opt/cni/bin
+Volume=/lib/modules:/lib/modules:ro
+# Quadlet recreates the container on every start (--rm --replace). Everything the node
+# must keep across restarts and reboots lives in named volumes; podman copies the image
+# content into an empty volume on first use.
+Volume=multi-worker-3-var:/var:suid,exec,dev,rbind
+Volume=multi-worker-3-etc:/etc
+Volume=multi-worker-3-usr-local-bin:/usr/local/bin
+# The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
+# reads it as an additional image store, so nothing a create needs is pulled; read-only
+# because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
+Volume=<TMP>/images/1.37.1:/var/lib/containers/shared:ro
+Volume=<TMP>/clusters/multi:/opt/taroko
+Volume=<TMP>/wulin:/opt/taroko/wulin
+Volume=<TMP>/clusters/multi/nodes/multi-worker-3/meminfo:/proc/meminfo:ro
+Volume=<TMP>/clusters/multi/nodes/multi-worker-3/sys-node:/sys/devices/system/node:ro
+Volume=<TMP>/clusters/multi/nodes/multi-worker-3/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
+Volume=<TMP>/clusters/multi/nodes/multi-worker-3/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
+StopTimeout=60
+PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:52
+
+[Service]
+# The node image stops with SIGRTMIN+3; systemd inside exits 130 on halt.
+SuccessExitStatus=130 143
+Restart=on-failure
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+
+# ---- 192.168.1.232:/etc/systemd/system/multi.target
+# Generated by tkctl. Start or stop every node of cluster multi together.
+[Unit]
+Description=tk8s cluster multi
+Wants=multi-control-plane-3.service multi-worker-3.service
+
+[Install]
+WantedBy=multi-user.target
+
+  $ ssh 192.168.1.232 'ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/multi/nodes/multi-control-plane-3/sys-node/node0/cpu0'
+  $ ssh 192.168.1.232 'ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/multi/nodes/multi-control-plane-3/sys-node/node0/cpu1'
+  $ ssh 192.168.1.232 'ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/multi/nodes/multi-worker-3/sys-node/node0/cpu0'
+  $ ssh 192.168.1.232 'ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/multi/nodes/multi-worker-3/sys-node/node0/cpu1'
+
+[kubeadm/render] write the kubeadm init configuration into the state dir
+# ---- <TMP>/clusters/multi/init-config.yaml
+# Generated by tkctl for cluster multi.
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: 192.168.1.68
+  bindPort: 6443
+nodeRegistration:
+  criSocket: unix:///var/run/crio/crio.sock
+  imagePullPolicy: IfNotPresent
+  name: multi-control-plane-1
+  taints: null
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+clusterName: multi
+kubernetesVersion: 1.37.1
+controlPlaneEndpoint: "api.multi.k8s:6443"
+networking:
+  dnsDomain: multi.k8s
+  podSubnet: 10.244.0.0/21
+  serviceSubnet: 10.98.0.0/24
+apiServer:
+  certSANs:
+    - api.multi.k8s
+    - 192.168.1.64
+    - 172.23.0.1
+    - 192.168.1.68
+    - 192.168.1.69
+    - 192.168.1.70
+  extraArgs:
+    - name: audit-log-format
+      value: legacy
+    - name: audit-policy-file
+      value: /opt/taroko/logs/apiserver/audit-policy.yaml
+    - name: audit-log-path
+      value: /opt/taroko/logs/apiserver/audit.log
+    - name: audit-log-maxage
+      value: "3"
+    - name: audit-log-maxbackup
+      value: "5"
+    - name: audit-log-maxsize
+      value: "10"
+  extraVolumes:
+    - name: audit-logs
+      hostPath: /opt/taroko
+      mountPath: /opt/taroko
+      readOnly: false
+      pathType: DirectoryOrCreate
+    - name: host-localtime
+      hostPath: /etc/localtime
+      mountPath: /etc/localtime
+      readOnly: true
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+evictionHard:
+  memory.available: "500Mi"
+  nodefs.available: "5%"
+  imagefs.available: "5%"
+evictionSoft:
+  memory.available: "500Mi"
+  nodefs.available: "5%"
+evictionSoftGracePeriod:
+  memory.available: "1m30s"
+  nodefs.available: "1m30s"
+
+# ---- <TMP>/clusters/multi/logs/apiserver/audit-policy.yaml
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+  - "RequestReceived"
+rules:
+  - level: Request
+    verbs: ["create","update","patch","delete","watch","get","list","deletecollection"]
+    resources:
+      - group: ""  # core
+        resources: ["pods", "services", "secrets", "configmaps"]
+      - group: "apps"
+        resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
+      - group: "batch"
+        resources: ["jobs", "cronjobs"]
+
+

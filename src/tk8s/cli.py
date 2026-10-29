@@ -13,6 +13,7 @@ from .args import UsageError, add_create_flags
 from .create.plan import PlanError
 from .datatree import PreflightError
 from .host import HostError
+from .hosts import HostsError
 from .phases import PhaseFailed, tk8s_version
 from .verbs import (
     HOME,
@@ -28,7 +29,7 @@ from .verbs import (
 )
 
 USAGE = """\
-tkctl: create and manage tk8s Kubernetes clusters on a single podman host.
+tkctl: create and manage tk8s Kubernetes clusters on one podman host or several (--hosts).
 
 Usage:
   tkctl create cluster [NAME] [flags]
@@ -40,7 +41,8 @@ Usage:
   tkctl start cluster NAME
   tkctl use cluster NAME
   tkctl verify cluster NAME [--phase P] [--list-phases]
-  tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] [--no-join]
+  tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] [--host NAME]
+                         [--no-join]
   tkctl delete node CLUSTER NODE [--yes] [--phase P] [--list-phases]
   tkctl join node CLUSTER NODE
   tkctl pull images [--k8s VERSION] [--refresh]
@@ -62,6 +64,13 @@ Create flags:
                          join later with: tkctl join node CLUSTER NODE
   --routers N            router containers: 1 (default) or 2 (VRRP between them, the nodes'
                          gateway .253 floats; stop one with systemctl stop NAME-router-1.service)
+  --hosts LIST           spread the nodes over several hosts on one LAN (macvlan): a comma list
+                         of [name=][user@]host[:port]; `local` (or name=local) is this host.
+                         Control planes, workers and routers go round-robin; needs --ip-range
+  --ip-range POOL        addresses reserved for the cluster on the hosts' LAN: A-B segments,
+                         comma-separated, the end may be a last octet (192.168.1.64-70,
+                         192.168.1.80-89); router, nodes, the operator's shim, the last 5 as
+                         the LoadBalancer pool
   --preset NAME          a named topology, printed expanded under [plan]; cannot be combined
                          with --control-planes/--workers/--ha/--routers/--defer-join/-f:
                            lab   --control-planes 1 --workers 2 --ha proxy --routers 1
@@ -186,6 +195,7 @@ def build_parser() -> argparse.ArgumentParser:
     an.add_argument("--role")
     an.add_argument("--cpu", type=int)
     an.add_argument("--memory")
+    an.add_argument("--host")
     an.add_argument("--no-join", action="store_true")
     jn = (
         sub.add_parser("join", add_help=False)
@@ -228,6 +238,7 @@ def main(argv: list[str] | None = None) -> int:
         PhaseFailed,
         images.ImagesError,
         HostError,
+        HostsError,
         PreflightError,
         verify.VerifyError,
         lifecycle.ClusterError,
@@ -249,7 +260,7 @@ def _usage_of(verb: str) -> str:
         "start": "usage: tkctl start cluster NAME",
         "use": "usage: tkctl use cluster NAME",
         "add": "usage: tkctl add node CLUSTER --role worker|control-plane "
-        "[--cpu N] [--memory SIZE] [--no-join]",
+        "[--cpu N] [--memory SIZE] [--host NAME] [--no-join]",
         "join": "usage: tkctl join node CLUSTER NODE",
     }[verb]
 

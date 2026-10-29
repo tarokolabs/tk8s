@@ -5,7 +5,7 @@ import argparse
 import os
 from pathlib import Path
 
-from . import delete, images, lifecycle, model, verify, versions
+from . import delete, hosts, images, lifecycle, model, verify, versions
 from .args import (
     UsageError,
     apply_preset,
@@ -17,7 +17,7 @@ from .args import (
     validate_node_name,
 )
 from .create import DRY_RUN_PHASES, PHASES
-from .create.plan import load_existing, resolve, used_indices
+from .create.plan import load_existing, parse_range, resolve, used_indices, used_indices_on
 from .host import DryRunHost, Host
 from .node import add as node_add
 from .node import common as node_common
@@ -39,7 +39,16 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
         validate_k8s(a.k8s)
     if a.gvisor and a.datapath is None:
         a.datapath = "veth"
-    flags = ("--control-planes", "--workers", "--cpu", "--memory", "--ha", "--routers")
+    flags = (
+        "--control-planes",
+        "--workers",
+        "--cpu",
+        "--memory",
+        "--ha",
+        "--routers",
+        "--hosts",
+        "--ip-range",
+    )
     topo = any(a == f or a.startswith(f + "=") for a in raw for f in flags)  # --ha bgp, --ha=bgp
     preset = apply_preset(a, raw)
     user = user_cluster_from_file(a, topo) if a.file else user_cluster_from_flags(a)
@@ -55,13 +64,35 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
         )
     if existing is not None and existing.status is not None and existing.status.phase == "Ready":
         raise UsageError(f"cluster {name} already exists; delete it first or pick another name")
+    lans, operator = None, None
+    if user.spec.hosts is not None:
+        ctx.hosts = hosts.build(
+            ctx.host, user.spec.hosts, say=print, quiet=a.quiet, dry_run=a.dry_run
+        )
+        if a.dry_run:
+            assert user.spec.network is not None and user.spec.network.range is not None
+            lan = hosts.dry_run_lan(parse_range(user.spec.network.range)[0])
+            lans = {h.name: lan for h in user.spec.hosts}
+            operator = "dry-run"
+        else:
+            lans = {}
+            for h in user.spec.hosts:
+                hosts.check_reachable(ctx.hosts[h.name], h.name)
+                lans[h.name] = hosts.lan_facts(ctx.hosts[h.name], h.name)
+            operator = hosts.local_hostname(ctx.host)
+    used = used_indices(ctx.paths)
+    for remote in ctx.hosts.values():
+        if remote is not ctx.host and not a.dry_run:
+            used |= used_indices_on(remote, ctx.paths)
     ctx.cluster = resolve(
         user,
         k8s_default=ctx.versions.kubernetes.default,
         existing=existing,
-        used_indices=used_indices(ctx.paths),
+        used_indices=used,
         allow_overlap=a.allow_overlap,
         tk8s_version=tk8s_version(HOME),
+        lans=lans,
+        operator=operator,
     )
     phases = DRY_RUN_PHASES if a.dry_run else PHASES
     skip = {s for s in a.skip_phases.split(",") if s}
@@ -78,8 +109,7 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
         return 0
     if c.status is not None and c.status.phase != "Ready":
         status = c.status.model_copy(update={"phase": "Ready"})
-        ctx.cluster = c.model_copy(update={"status": status})
-        ctx.host.write(ctx.state_dir / "cluster.yaml", model.dumps(ctx.cluster))
+        ctx.save_cluster(c.model_copy(update={"status": status}))
     print()
     print(f"cluster {c.name} is ready")
     print(f"  kubeconfig: {ctx.state_dir}/kubeconfig   (tkctl use cluster {c.name})")
@@ -147,7 +177,7 @@ def cmd_delete_cluster(a: argparse.Namespace) -> int:
     ctx.name = name
     try:
         lifecycle.load_cluster(ctx, name)
-    except lifecycle.ClusterError:
+    except lifecycle.ClusterNotFound:
         pass  # no cluster.yaml: delete what the units and podman still know
     except model.ClusterFileError as err:
         print(f"  {err}; deleting what the units and podman still know")
@@ -183,7 +213,7 @@ def cmd_add_node(a: argparse.Namespace) -> int:
     if not a.cluster:
         raise UsageError(
             "usage: tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] "
-            "[--no-join]"
+            "[--host NAME] [--no-join]"
         )
     if a.role not in ("worker", "control-plane"):
         raise UsageError("--role must be worker or control-plane")
@@ -192,7 +222,7 @@ def cmd_add_node(a: argparse.Namespace) -> int:
     memory = normalize_memory(a.memory) if a.memory else None
     ctx = make_context()
     c = running_cluster(ctx, a.cluster)
-    ctx.request = model.NodeRequest(role=a.role, cpu=a.cpu, memory=memory)
+    ctx.request = model.NodeRequest(role=a.role, cpu=a.cpu, memory=memory, host=a.host)
     Runner([node_add.add_phase(join=not a.no_join)], record=False).run(ctx)
     print()
     if a.no_join:

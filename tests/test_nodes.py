@@ -7,6 +7,7 @@ from tests.fixtures import (
     argvs,
     bgp_router_answers,
     running_cluster_answers,
+    running_multi_answers,
 )
 from tk8s.create import nodes
 from tk8s.host import FakeHost, Result
@@ -128,3 +129,82 @@ def test_up_in_bgp_mode_is_done_once_the_router_lists_every_peer(
     assert nodes.up_done(bgp_ctx)
     host.responses[VTYSH_SUMMARY] = Result(0, "{}", "")
     assert not nodes.up_done(bgp_ctx)
+
+
+# ---- several hosts
+
+
+def test_multi_host_cni_plugins_land_on_every_host(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    hosts["a"].files[ctx.paths.cni_dir / "bridge"] = "elf"
+    assert not nodes.cni_plugins_done(ctx)  # b and c have none yet
+    nodes.cni_plugins_run(ctx)
+    for name in ("b", "c"):
+        assert any(c.argv[0] == "curl" for c in hosts[name].calls), name
+        hosts[name].files[ctx.paths.cni_dir / "bridge"] = "elf"
+    assert not any(c.argv[0] == "curl" for c in hosts["a"].calls)  # a already had them
+    assert nodes.cni_plugins_done(ctx)
+
+
+def test_multi_host_up_starts_every_hosts_target_and_waits(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    running_multi_answers(hosts, ctx)
+    for h in hosts.values():
+        h.active.discard("demo.target")
+    assert not nodes.up_done(ctx)
+    nodes.up_run(ctx)
+    for name, h in hosts.items():
+        a = argvs(h)
+        assert ["systemctl", "enable", "--now", "--quiet", "demo.target"] in a, name
+        assert ["systemctl", "daemon-reload"] in a, name
+        assert ["mkdir", str(ctx.state_dir / "storage")] in a, name
+        assert ["mkdir", str(ctx.state_dir / "logs")] in a, name
+    assert ["podman", "exec", "demo-control-plane-3", "systemctl", "is-system-running"] in argvs(
+        hosts["c"]
+    )
+    assert "  demo-router-2: VyOS up, 3 control plane peer(s) at 192.168.1.66" in hosts["a"].lines
+    assert nodes.up_done(ctx)
+    hosts["b"].active.discard("demo.target")
+    assert not nodes.up_done(ctx)
+
+
+def test_multi_host_stale_volumes_are_removed_on_the_nodes_host(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    running_multi_answers(hosts, ctx)
+    for h in hosts.values():
+        h.responses[("podman", "container", "exists")] = Result(1, "", "")
+        h.responses[("podman", "volume", "exists")] = Result(1, "", "")
+    hosts["b"].responses = {  # the specific prefix before the general one
+        ("podman", "volume", "exists", "demo-worker-2-var"): Result(0, "", ""),
+        **hosts["b"].responses,
+    }
+    nodes.up_run(ctx)
+    assert ["podman", "volume", "rm", "-f", "demo-worker-2-var"] in argvs(hosts["b"])
+    assert not any(c.argv[:3] == ["podman", "volume", "rm"] for c in hosts["a"].calls)
+
+
+def test_multi_host_up_starts_the_target_of_an_operator_that_runs_no_node(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    op = FakeHost()
+    ctx.host = op
+    running_multi_answers(hosts, ctx)
+    op.responses[("id", "-u")] = Result(0, "1000\n", "")
+    op.responses[("id", "-g")] = Result(0, "1000\n", "")
+    for h in (*hosts.values(), op):
+        h.active.discard("demo.target")
+    nodes.up_run(ctx)
+    a = argvs(op)
+    assert ["systemctl", "daemon-reload"] in a
+    assert ["systemctl", "enable", "--now", "--quiet", "demo.target"] in a
+    assert not any(x[:3] == ["podman", "volume", "exists"] for x in a)  # no node here
+    assert nodes.up_done(ctx)
+    op.active.discard("demo.target")
+    assert not nodes.up_done(ctx)

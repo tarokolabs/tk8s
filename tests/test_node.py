@@ -652,3 +652,150 @@ def test_add_node_on_an_old_cluster_leaves_every_existing_unit_byte_identical(
     new = host.files[unit_dir / "demo-worker-3.container"]
     assert "/proc/meminfo" not in new and "kubelet.conf.d" not in new
     assert not any("/nodes/demo-worker-3/" in str(p) for p in host.files)
+
+
+# ---- several hosts
+
+from tests.fixtures import running_multi_answers  # noqa: E402
+
+
+def multi_node_ctx(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> tuple[Context, dict[str, FakeHost]]:
+    """The MULTI_YAML cluster Ready and running on its three hosts; a node verb starts there."""
+    ctx, hosts = multi_ctx
+    c = ctx.require_cluster()
+    assert c.status is not None
+    c = c.model_copy(update={"status": c.status.model_copy(update={"phase": "Ready"})})
+    ctx.cluster = c
+    ctx.save_cluster(c)
+    units.run(ctx)
+    running_multi_answers(hosts, ctx)
+    for n in c.spec.nodes:
+        h = hosts[n.host or "a"]
+        h.podman.add(f"container:{n.name}")
+        h.podman.update(f"volume:{v}" for v in node_volumes(n.name))
+        h.active.add(f"{n.name}.service")
+    hosts["a"].responses[("curl", "-sk", "--max-time", "3")] = Result(0, "ok", "")
+    hosts["a"].responses[("kubectl", "get", "--raw", "/readyz")] = Result(0, "ok", "")
+    hosts["a"].responses[("podman", "run", "--rm", "--entrypoint", "kubeadm")] = Result(
+        0, f"registry.k8s.io/kube-apiserver:v{c.spec.kubernetes}\n", ""
+    )
+    hosts["a"].responses[("cilium", "install")] = Result(
+        0, '      image: "quay.io/cilium/cilium:v1@sha256:a"\n', ""
+    )
+    return ctx, hosts
+
+
+def test_add_node_defaults_to_the_least_loaded_host_and_the_next_free_address(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, _ = multi_node_ctx(multi_ctx)
+    c = ctx.require_cluster()  # a: 2 nodes, b: 2, c: 1
+    n = node_common.plan_add(c, model.NodeRequest(role="worker"))
+    assert (n.name, n.host, str(n.ip)) == ("demo-worker-3", "c", "192.168.1.82")
+    n = node_common.plan_add(c, model.NodeRequest(role="worker", host="a"))
+    assert n.host == "a"
+    full = node_common.with_node(c, n)
+    with pytest.raises(
+        lifecycle.ClusterError,
+        match=r"no free node address left in 192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.89 "
+        r"\(the last 5 are the LoadBalancer pool\)",
+    ):
+        node_common.next_ip(
+            node_common.with_node(
+                node_common.with_node(
+                    full,
+                    n.model_copy(
+                        update={"name": "demo-worker-5", "ip": IPv4Address("192.168.1.83")}
+                    ),
+                ),
+                n.model_copy(update={"name": "demo-worker-6", "ip": IPv4Address("192.168.1.84")}),
+            )
+        )
+
+
+def test_add_node_host_unknown_or_on_single_host_is_refused(
+    multi_ctx: tuple[Context, dict[str, FakeHost]], tmp_path: Path
+) -> None:
+    ctx, _ = multi_node_ctx(multi_ctx)
+    with pytest.raises(
+        lifecycle.ClusterError, match=r"host zz is not in cluster demo \(hosts: a, b, c\)"
+    ):
+        node_common.plan_add(ctx.require_cluster(), model.NodeRequest(role="worker", host="zz"))
+    single, _ = node_ctx(tmp_path)
+    with pytest.raises(lifecycle.ClusterError, match="--host only applies to a multi-host cluster"):
+        node_common.plan_add(single.require_cluster(), model.NodeRequest(role="worker", host="a"))
+
+
+def test_add_node_with_host_runs_units_and_start_there(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_node_ctx(multi_ctx)
+    new_node_answers(hosts["a"], "demo-worker-3", ready_after=1)
+    hosts["c"].responses[("podman", "exec", "demo-worker-3", "systemctl", "is-system-running")] = (
+        Result(0, "running\n", "")
+    )
+    hosts["c"].responses[("nproc",)] = Result(0, "8\n", "")
+    hosts["c"].files[Path("/proc/meminfo")] = "MemTotal:       32873260 kB\n"
+    ctx.request = model.NodeRequest(role="worker", host="c")
+    Runner([node_add.add_phase(join=False)], record=False).run(ctx)
+    assert ctx.node == "demo-worker-3"
+    unit = ctx.paths.unit_dir / "demo" / "demo-worker-3.container"
+    assert unit in hosts["c"].files and unit not in hosts["a"].files
+    assert "IP=192.168.1.82" in hosts["c"].files[unit]
+    assert "--mac-address 02:54:4b:a8:01:52" in hosts["c"].files[unit]
+    assert "demo-worker-3.service" in hosts["c"].files[ctx.paths.systemd_dir / "demo.target"]
+    a = argvs(hosts["c"])
+    assert a.index(["systemctl", "daemon-reload"]) < a.index(
+        ["systemctl", "start", "demo-worker-3.service"]
+    )
+    assert ["systemctl", "start", "demo-worker-3.service"] not in argvs(hosts["a"])
+    for h in hosts.values():
+        saved = model.load_text(h.files[ctx.state_dir / "cluster.yaml"])
+        assert saved.spec.nodes[-1].host == "c"
+    assert "  demo-worker-3: worker at 192.168.1.82 on c, 2 cpu, 4g" in hosts["a"].lines
+
+
+def test_add_node_refuses_a_node_bigger_than_its_host(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_node_ctx(multi_ctx)
+    hosts["c"].responses[("nproc",)] = Result(0, "2\n", "")
+    hosts["c"].files[Path("/proc/meminfo")] = "MemTotal:       32873260 kB\n"
+    before = hosts["a"].files[ctx.state_dir / "cluster.yaml"]
+    ctx.request = model.NodeRequest(role="worker", host="c", cpu=4)
+    with pytest.raises(PhaseFailed, match="node demo-worker-3 asks for 4 cpu, the host has 2"):
+        node_add.plan_run(ctx)
+    assert hosts["a"].files[ctx.state_dir / "cluster.yaml"] == before
+
+
+def test_delete_node_removes_container_volumes_unit_and_dir_on_its_host(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_node_ctx(multi_ctx)
+    hosts["a"].responses = {
+        ("kubectl", "get", "node", "demo-worker-2"): [
+            Result(0, "demo-worker-2", ""),
+            Result(1, "", "not found"),
+        ],
+        **hosts["a"].responses,
+    }
+    d = ctx.state_dir / "nodes" / "demo-worker-2"
+    ctx.node = "demo-worker-2"
+    Runner([node_delete.PHASE], record=False).run(ctx)
+    b = argvs(hosts["b"])
+    assert ["systemctl", "stop", "demo-worker-2.service"] in b
+    assert ["podman", "rm", "-f", "demo-worker-2"] in b
+    assert ["podman", "volume", "rm", "-f", "demo-worker-2-var"] in b
+    unit = ctx.paths.unit_dir / "demo" / "demo-worker-2.container"
+    assert ["rm", "-f", str(unit)] in b and ["rm", "-rf", str(d)] in b
+    assert ["systemctl", "daemon-reload"] in b
+    assert not any(
+        x[:2] in (["podman", "rm"], ["rm", "-f"], ["rm", "-rf"]) for x in argvs(hosts["a"])
+    )
+    assert "demo-worker-2.service" not in hosts["b"].files[ctx.paths.systemd_dir / "demo.target"]
+    assert "container:demo-worker-2" not in hosts["b"].podman
+    for h in hosts.values():
+        saved = model.load_text(h.files[ctx.state_dir / "cluster.yaml"])
+        assert "demo-worker-2" not in [n.name for n in saved.spec.nodes]

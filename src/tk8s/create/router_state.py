@@ -11,7 +11,7 @@ OP = "/opt/vyatta/bin/vyatta-op-cmd-wrapper"
 def running(ctx: Context, r: model.Router) -> bool:
     """podman's own word: a stopped router (systemctl stop) is not reloaded and not waited for;
     `podman container exists` is not enough, a stopped container exists too."""
-    res = ctx.host.run(
+    res = ctx.host_for(r.name).run(
         ["podman", "container", "inspect", "--format", "{{.State.Running}}", r.name],
         sudo=True,
         capture=True,

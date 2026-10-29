@@ -1,6 +1,6 @@
 ${vrrp}interfaces {
     ethernet eth0 {
-        address "$router_ip/24"
+        address "$router_ip/$prefix"
     }
     loopback lo {
     }

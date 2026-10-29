@@ -40,6 +40,7 @@ def test_release_notes_from_versions_and_digests(tmp_path: Path) -> None:
         f"{d}、{p}",
         f"uv {v.uv}",
         "kubeReserved 500m",  # the node sizing row
+        "--hosts",  # the multi-host row
         "1500m／3084Mi",  # noqa: RUF001 (the notes are in Chinese typography)
     ):
         assert s in out, s

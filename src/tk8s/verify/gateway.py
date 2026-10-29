@@ -92,7 +92,13 @@ def check_xff(r: Report) -> None:
         capture=True,
         check=False,
     ).stdout
-    host_ip = str(c.spec.network.gateway)  # the host's address on the node network
+    if c.multi_host:  # whatever the operator sends from towards the LB address (shim or LAN)
+        route = r.ctx.host.run(
+            ["ip", "-4", "route", "get", r.gateway_ip], capture=True, check=False
+        ).stdout.split()
+        host_ip = route[route.index("src") + 1] if "src" in route else "?"
+    else:
+        host_ip = str(c.spec.network.gateway)  # the host's address on the node network
     if xff == host_ip:
         r.ok(f"X-Forwarded-For carries the client IP ({xff})")
     else:

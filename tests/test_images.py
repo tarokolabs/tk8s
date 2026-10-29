@@ -37,11 +37,13 @@ def sources(host: FakeHost) -> None:
 
 
 def store_pulls(host: FakeHost) -> list[str]:
-    return [
-        c.argv[-1]
-        for c in host.calls
-        if c.argv[:3] == ["podman", "pull", "-q"] and "CONTAINERS_STORAGE_CONF" in c.env
-    ]
+    """The images pulled into the store (a remote host's pulls run under flock)."""
+    out = []
+    for c in host.calls:
+        argv = c.argv[c.argv.index("podman") :] if "podman" in c.argv else c.argv
+        if argv[:3] == ["podman", "pull", "-q"] and "CONTAINERS_STORAGE_CONF" in c.env:
+            out.append(argv[-1])
+    return out
 
 
 def test_wanted_is_derived_sorted_and_unique(ctx: Context, host: FakeHost) -> None:
@@ -371,3 +373,63 @@ def test_images_phase_is_not_done_without_the_cilium_cli(ctx: Context, host: Fak
     host.files[images.conf_path(ctx.paths, K8S)] = images.storage_conf(ctx.paths, K8S)
     host.responses[("cilium", "version", "--client")] = MISSING
     assert not images_phase.done(ctx)
+
+
+def test_multi_host_images_phase_fills_every_hosts_store_from_one_list(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    sources(hosts["a"])  # the image list is computed once, on the operator
+    for h in hosts.values():
+        h.responses[("id", "-u")] = Result(0, "1000\n", "")
+        h.responses[("id", "-g")] = Result(0, "1000\n", "")
+        h.responses[("podman", "image", "exists")] = MISSING
+    assert not images_phase.done(ctx)
+    images_phase.run(ctx)
+    for name, h in hosts.items():
+        assert len(store_pulls(h)) == 15, name
+        assert ["podman", "pull", NODE] in [c.argv for c in h.calls], name
+        assert any(c.argv[:2] == ["mkdir", str(ctx.paths.images_dir / K8S)] for c in h.calls)
+    # the list is computed on the operator only; the cilium CLI is installed there only
+    for name in ("b", "c"):
+        assert not any(c.argv[:1] in (["curl"], ["cilium"]) for c in hosts[name].calls), name
+        assert not any(c.argv[:3] == ["podman", "run", "--rm"] for c in hosts[name].calls), name
+    assert "  host b:" in hosts["a"].lines and "  host c:" in hosts["a"].lines
+    for h in hosts.values():  # once everything is there, the phase is done
+        h.responses[("podman", "image", "exists")] = PRESENT
+        h.dirs.add(images.store_dir(ctx.paths, K8S))
+        h.files[images.conf_path(ctx.paths, K8S)] = images.storage_conf(ctx.paths, K8S)
+    assert images_phase.done(ctx)
+
+
+def test_multi_host_images_phase_is_done_only_when_every_host_has_everything(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    sources(hosts["a"])
+    for h in hosts.values():
+        h.dirs.add(images.store_dir(ctx.paths, K8S))
+        h.files[images.conf_path(ctx.paths, K8S)] = images.storage_conf(ctx.paths, K8S)
+    assert images_phase.done(ctx)
+    hosts["c"].responses[("podman", "image", "exists", "registry.k8s.io/pause:3.10.2")] = MISSING
+    assert not images_phase.done(ctx)
+
+
+def test_a_remote_hosts_pulls_take_the_stores_lock_there(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    """The operator's flock cannot exclude a `tkctl pull images` run on the remote host: the
+    remote pulls run under flock on the remote lock file instead."""
+    ctx, hosts = multi_ctx
+    sources(hosts["a"])
+    remote = hosts["b"]
+    remote.responses[("id", "-u")] = Result(0, "1000\n", "")
+    remote.responses[("id", "-g")] = Result(0, "1000\n", "")
+    remote.responses[("podman", "image", "exists")] = MISSING
+    want = images.wanted(ctx, K8S)
+    assert not remote.local and hosts["a"].local
+    images.ensure(ctx.on(remote), K8S, images=want, cli=False)
+    lock = str(ctx.paths.images_dir / f"{K8S}.lock")
+    pulls = [c.argv for c in remote.calls if "pull" in c.argv and "-q" in c.argv]
+    assert pulls and all(a[:5] == ["flock", "-w", "600", lock, "podman"] for a in pulls)
+    assert not any(c.argv[:1] == ["flock"] for c in hosts["a"].calls)

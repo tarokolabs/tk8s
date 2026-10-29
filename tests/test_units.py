@@ -335,3 +335,181 @@ def test_a_cluster_without_status_renders_todays_units_too(ctx: Context) -> None
     files = units.render(ctx, none)
     assert not any("/nodes/" in str(p) for p in files) and units.links(ctx, none) == {}
     assert files == units.render(ctx, old_cluster(ctx))
+
+
+# ---- several hosts: each gets its own files
+
+UNIT_DIR = Path("/etc/containers/systemd/demo")
+SYSTEMD = Path("/etc/systemd/system")
+
+
+def test_mac_and_shim_name_are_derived_from_the_address_and_the_cluster() -> None:
+    from ipaddress import IPv4Address
+
+    assert units.mac(IPv4Address("192.168.1.70")) == "02:54:4b:a8:01:46"
+    assert units.shim_name("demo") == "tk8s-demo"
+    long = units.shim_name("a-very-long-name")
+    assert (
+        len(long) <= 15
+        and long.startswith("tk8s-a-very-")
+        and long != units.shim_name("a-very-long-namf")
+    )
+    assert [str(p) for p in units.range_prefixes("192.168.1.64-192.168.1.95")] == [
+        "192.168.1.64/27"
+    ]
+    assert [str(p) for p in units.range_prefixes("192.168.1.65-192.168.1.68,192.168.1.90")] == [
+        "192.168.1.65/32",
+        "192.168.1.66/31",
+        "192.168.1.68/32",
+        "192.168.1.90/32",
+    ]
+
+
+def test_each_host_gets_its_own_network_units_target_and_routes(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    state = ctx.state_dir
+    by = {hf.name: hf for hf in units.per_host(ctx)}
+    assert list(by) == ["a", "b", "c"] and by["b"].host is hosts["b"]
+    a, b = by["a"].files, by["b"].files
+    net = a[UNIT_DIR / "demo.network"]
+    assert "Driver=macvlan\nOptions=parent=ens18\n" in net
+    assert "Subnet=192.168.1.0/24\nGateway=192.168.1.1\n" in net
+    assert "Options=no_default_route=1\nPodmanArgs=--route 0.0.0.0/0,192.168.1.64\n" in net
+    cp1 = a[UNIT_DIR / "demo-control-plane-1.container"]
+    assert "IP=192.168.1.68\n" in cp1
+    assert "--cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:44\n\n[Service]" in cp1
+    assert UNIT_DIR / "demo-control-plane-2.container" not in a
+    assert "IP=192.168.1.69\n" in b[UNIT_DIR / "demo-control-plane-2.container"]
+    assert (
+        "After=demo-control-plane-1.service" not in b[UNIT_DIR / "demo-control-plane-2.container"]
+    )
+    assert (
+        "Wants=demo-router-1.service demo-control-plane-1.service demo-worker-1.service "
+        "demo-routes.service\n"
+    ) in a[SYSTEMD / "demo.target"]
+    # only the operator talks to the cluster from its host network: b and c get no routes unit
+    assert (
+        "Wants=demo-router-2.service demo-control-plane-2.service demo-worker-2.service\n"
+    ) in b[SYSTEMD / "demo.target"]
+    assert SYSTEMD / "demo-routes.service" not in b
+    assert SYSTEMD / "demo-routes.service" not in by["c"].files
+    routes = a[SYSTEMD / "demo-routes.service"]
+    assert "ExecStart=-ip link add tk8s-demo link ens18 type macvlan mode bridge\n" in routes
+    assert "ExecStart=ip addr replace 192.168.1.67/32 dev tk8s-demo\n" in routes
+    assert "ExecStart=ip route replace 192.168.1.64/30 dev tk8s-demo src 192.168.1.67\n" in routes
+    assert "ExecStart=ip route replace 192.168.1.80/29 dev tk8s-demo src 192.168.1.67\n" in routes
+    assert "ExecStart=ip route replace 192.168.1.88/31 dev tk8s-demo src 192.168.1.67\n" in routes
+    assert "ExecStart=ip route replace 10.244.0.0/21 via 192.168.1.68 dev tk8s-demo\n" in routes
+    assert "ExecStart=ip route replace 172.23.0.1/32 via 192.168.1.64 dev tk8s-demo\n" in routes
+    assert "ExecStop=-ip link del tk8s-demo\n" in routes
+    assert "Wants=demo-control-plane" not in routes  # the first control plane is elsewhere
+    boot = a[state / "router-1" / "tkctl.boot"]
+    assert 'address "192.168.1.65/24"' in boot and "next-hop 192.168.1.1" in boot
+    assert "address 192.168.1.64/24 {" in boot  # the VRRP group
+    assert "--mac-address 02:54:4b:a8:01:41" in a[UNIT_DIR / "demo-router-1.container"]
+    assert state / "router-2" / "tkctl.boot" not in a and state / "router-2" / "tkctl.boot" in b
+    assert state / "nodes" / "demo-control-plane-3" / "meminfo" in by["c"].files
+    assert state / "nodes" / "demo-control-plane-3" / "meminfo" not in a
+    assert set(by["c"].links) == {
+        state / "nodes" / "demo-control-plane-3" / "sys-node" / "node0" / f"cpu{i}"
+        for i in range(2)
+    }
+
+
+def test_an_operator_outside_the_node_hosts_gets_routes_only(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, _ = multi_ctx
+    op = FakeHost()
+    ctx.host = op  # a is no longer the operator's own machine
+    by = {hf.name: hf for hf in units.per_host(ctx)}
+    assert list(by) == ["a", "b", "c", "operator"] and by["operator"].host is op
+    files = by["operator"].files
+    assert set(files) == {SYSTEMD / "demo.target", SYSTEMD / "demo-routes.service"}
+    assert "Wants=demo-routes.service\n" in files[SYSTEMD / "demo.target"]
+    routes = files[SYSTEMD / "demo-routes.service"]
+    assert "ExecStart=ip route replace 10.244.0.0/21 via 192.168.1.68\n" in routes
+    assert "ExecStart=ip route replace 172.23.0.1/32 via 192.168.1.64\n" in routes
+    assert "tk8s-demo" not in routes
+
+
+def test_run_writes_each_hosts_files_on_that_host(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    units.run(ctx)
+    assert UNIT_DIR / "demo-control-plane-3.container" in hosts["c"].files
+    assert UNIT_DIR / "demo-control-plane-3.container" not in hosts["a"].files
+    assert (
+        UNIT_DIR / "demo.network" in hosts["a"].files
+        and UNIT_DIR / "demo.network" in hosts["b"].files
+    )
+    assert units.done(ctx)
+    assert units.missing_node_files(ctx) == []
+    del hosts["b"].files[ctx.state_dir / "nodes" / "demo-worker-2" / "meminfo"]
+    assert units.missing_node_files(ctx) == [ctx.state_dir / "nodes" / "demo-worker-2" / "meminfo"]
+    assert not units.done(ctx)
+
+
+def test_single_host_files_carry_no_mac_or_shim(ctx: Context) -> None:
+    files = units.render(ctx)
+    text = "\n".join(files.values())
+    assert "mac-address" not in text and "tk8s-demo" not in text and "macvlan" not in text
+    assert 'address "172.22.0.253/24"' in files[ctx.state_dir / "router" / "tkctl.boot"]
+    assert [hf.name for hf in units.per_host(ctx)] == [""]
+
+
+def test_every_node_host_gets_the_audit_policy_the_apiservers_mount(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    """kubeadm join --control-plane copies init's ClusterConfiguration, audit-policy-file
+    included: the file has to be on every host a control plane may run on."""
+    ctx, _ = multi_ctx
+    by = {hf.name: hf for hf in units.per_host(ctx)}
+    policy = ctx.state_dir / "logs" / "apiserver" / "audit-policy.yaml"
+    text = (ctx.paths.home / "manifests" / "audit-policy.yaml").read_text()
+    for name in ("a", "b", "c"):
+        assert by[name].files[policy] == text, name
+
+
+def test_single_host_units_do_not_carry_the_audit_policy(ctx: Context) -> None:
+    assert ctx.state_dir / "logs" / "apiserver" / "audit-policy.yaml" not in units.render(ctx)
+
+
+def test_vrrp_id_follows_the_floating_address_on_several_hosts(
+    multi_ctx: tuple[Context, dict[str, FakeHost]], two_router_ctx: Context
+) -> None:
+    ctx, _ = multi_ctx
+    by = {hf.name: hf for hf in units.per_host(ctx)}
+    boot = by["a"].files[ctx.state_dir / "router-1" / "tkctl.boot"]
+    assert 'vrid "64"' in boot  # 192.168.1.64: two clusters on one LAN never share a VRID
+    single = units.render(two_router_ctx)[two_router_ctx.state_dir / "router-1" / "tkctl.boot"]
+    assert 'vrid "10"' in single
+
+
+def test_macvlan_containers_carry_their_own_dns_the_network_none(
+    multi_ctx: tuple[Context, dict[str, FakeHost]], ctx: Context
+) -> None:
+    """netavark refuses DNS= on a macvlan network (no aardvark there): the resolvers go into
+    each container instead; a bridge network keeps them as before."""
+    multi, _ = multi_ctx
+    by = {hf.name: hf for hf in units.per_host(multi)}
+    assert "DNS=" not in by["a"].files[UNIT_DIR / "demo.network"]
+    cp1 = by["a"].files[UNIT_DIR / "demo-control-plane-1.container"]
+    assert "IP=192.168.1.68\nDNS=1.1.1.1\nDNS=1.0.0.1\nDNS=8.8.8.8\nDNS=8.8.4.4\n" in cp1
+    assert "DNS=1.1.1.1\n" in by["a"].files[UNIT_DIR / "demo-router-1.container"]
+    single = units.render(ctx)
+    assert "DNS=1.1.1.1\n" in single[UNIT_DIR / "demo.network"]
+    assert "DNS=" not in single[UNIT_DIR / "demo-control-plane-1.container"]
+    assert "DNS=" not in single[UNIT_DIR / "demo-router.container"]
+
+
+def test_macvlan_routes_unit_waits_for_the_network(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, _ = multi_ctx
+    by = {hf.name: hf for hf in units.per_host(ctx)}
+    routes = by["a"].files[SYSTEMD / "demo-routes.service"]
+    assert "Wants=network-online.target\nAfter=network-online.target\n" in routes

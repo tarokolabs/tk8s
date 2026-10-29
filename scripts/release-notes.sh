@@ -37,6 +37,7 @@ $(sort "$digests"/*.digest | awk '{printf "| `%s` | `%s` |\n", $1, $2}')
 | 相容 | 叢集由建立時寫下的 \`cluster.yaml\` 描述；v2026.10.7 之前建立的（沒有 \`status\` 區塊）不再視為 Ready，\`create\` 也不會續跑它，請 \`tkctl delete cluster\` 後重建 |
 | apiserver 入口 | \`api.<叢集>.k8s:6443\` 解析到 router（proxy）或 anycast VIP \`172.23.N.1\`（bgp）；\`--control-planes 3\` 以上多 control plane |
 | 節點規格 | capacity 就是 \`cpu\`／\`memory\`，allocatable 再扣 kubeReserved 500m／512Mi 與 evictionHard 500Mi（2 核 4G → 1500m／3084Mi），和同規格的 VM 跑 kubeadm 一樣；記憶體至少 2G、節點不可超過主機；\`verify\` 的 \`node sizes\` 檢查這些數字；這版之前建的叢集仍回報整台主機，\`verify\` 對它們印 SKIP，重建即可 |
+| 多主機 | \`--hosts a,b=tux@host,c --ip-range A-B\`：節點容器與 router 分散到同一個 L2 的多台主機（Quadlet macvlan，節點拿 LAN 的位址、固定 MAC），一個操作台透過 ssh 管全部，叢集不依賴操作台；control plane、worker、router 輪流分散（\`-f\` 可寫 \`host:\`），每台主機一個 \`tk8s-<叢集>\` shim 介面讓主機連得到自己的容器；\`add node --host\`、\`verify\` 的 \`[hosts]\`；單主機叢集完全不變 |
 | RuntimeClass | crun（CRI-O 內建）；gVisor $(v gvisor)（\`--gvisor\`，建叢集時裝進節點）|
 | 監控與儲存 | metrics-server $(v metrics_server)、local-path-provisioner $(v local_path_provisioner) |
 | 工具 | uv $(v uv)（Python 3.14 與相依由它安裝）、kubectl ${d}（install.sh 下載）|

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.fixtures import DEMO_USER, resolved
+from tests.fixtures import DEMO_USER, MULTI_YAML, resolved
 from tk8s import model
 
 GOOD = """\
@@ -166,3 +166,73 @@ def test_a_cluster_yaml_without_node_capacity_loads_as_false() -> None:
 def test_node_capacity_is_dumped_right_after_tk8s() -> None:
     text = model.dumps(resolved(DEMO_USER))
     assert "  tk8s: test\n  node_capacity: true\n" in text
+
+
+# ---- multi-host fields
+
+
+def test_multi_host_cluster_round_trips_and_derives_routers() -> None:
+    c = model.load_text(MULTI_YAML)
+    assert c.multi_host and c.host_names == ["a", "b", "c"]
+    assert c.range_start == IPv4Address("192.168.1.64")
+    assert [r.ip for r in c.routers] == [IPv4Address("192.168.1.65"), IPv4Address("192.168.1.66")]
+    assert [r.host for r in c.routers] == ["a", "b"]
+    assert [r.name for r in c.routers] == ["demo-router-1", "demo-router-2"]
+    assert c.host_of("demo-control-plane-2") == "b" and c.host_of("demo-router-1") == "a"
+    assert c.host_of("nothing") is None
+    assert model.dumps(c) == MULTI_YAML
+
+
+def test_one_router_on_multi_host_sits_at_the_floating_address() -> None:
+    text = MULTI_YAML.replace("routers: 2", "routers: 1").replace(
+        "    router_hosts:\n      - a\n      - b\n", "    router_hosts:\n      - c\n"
+    )
+    c = model.load_text(text)
+    assert [(r.name, str(r.ip), r.host) for r in c.routers] == [
+        ("demo-router", "192.168.1.64", "c")
+    ]
+
+
+def test_single_host_cluster_has_no_host_fields_in_its_yaml() -> None:
+    c = resolved(DEMO_USER)
+    text = model.dumps(c)
+    for word in ("hosts:", "    range:", "operator:", "host:"):
+        assert word not in text, word
+    assert not c.multi_host and c.host_names == [] and c.host_of("demo-worker-1") is None
+    assert all(r.host is None for r in c.routers)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        (
+            "    range: 192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.89\n",
+            "",
+            "spec.hosts and spec.network.range go together",
+        ),
+        ("      host: c\n", "      host: x\n", "node host x is not in spec.hosts"),
+        ("      ssh: tux@192.168.1.231\n", "", "at most one host without ssh"),
+        (
+            "    router_hosts:\n      - a\n      - b\n",
+            "    router_hosts:\n      - a\n",
+            "router_hosts must name 2 hosts",
+        ),
+        ("    - name: b\n", "    - name: a\n", "host name a is used twice"),
+    ],
+)
+def test_inconsistent_host_fields_are_refused(old: str, new: str, message: str) -> None:
+    assert old in MULTI_YAML
+    with pytest.raises(model.ClusterFileError, match=message):
+        model.load_text(MULTI_YAML.replace(old, new))
+
+
+def test_a_node_host_on_a_single_host_cluster_is_refused() -> None:
+    c = resolved(DEMO_USER)
+    text = model.dumps(c).replace("      join: true\n", "      join: true\n      host: a\n", 1)
+    with pytest.raises(model.ClusterFileError, match="host on a single-host cluster"):
+        model.load_text(text)
+
+
+def test_peek_text_reads_index_and_version_from_any_text() -> None:
+    assert model.peek_text("spec: {network: {index: 3}, kubernetes: '1.37.1'}") == (3, "1.37.1")
+    assert model.peek_text("garbage: [") == (None, None)

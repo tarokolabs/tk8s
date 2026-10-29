@@ -210,7 +210,8 @@ def check_storage(r: Report) -> None:
         r.ok("PVC bound and pod wrote data")
         _, pv = r.kubectl("get", "pvc", "-n", NS, "pvc", "-o", "jsonpath={.spec.volumeName}")
         storage = r.ctx.state_dir / "storage"
-        found = r.ctx.host.exists(storage / f"{pv.strip()}_{NS}_pvc")
+        # local-path writes on the node that ran the pod: on several hosts, whichever host that is
+        found = any(h.exists(storage / f"{pv.strip()}_{NS}_pvc") for _, h in r.ctx.node_hosts())
         if found:
             r.ok(f"PV data on host ({storage})")
         else:

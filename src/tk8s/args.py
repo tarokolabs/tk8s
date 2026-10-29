@@ -52,6 +52,30 @@ def apply_preset(a: argparse.Namespace, raw: list[str]) -> str | None:
     return preset_line(a.preset)
 
 
+def parse_hosts_flag(text: str) -> list[model.UserHost]:
+    """--hosts a=local,b=tux@h:2222,c: each item [name=][user@]host[:port]; without name= the
+    host is the name (so it has to look like one). `local` is this host (the operator)."""
+    out: list[model.UserHost] = []
+    for item in text.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        name, _, ssh = item.partition("=")
+        if not ssh:
+            name, ssh = item, item
+        if not re.fullmatch(model.HOST_NAME, name):
+            raise UsageError(
+                f"invalid host name '{name}': use lowercase letters, digits and '-', start "
+                "with a letter (write name=user@host to name a host)"
+            )
+        out.append(model.UserHost(name=name, ssh=ssh))  # "local" becomes ssh None in the model
+    if not out:
+        raise UsageError("--hosts needs at least one host")
+    if sum(1 for h in out if h.ssh is None) > 1:
+        raise UsageError("only one host can be local (the one tkctl runs on)")
+    return out
+
+
 def validate_name(name: str) -> str:
     if not NAME_RE.match(name):
         raise UsageError(
@@ -96,6 +120,8 @@ def add_create_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--datapath", choices=["auto", "netkit", "veth"])
     p.add_argument("--ha", choices=["proxy", "bgp"])
     p.add_argument("--routers", type=int, choices=[1, 2], default=1)
+    p.add_argument("--hosts")
+    p.add_argument("--ip-range", dest="ip_range")
     p.add_argument("--preset", choices=sorted(PRESETS))
     p.add_argument("--defer-join", action="store_true")
     p.add_argument("-f", dest="file")
@@ -131,9 +157,28 @@ def user_cluster_from_flags(a: argparse.Namespace) -> model.UserCluster:
         )
     if a.workers:
         groups.append(model.NodeGroup(role="worker", count=a.workers, cpu=a.cpu, memory=memory))
-    network = model.UserNetwork(ha=a.ha, routers=a.routers) if a.ha or a.routers == 2 else None
+    if a.ip_range and not a.hosts:
+        raise UsageError("--ip-range needs --hosts")
+    if a.hosts and not a.ip_range:
+        raise UsageError("--hosts needs --ip-range A-B (addresses reserved on the hosts' LAN)")
+    hosts = parse_hosts_flag(a.hosts) if a.hosts else None
+    if a.ip_range and not re.fullmatch(model.RANGE, a.ip_range):
+        raise UsageError(
+            f"invalid --ip-range '{a.ip_range}': comma-separated A-B segments (or single "
+            "addresses), e.g. 192.168.1.64-79,192.168.1.208-223"
+        )
+    network = (
+        model.UserNetwork(ha=a.ha, routers=a.routers, range=a.ip_range)
+        if a.ha or a.routers == 2 or a.ip_range
+        else None
+    )
     spec = model.UserSpec(
-        kubernetes=a.k8s, gvisor=a.gvisor, datapath=a.datapath, network=network, nodes=groups
+        kubernetes=a.k8s,
+        gvisor=a.gvisor,
+        datapath=a.datapath,
+        network=network,
+        nodes=groups,
+        hosts=hosts,
     )
     name = validate_name(a.name or "tk8s")
     return model.UserCluster(metadata=model.Metadata(name=name), spec=spec)
@@ -143,7 +188,7 @@ def user_cluster_from_file(a: argparse.Namespace, topo_flags: bool) -> model.Use
     if topo_flags:
         raise UsageError(
             "-f cannot be combined with --control-planes/--workers/--cpu/--memory/--ha/"
-            "--routers; put them in the file"
+            "--routers/--hosts/--ip-range; put them in the file"
         )
     path = Path(a.file)
     if not path.is_file():

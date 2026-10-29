@@ -1,23 +1,58 @@
 """delete cluster: stop the units, remove the containers, the volumes, the units, the network, the
 host routes and the state directory. Every phase's done() is "that thing is already gone", so a
 delete that stopped halfway is finished by running it again, and a cluster that lost its
-cluster.yaml (an interrupted create, a cleanup by hand) is deleted from what is left."""
+cluster.yaml (an interrupted create, a cleanup by hand) is deleted from what is left.
 
+On several hosts the host-side phases (stop, units, network, routes, state) run on every host of
+the cluster, each its own; containers and volumes go on the host that runs them. Without a
+cluster.yaml only this host is known, and only this host is cleaned."""
+
+from collections.abc import Callable
 from pathlib import Path
 
 from . import kubeconfig, podman
+from .create.units import shim_name
+from .host import Host
 from .lifecycle import ClusterError
 from .phases import Context, Phase, confirm
 from .podman import node_volumes
 
 
+def targets(ctx: Context) -> list[tuple[str, Host]]:
+    """The hosts the host-side phases visit: the node hosts and, when it runs no node, the
+    operator; the operator last, so cluster.yaml (the list of hosts) goes last of all."""
+    return ctx.target_hosts()
+
+
+def per_host(
+    done: Callable[[Context], bool], run: Callable[[Context], None]
+) -> tuple[Callable[[Context], bool], Callable[[Context], None]]:
+    """A host-side phase on every target: done when done everywhere, run where it is not."""
+
+    def done_all(ctx: Context) -> bool:
+        return all(done(ctx.on(h)) for _, h in targets(ctx))
+
+    def run_each(ctx: Context) -> None:
+        hosts = targets(ctx)
+        for name, h in hosts:
+            sub = ctx.on(h)
+            if len(hosts) > 1 and done(sub):  # one host: the runner just asked
+                continue
+            if name:
+                ctx.say(f"  host {name}:")
+            run(sub)
+
+    return done_all, run_each
+
+
 def found(ctx: Context) -> bool:
     name = ctx.cluster_name
-    return (
-        ctx.host.exists(ctx.state_dir)
-        or ctx.host.exists(ctx.paths.unit_dir / name)
-        or ctx.host.exists(ctx.paths.systemd_dir / f"{name}.target")
-        or podman.exists(ctx, "network", ctx.cluster_name)
+    return any(
+        h.exists(ctx.state_dir)
+        or h.exists(ctx.paths.unit_dir / name)
+        or h.exists(ctx.paths.systemd_dir / f"{name}.target")
+        or podman.exists(ctx.on(h), "network", name)
+        for _, h in targets(ctx)
     )
 
 
@@ -64,17 +99,25 @@ def router_names(ctx: Context) -> list[str]:
 
 
 def remove_containers(ctx: Context, names: list[str]) -> None:
+    """Each container on the host that runs it."""
     for n in names:
         if podman.exists(ctx, "container", n):
-            ctx.host.run(["podman", "rm", "-f", n], sudo=True, capture=True)
+            ctx.host_for(n).run(["podman", "rm", "-f", n], sudo=True, capture=True)
             ctx.say(f"  removed container {n}")
 
 
-def remove_volumes(ctx: Context, names: list[str]) -> None:
-    for v in names:
-        if podman.exists(ctx, "volume", v):
-            ctx.host.run(["podman", "volume", "rm", "-f", v], sudo=True, capture=True)
+def remove_node_volumes(ctx: Context, node: str) -> None:
+    """The node's volumes, on the host that runs it."""
+    sub = ctx.on(ctx.host_for(node))
+    for v in node_volumes(node):
+        if podman.exists(sub, "volume", v):
+            sub.host.run(["podman", "volume", "rm", "-f", v], sudo=True, capture=True)
             ctx.say(f"  removed volume {v}")
+
+
+def node_volumes_gone(ctx: Context, node: str) -> bool:
+    sub = ctx.on(ctx.host_for(node))
+    return not any(podman.exists(sub, "volume", v) for v in node_volumes(node))
 
 
 # ---- stop
@@ -94,7 +137,26 @@ def stop_run(ctx: Context) -> None:
     ctx.host.run(["systemctl", "stop", f"{name}-network.service"], sudo=True, check=False)
 
 
-STOP = Phase("stop", "stop the cluster target and its network unit", stop_done, stop_run)
+def _note_this_host_only(ctx: Context) -> None:
+    """A multi-host cluster without its cluster.yaml: the other hosts cannot be found."""
+    if ctx.cluster is not None:
+        return
+    net = ctx.host.read(ctx.paths.unit_dir / ctx.cluster_name / f"{ctx.cluster_name}.network")
+    if net and "Driver=macvlan" in net:
+        ctx.say(
+            "  no cluster.yaml: cleaning this host only; other hosts keep their units until "
+            "tkctl delete cluster runs there"
+        )
+
+
+def _stop_run(ctx: Context) -> None:
+    _note_this_host_only(ctx)
+    stop_run(ctx)
+
+
+STOP = Phase(
+    "stop", "stop the cluster target and its network unit", *per_host(stop_done, _stop_run)
+)
 
 
 # ---- units
@@ -122,7 +184,9 @@ def units_run(ctx: Context) -> None:
 
 
 UNITS = Phase(
-    "units", "remove the Quadlet units, the target and the routes unit", units_done, units_run
+    "units",
+    "remove the Quadlet units, the target and the routes unit",
+    *per_host(units_done, units_run),
 )
 
 
@@ -149,16 +213,13 @@ CONTAINERS = Phase(
 # ---- volumes
 
 
-def volumes(ctx: Context) -> list[str]:
-    return [v for n in node_names(ctx) for v in node_volumes(n)]
-
-
 def volumes_done(ctx: Context) -> bool:
-    return not any(podman.exists(ctx, "volume", v) for v in volumes(ctx))
+    return all(node_volumes_gone(ctx, n) for n in node_names(ctx))
 
 
 def volumes_run(ctx: Context) -> None:
-    remove_volumes(ctx, volumes(ctx))
+    for n in node_names(ctx):
+        remove_node_volumes(ctx, n)
 
 
 VOLUMES = Phase(
@@ -180,7 +241,7 @@ def network_run(ctx: Context) -> None:
     ctx.host.run(["podman", "network", "rm", "-f", ctx.cluster_name], sudo=True, capture=True)
 
 
-NETWORK = Phase("network", "remove the podman network", network_done, network_run)
+NETWORK = Phase("network", "remove the podman network", *per_host(network_done, network_run))
 
 
 # ---- routes
@@ -206,10 +267,15 @@ def routes_run(ctx: Context) -> None:
     for s in subnets(ctx):
         if route_present(ctx, s):
             ctx.host.run(["ip", "route", "del", s], sudo=True)
+    if ctx.cluster is not None and ctx.cluster.multi_host:
+        # the shim goes with the routes unit; a host that never had one answers "not found"
+        ctx.host.run(["ip", "link", "del", shim_name(ctx.cluster.name)], sudo=True, check=False)
 
 
 ROUTES = Phase(
-    "routes", "remove the host routes to the pod and service subnets", routes_done, routes_run
+    "routes",
+    "remove the host routes to the pod and service subnets (and the shim)",
+    *per_host(routes_done, routes_run),
 )
 
 
@@ -225,7 +291,9 @@ def state_run(ctx: Context) -> None:
     ctx.host.run(["rm", "-rf", str(ctx.state_dir)], sudo=True)
 
 
-STATE = Phase("state", "remove the state directory, PVC data included", state_done, state_run)
+STATE = Phase(
+    "state", "remove the state directory, PVC data included", *per_host(state_done, state_run)
+)
 
 
 def _kube_config(ctx: Context) -> tuple[Path, str | None]:

@@ -221,3 +221,104 @@ def test_delete_leaves_a_foreign_cluster_with_the_same_name_alone_and_keeps_a_ba
     delete.kubeconfig_run(ctx)
     assert config not in host.files
     assert host.files[home / ".kube" / "config.bak"] == kubeconfig.merge(None, ours, "demo")
+
+
+# ---- several hosts
+
+
+def multi_everything_there(ctx: Context, hosts: dict[str, FakeHost]) -> None:
+    """The MULTI_YAML cluster complete on its three hosts."""
+    c, p = ctx.require_cluster(), ctx.paths
+    there = Result(0, f"{c.spec.network.pods} via 192.168.1.70\n", "")
+    for name, h in hosts.items():
+        h.dirs.update({ctx.state_dir, p.unit_dir / "demo"})
+        h.files[p.systemd_dir / "demo.target"] = "x"
+        h.files[p.systemd_dir / "demo-routes.service"] = "x"
+        h.active.update({"demo.target", "demo-network.service"})
+        mine = [n.name for n in c.spec.nodes if n.host == name]
+        h.podman.update(f"container:{n}" for n in mine)
+        h.podman.update(f"container:{r.name}" for r in c.routers if r.host == name)
+        h.podman.update(f"volume:{v}" for n in mine for v in podman.node_volumes(n))
+        h.podman.add("network:demo")
+        h.responses[("ip", "route", "show")] = [there, there, there, Result(0, "", "")]
+
+
+def test_delete_multi_host_removes_everything_on_every_host(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    multi_everything_there(ctx, hosts)
+    Runner([delete.PHASE], record=False).run(ctx)
+    for name, h in hosts.items():
+        a = argvs(h)
+        assert ["systemctl", "disable", "--now", "demo.target"] in a, name
+        assert ["podman", "network", "rm", "-f", "demo"] in a, name
+        assert ["ip", "link", "del", "tk8s-demo"] in a, name
+        assert ["ip", "route", "del", "10.244.0.0/21"] in a, name
+        assert ["rm", "-rf", str(ctx.state_dir)] in a, name
+        assert h.podman == set() and not h.active and not h.exists(ctx.state_dir), name
+    assert ["podman", "rm", "-f", "demo-control-plane-3"] in argvs(hosts["c"])
+    assert ["podman", "rm", "-f", "demo-control-plane-3"] not in argvs(hosts["a"])
+    assert ["podman", "volume", "rm", "-f", "demo-worker-2-var"] in argvs(hosts["b"])
+    assert ["podman", "rm", "-f", "demo-router-2"] in argvs(hosts["b"])
+    assert "  host b:" in hosts["a"].lines
+
+
+def test_delete_multi_host_resumes_per_host(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    multi_everything_there(ctx, hosts)
+    b = hosts["b"]  # already clean
+    b.podman.clear()
+    b.active.clear()
+    b.dirs.clear()
+    b.files.clear()
+    b.responses[("ip", "route", "show")] = Result(0, "", "")
+    Runner([delete.PHASE], record=False).run(ctx)
+    changes = (
+        ["podman", "rm"],
+        ["podman", "volume", "rm"],
+        ["rm", "-rf"],
+        ["systemctl", "disable"],
+    )
+    assert not any(x[: len(k)] == k for x in argvs(b) for k in changes)
+    assert ["podman", "rm", "-f", "demo-control-plane-3"] in argvs(hosts["c"])
+
+
+def test_delete_multi_host_without_cluster_yaml_cleans_this_host_only(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    multi_everything_there(ctx, hosts)
+    ctx.cluster = None
+    ctx.hosts = {}
+    ctx.name = "demo"
+    unit_dir = ctx.paths.unit_dir / "demo"
+    hosts["a"].files[unit_dir / "demo.network"] = "Driver=macvlan\n"
+    for u in ("demo-router-1", "demo-control-plane-1", "demo-worker-1"):
+        hosts["a"].files[unit_dir / f"{u}.container"] = "x"
+    assert delete.found(ctx)
+    Runner([delete.PHASE], record=False).run(ctx)
+    assert ["podman", "rm", "-f", "demo-control-plane-1"] in argvs(hosts["a"])
+    assert not hosts["b"].calls and not hosts["c"].calls
+    assert any("cleaning this host only" in ln for ln in hosts["a"].lines)
+
+
+def test_single_host_delete_sequence_is_unchanged(ctx: Context, host: FakeHost) -> None:
+    everything_there(ctx, host)
+    Runner([delete.PHASE], record=False).run(ctx)
+    assert not any(x[:2] == ["ip", "link"] for x in argvs(host))
+    assert not any(ln.startswith("  host ") for ln in host.lines)
+
+
+def test_delete_multi_host_removes_the_operators_state_last(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    multi_everything_there(ctx, hosts)
+    Runner([delete.PHASE], record=False).run(ctx)
+    lines = hosts["a"].lines
+    state = lines.index("[delete/state] remove the state directory, PVC data included")
+    visited = [ln.strip() for ln in lines[state + 1 :] if ln.startswith("  host ")]
+    assert visited == ["host b:", "host c:", "host a:"]  # cluster.yaml on the operator last

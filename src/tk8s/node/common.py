@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .. import model
 from ..create.kubeadm import kubectl
+from ..create.plan import LB_POOL, node_region
 from ..lifecycle import ClusterError
 from ..phases import Context, PhaseFailed
 
@@ -26,13 +27,47 @@ def next_name(c: model.Cluster, role: model.Role) -> str:
 
 def next_ip(c: model.Cluster) -> IPv4Address:
     """One past the highest node address. .200-.219 is the LB-IPAM pool and .253 the router,
-    so .199 is the last node."""
+    so .199 is the last node. On several hosts: the lowest free address of the range's node
+    region (after the router and shim addresses, before the LoadBalancer pool)."""
     net = c.spec.network.nodes
+    if c.spec.network.range is not None:
+        return _next_ip_in_range(c)
     last = max(int(n.ip) - int(net.network_address) for n in c.spec.nodes)
     host = last + 1
     if host > 199:
         raise ClusterError(f"no free node address left in {net} (.200-.219 is the LB pool)")
     return net.network_address + host
+
+
+def _next_ip_in_range(c: model.Cluster) -> IPv4Address:
+    used = {n.ip for n in c.spec.nodes}
+    free = next((ip for ip in node_region(c) if ip not in used), None)
+    if free is None:
+        raise ClusterError(
+            f"no free node address left in {c.spec.network.range} "
+            f"(the last {LB_POOL} are the LoadBalancer pool)"
+        )
+    return free
+
+
+def least_loaded(c: model.Cluster) -> str:
+    """The host with the fewest nodes, the first in cluster.yaml order on a tie."""
+    counts = {h: sum(1 for n in c.spec.nodes if n.host == h) for h in c.host_names}
+    return min(c.host_names, key=lambda h: counts[h])
+
+
+def host_for_request(c: model.Cluster, req: model.NodeRequest) -> str | None:
+    if not c.multi_host:
+        if req.host is not None:
+            raise ClusterError("--host only applies to a multi-host cluster")
+        return None
+    if req.host is None:
+        return least_loaded(c)
+    if req.host not in c.host_names:
+        raise ClusterError(
+            f"host {req.host} is not in cluster {c.name} (hosts: {', '.join(c.host_names)})"
+        )
+    return req.host
 
 
 def plan_add(c: model.Cluster, req: model.NodeRequest) -> model.Node:
@@ -52,6 +87,7 @@ def plan_add(c: model.Cluster, req: model.NodeRequest) -> model.Node:
         # cluster.yaml says what is true: the record phase writes join: true after kubeadm join
         # and Ready, so an add interrupted in between describes the node as not joined.
         join=False,
+        host=host_for_request(c, req),
     )
 
 

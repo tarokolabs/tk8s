@@ -2,12 +2,14 @@
 
 import json
 from collections.abc import Callable
+from ipaddress import IPv4Address, IPv4Network
 from pathlib import Path
 
 from tk8s import kubeconfig, model, versions
 from tk8s.create import kubeadm, units
 from tk8s.create.plan import resolve
 from tk8s.host import FakeHost, Result
+from tk8s.hosts import LanFacts
 from tk8s.paths import Paths
 from tk8s.phases import Context, Options
 
@@ -68,12 +70,141 @@ def ha_user() -> model.UserCluster:
     )
 
 
+# demo spread over three hosts (a is the operator, b and c over ssh), bgp mode with two routers,
+# resolved from the pool 192.168.1.64-70,192.168.1.80-89 (17 addresses) on the hosts' LAN
+# 192.168.1.0/24 (c reaches it by eth0, the others by ens18): router .64 floating, router-1 .65
+# (a), router-2 .66 (b), the operator's shim .67, control planes .68/.69/.70 on a/b/c, workers
+# .80/.81 on a/b, .82-.84 free for add node, LoadBalancer pool .85-.89, VIP 172.23.0.1.
+MULTI_YAML = """\
+apiVersion: taroko.io/v1alpha1
+kind: Cluster
+metadata:
+  name: demo
+spec:
+  kubernetes: "1.37.1"
+  cni: cilium
+  datapath: auto
+  gvisor: false
+  network:
+    index: 0
+    nodes: 192.168.1.0/24
+    gateway: 192.168.1.1
+    router: 192.168.1.64
+    ha: bgp
+    routers: 2
+    vip: 172.23.0.1
+    lb_range: 192.168.1.85-192.168.1.89
+    pods: 10.244.0.0/21
+    services: 10.98.0.0/24
+    range: 192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.89
+    router_hosts:
+      - a
+      - b
+    shim: 192.168.1.67
+  nodes:
+    - role: control-plane
+      name: demo-control-plane-1
+      ip: 192.168.1.68
+      cpu: 2
+      memory: 4g
+      join: true
+      host: a
+    - role: control-plane
+      name: demo-control-plane-2
+      ip: 192.168.1.69
+      cpu: 2
+      memory: 4g
+      join: true
+      host: b
+    - role: control-plane
+      name: demo-control-plane-3
+      ip: 192.168.1.70
+      cpu: 2
+      memory: 4g
+      join: true
+      host: c
+    - role: worker
+      name: demo-worker-1
+      ip: 192.168.1.80
+      cpu: 2
+      memory: 4g
+      join: true
+      host: a
+    - role: worker
+      name: demo-worker-2
+      ip: 192.168.1.81
+      cpu: 2
+      memory: 4g
+      join: true
+      host: b
+  hosts:
+    - name: a
+      iface: ens18
+    - name: b
+      ssh: tux@192.168.1.231
+      iface: ens18
+    - name: c
+      ssh: 192.168.1.232
+      iface: eth0
+status:
+  phase: Creating
+  completed: {}
+  tk8s: test
+  node_capacity: true
+  operator: op
+"""
+
+
+_LAN = IPv4Network("192.168.1.0/24")
+_GW = IPv4Address("192.168.1.1")
+MULTI_LANS = {
+    "a": LanFacts("ens18", _LAN, _GW, IPv4Address("192.168.1.230")),
+    "b": LanFacts("ens18", _LAN, _GW, IPv4Address("192.168.1.231")),
+    "c": LanFacts("eth0", _LAN, _GW, IPv4Address("192.168.1.232")),
+}
+
+
+def multi_user() -> model.UserCluster:
+    """demo over three hosts: what MULTI_YAML is resolved from."""
+    return model.UserCluster(
+        metadata=model.Metadata(name="demo"),
+        spec=model.UserSpec(
+            hosts=[
+                model.UserHost(name="a"),
+                model.UserHost(name="b", ssh="tux@192.168.1.231"),
+                model.UserHost(name="c", ssh="192.168.1.232"),
+            ],
+            network=model.UserNetwork(ha="bgp", routers=2, range="192.168.1.64-70,192.168.1.80-89"),
+            nodes=[
+                model.NodeGroup(role="control-plane", count=3),
+                model.NodeGroup(role="worker", count=2),
+            ],
+        ),
+    )
+
+
+def make_multi_ctx(host: FakeHost, data_dir: Path) -> tuple[Context, dict[str, FakeHost]]:
+    """The MULTI_YAML cluster on three fake hosts: a is the operator (`host`), b and c are
+    labelled like ssh hosts."""
+    ctx = make_ctx(host, data_dir, user=None)
+    ctx.cluster = model.load_text(MULTI_YAML)
+    hosts = {
+        "a": host,
+        "b": FakeHost(label="tux@192.168.1.231"),
+        "c": FakeHost(label="192.168.1.232"),
+    }
+    ctx.hosts = dict(hosts)
+    return ctx, hosts
+
+
 def resolved(
     user: model.UserCluster,
     *,
     existing: model.Cluster | None = None,
     used_indices: set[int] | None = None,
     allow_overlap: bool = False,
+    lans: dict[str, LanFacts] | None = None,
+    operator: str | None = None,
 ) -> model.Cluster:
     return resolve(
         user,
@@ -82,6 +213,8 @@ def resolved(
         used_indices=used_indices or set(),
         allow_overlap=allow_overlap,
         tk8s_version="test",
+        lans=lans,
+        operator=operator,
     )
 
 
@@ -199,12 +332,13 @@ def bgp_router_answers(
     established: int = 3,
     hops: int = 3,
     bfd_up: int = 3,
+    ips: list[str] | None = None,
 ) -> None:
-    """The demo bgp router (3 control planes .1 .2 .3) as vtysh reports it: the first `established`
-    peers Established and the rest Active, `hops` ECMP next hops to the VIP, the first `bfd_up` BFD
-    sessions up. The JSON shapes are FRR 10's, trimmed to the keys tkctl reads. `router` picks the
-    container (demo-router-1/-2 for a two-router cluster)."""
-    ips = ["172.22.0.1", "172.22.0.2", "172.22.0.3"]
+    """The demo bgp router (3 control planes .1 .2 .3, or `ips`) as vtysh reports it: the first
+    `established` peers Established and the rest Active, `hops` ECMP next hops to the VIP, the
+    first `bfd_up` BFD sessions up. The JSON shapes are FRR 10's, trimmed to the keys tkctl
+    reads. `router` picks the container (demo-router-1/-2 for a two-router cluster)."""
+    ips = ips or ["172.22.0.1", "172.22.0.2", "172.22.0.3"]
     summary = {
         "as": 65000,
         "peers": {
@@ -306,3 +440,30 @@ def ready_host(
     )
     r[("cilium", "install")] = Result(0, '      image: "quay.io/cilium/cilium:v1@sha256:a"\n', "")
     return c
+
+
+def running_multi_answers(hosts: dict[str, FakeHost], ctx: Context) -> None:
+    """The MULTI_YAML cluster up on its three hosts: every host's target active, every node's
+    systemd running on its host, both routers booted and peering with the three control planes,
+    CNI plugins and the data tree on every host."""
+    c = ctx.require_cluster()
+    cps = [str(n.ip) for n in c.control_planes]
+    shim = c.spec.network.shim
+    for name, h in hosts.items():
+        h.responses[("id", "-u")] = Result(0, "1000\n", "")
+        h.responses[("id", "-g")] = Result(0, "1000\n", "")
+        h.active.add("demo.target")
+        if shim is not None:  # the operator's shim carries its address
+            h.responses[("ip", "-o", "-4", "addr", "show", "dev", "tk8s-demo")] = Result(
+                0, f"5: tk8s-demo    inet {shim}/32 scope global tk8s-demo\n", ""
+            )
+        h.files[ctx.paths.cni_dir / "bridge"] = "elf"
+        h.dirs.update({ctx.paths.data_dir, ctx.paths.clusters_dir, ctx.paths.wulin_dir})
+        for n in c.spec.nodes:
+            if n.host == name:
+                h.responses[("podman", "exec", n.name, "systemctl", "is-system-running")] = Result(
+                    0, "running\n", ""
+                )
+        for r in c.routers:
+            if r.host == name:
+                bgp_router_answers(h, router=r.name, ips=cps)

@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from tests.fixtures import argvs
+from tk8s import model
 from tk8s.create import preflight
 from tk8s.create.preflight import PreflightError
 from tk8s.host import FakeHost, Result
@@ -154,3 +155,206 @@ def test_an_unreadable_host_size_is_a_preflight_error_not_a_traceback(
     host.files[Path("/proc/meminfo")] = "MemFree:        1 kB\n"
     with pytest.raises(PreflightError, match="no MemTotal in /proc/meminfo"):
         preflight.check_host_fits(ctx)
+
+
+# ---- several hosts
+
+ROUTE_Q = ("ip", "-j", "route", "show", "default")
+ADDR_Q = ("ip", "-j", "-4", "addr", "show", "dev", "ens18")
+ROUTE = '[{"dst":"default","gateway":"192.168.1.1","dev":"ens18"}]'
+ADDR = (
+    '[{"ifname":"ens18","addr_info":[{"family":"inet","local":"192.168.1.230","prefixlen":24,'
+    '"scope":"global"}]}]'
+)
+
+
+def good_lan(host: FakeHost, kernel: str = "6.12.0", iface: str = "ens18") -> None:
+    good_host(host)
+    host.responses[ROUTE_Q] = Result(0, ROUTE.replace("ens18", iface), "")
+    host.responses[("ip", "-j", "-4", "addr", "show", "dev", iface)] = Result(
+        0, ADDR.replace("ens18", iface), ""
+    )
+    host.responses[("hostname",)] = Result(0, f"host-{id(host)}\n", "")
+    host.responses[("uname", "-r")] = Result(0, f"{kernel}\n", "")
+    host.responses[("arping",)] = Result(1, "", "")  # nobody answers
+    host.responses[("xargs",)] = Result(123, "", "")  # nobody answers the parallel probe
+
+
+def test_multi_host_preflight_checks_every_host_and_prints_one_line_each(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    good_lans(hosts)
+    Runner([preflight.PHASE]).run(ctx)
+    out = "\n".join(hosts["a"].lines)
+    for name in ("a", "b", "c"):
+        assert f"  host {name}: preflight ok: podman 5.4.2" in out
+    for h in hosts.values():
+        assert ["sysctl", "-qw", "net.ipv4.ip_forward=1"] in argvs(h)
+        assert Path("/etc/sysctl.d/90-tk8s.conf") in h.files
+    # the pool was probed from the first host, every address, in one parallel run
+    probe = next(c for c in hosts["a"].calls if c.argv[:1] == ["xargs"])
+    probed = (probe.input or "").split()
+    assert len(probed) == 17 and probed[0] == "192.168.1.64" and probed[-1] == "192.168.1.89"
+    assert not any(c.argv[:1] in (["xargs"], ["arping"]) for c in hosts["b"].calls)
+    assert "warning" not in out
+
+
+def good_lans(hosts: dict[str, FakeHost]) -> None:
+    """The three hosts of MULTI_YAML as preflight expects them (c reaches the LAN by eth0)."""
+    for name, h in hosts.items():
+        good_lan(h, iface="eth0" if name == "c" else "ens18")
+
+
+def test_unreachable_host_is_named_with_the_ssh_advice(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    good_lans(hosts)
+    hosts["b"].responses[("true",)] = Result(255, "", "Host key verification failed.\n")
+    with pytest.raises(
+        PhaseFailed,
+        match=r"host b: ssh failed \(Host key verification failed\.\); ssh to it once by hand",
+    ):
+        Runner([preflight.PHASE]).run(ctx)
+
+
+def test_host_on_another_subnet_or_interface_is_refused(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    good_lans(hosts)
+    good_lan(hosts["c"], iface="eth9")
+    with pytest.raises(
+        PhaseFailed, match=r"host c: on 192.168.1.0/24 via eth9 .*, cluster.yaml says eth0"
+    ):
+        Runner([preflight.PHASE]).run(ctx)
+
+
+def test_operator_off_the_lan_is_refused(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    op = FakeHost()
+    good_lan(op)
+    op.responses[ADDR_Q] = Result(0, ADDR.replace("192.168.1.230", "10.0.0.5"), "")
+    ctx.host = op
+    good_lans(hosts)
+    with pytest.raises(PhaseFailed, match="the operator host is not on the cluster's LAN"):
+        Runner([preflight.PHASE]).run(ctx)
+
+
+def test_same_named_foreign_cluster_on_a_host_is_refused(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    good_lans(hosts)
+    hosts["c"].dirs.add(Path("/etc/containers/systemd/demo"))  # units of another demo
+    with pytest.raises(
+        PhaseFailed, match=r"host c: a cluster named demo already exists there \(not managed"
+    ):
+        Runner([preflight.PHASE]).run(ctx)
+    # our own copy there (a rerun) is fine
+    ctx.save_cluster(ctx.require_cluster())
+    Runner([preflight.PHASE]).run(ctx)
+
+
+def test_addresses_in_use_are_listed_and_not_probed_on_a_rerun(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    good_lans(hosts)
+    taken = "Unicast reply from 192.168.1.80 [AA:BB:CC:DD:EE:FF]  0.6ms\n"
+    hosts["a"].responses[("xargs",)] = Result(123, taken, "")
+    with pytest.raises(
+        PhaseFailed, match=r"addresses in use on the LAN: 192.168.1.80 \(AA:BB:CC:DD:EE:FF\)"
+    ):
+        Runner([preflight.PHASE]).run(ctx)
+    hosts["b"].active.add("demo.target")  # a rerun: our own containers would answer
+    Runner([preflight.PHASE]).run(ctx)
+
+
+def test_network_manager_and_networkd_get_unmanaged_drop_ins(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    good_lans(hosts)
+    hosts["b"].dirs.add(Path("/etc/NetworkManager"))
+    hosts["c"].active.add("systemd-networkd")
+    Runner([preflight.PHASE]).run(ctx)
+    nm = hosts["b"].files[Path("/etc/NetworkManager/conf.d/90-tk8s.conf")]
+    assert "[keyfile]\nunmanaged-devices+=interface-name:tk8s-*\n" in nm
+    assert ["nmcli", "general", "reload", "conf"] in argvs(hosts["b"])
+    nd = hosts["c"].files[Path("/etc/systemd/network/90-tk8s-unmanaged.network")]
+    assert "[Match]\nName=tk8s-*\n\n[Link]\nUnmanaged=yes\n" in nd
+    assert ["networkctl", "reload"] in argvs(hosts["c"])
+    assert Path("/etc/NetworkManager/conf.d/90-tk8s.conf") not in hosts["a"].files
+
+
+def test_explicit_netkit_with_an_old_host_is_refused(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    good_lans(hosts)
+    good_lan(hosts["c"], kernel="6.1.0-30-amd64", iface="eth0")
+    c = ctx.require_cluster()
+    ctx.cluster = c.model_copy(update={"spec": c.spec.model_copy(update={"datapath": "netkit"})})
+    with pytest.raises(
+        PhaseFailed, match=r"host c: kernel 6\.1\.0-30-amd64 is too old for --datapath netkit"
+    ):
+        Runner([preflight.PHASE]).run(ctx)
+
+
+def test_majority_warning_is_printed_by_preflight(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    good_lans(hosts)
+    c = ctx.require_cluster()
+    moved = [
+        n.model_copy(update={"host": "a"}) if n.name.endswith("plane-3") else n
+        for n in c.spec.nodes
+    ]
+    ctx.cluster = c.model_copy(update={"spec": c.spec.model_copy(update={"nodes": moved})})
+    Runner([preflight.PHASE]).run(ctx)
+    assert (
+        "  warning: host a holds 2 of 3 control planes; losing it stops the apiserver"
+        in "\n".join(hosts["a"].lines)
+    )
+
+
+def test_single_host_preflight_output_is_unchanged(ctx: Context, host: FakeHost) -> None:
+    good_host(host)
+    Runner([preflight.PHASE]).run(ctx)
+    assert host.lines[-1] == (
+        "  preflight ok: podman 5.4.2, systemd, cgroup v2, swap off, host bridge-nf off, "
+        "ip_forward on, " + str(ctx.paths.data_dir) + " owned by student, host 8 cpu, 32102 MiB"
+    )
+    assert not any(c.argv[:1] in (["arping"], ["uname"]) for c in host.calls)
+
+
+def test_multi_host_preflight_checks_every_host_before_writing_anything(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    """A refusal on host c must leave host a untouched: no sysctl file, no drop-in."""
+    ctx, hosts = multi_ctx
+    good_lans(hosts)
+    hosts["c"].responses[("podman", "--version")] = Result(127, "", "")
+    with pytest.raises(PhaseFailed, match="host c: podman not found"):
+        Runner([preflight.PHASE]).run(ctx)
+    assert Path("/etc/sysctl.d/90-tk8s.conf") not in hosts["a"].files
+    assert not any(c.argv[:1] == ["sysctl"] for c in hosts["a"].calls)
+    assert not any(c.argv[:1] == ["mkdir"] for c in hosts["a"].calls)
+
+
+def test_same_named_interrupted_create_without_units_on_a_host_is_refused(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    good_lans(hosts)
+    other = model.dumps(ctx.require_cluster()).replace("operator: op", "operator: someone")
+    hosts["c"].files[ctx.state_dir / "cluster.yaml"] = other  # no unit dir: plan died early there
+    with pytest.raises(
+        PhaseFailed, match=r"host c: a cluster named demo already exists there \(not managed"
+    ):
+        Runner([preflight.PHASE]).run(ctx)

@@ -59,8 +59,9 @@ def test_list_shows_every_cluster_and_its_state(ctx: Context, host: FakeHost) ->
     (broken / "cluster.yaml").write_text("metadata: {name: broken}\nspec: {nodes: []}\n")
     lifecycle.list_clusters(ctx)
     out = "\n".join(host.lines)
-    assert out.splitlines()[0].split() == ["NAME", "NODES", "K8S", "DATAPATH", "STATE", "SUBNET"]
-    assert "demo         1+2     1.37.1   auto      Creating  172.22.0.0/24" in out
+    header = ["NAME", "NODES", "K8S", "DATAPATH", "STATE", "HOSTS", "SUBNET"]
+    assert out.splitlines()[0].split() == header
+    assert "demo         1+2     1.37.1   auto      Creating  -      172.22.0.0/24" in out
     assert "broken       " in out and "cluster.yaml" in out  # an unreadable file hides nothing
 
 
@@ -494,3 +495,240 @@ def test_use_normalises_a_state_kubeconfig_from_before_the_renaming(
     doc = kubeconfig.load(host.files[home / ".kube" / "config"])
     assert [c["name"] for c in doc["contexts"]] == ["demo"] and doc["current-context"] == "demo"
     assert doc["clusters"][0]["cluster"]["server"] == "https://172.22.0.253:6443"
+
+
+# ---- several hosts
+
+
+def multi_on_disk(ctx: Context, hosts: dict[str, FakeHost]) -> model.Cluster:
+    c = ctx.require_cluster()
+    state = ctx.paths.state_dir(c.name)
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "cluster.yaml").write_text(model.dumps(c))
+    for h in hosts.values():
+        h.files[state / "cluster.yaml"] = model.dumps(c)
+        h.responses[("hostname",)] = Result(0, "op\n", "")
+    return c
+
+
+def test_load_cluster_builds_the_hosts_and_refuses_a_copy_managed_elsewhere(
+    multi_ctx: tuple[Context, dict[str, FakeHost]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, hosts = multi_ctx
+    multi_on_disk(ctx, hosts)
+    built: dict[str, FakeHost] = {"a": hosts["a"], "b": FakeHost(label="b"), "c": FakeHost()}
+    monkeypatch.setattr("tk8s.hosts.build", lambda *a, **k: built)
+    ctx.hosts = {}
+    c = lifecycle.load_cluster(ctx, "demo")
+    assert c.multi_host and ctx.hosts is built
+    hosts["a"].responses[("hostname",)] = Result(0, "someone-else\n", "")
+    with pytest.raises(
+        lifecycle.ClusterError, match="cluster demo is managed from op; run tkctl there"
+    ):
+        lifecycle.load_cluster(ctx, "demo")
+
+
+def test_state_of_multi_host_is_running_stopped_or_degraded(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    c = ctx.require_cluster().model_copy(
+        update={"status": model.Status(phase="Ready", tk8s="t", operator="op")}
+    )
+    assert lifecycle.state_of(ctx, c) == "Stopped"
+    for h in hosts.values():
+        h.active.add("demo.target")
+    assert lifecycle.state_of(ctx, c) == "Running"
+    hosts["c"].active.discard("demo.target")
+    assert lifecycle.state_of(ctx, c) == "Degraded"
+
+
+def test_get_clusters_shows_the_host_count_and_managed_from(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    multi_on_disk(ctx, hosts)
+    lifecycle.list_clusters(ctx)
+    out = "\n".join(hosts["a"].lines)
+    header = out.splitlines()[0].split()
+    assert header == ["NAME", "NODES", "K8S", "DATAPATH", "STATE", "HOSTS", "SUBNET"]
+    assert "demo         3+2     1.37.1   auto      Creating  3      192.168.1.0/24" in out
+    hosts["a"].responses[("hostname",)] = Result(0, "pve-b\n", "")
+    hosts["a"].lines.clear()
+    lifecycle.list_clusters(ctx)
+    out = "\n".join(hosts["a"].lines)
+    assert "demo         3+2     1.37.1   auto      managed   3      192.168.1.0/24 from op" in out
+
+
+def test_single_host_list_prints_a_dash_for_hosts(ctx: Context, host: FakeHost) -> None:
+    on_disk(ctx, host)
+    lifecycle.list_clusters(ctx)
+    assert "demo         1+2     1.37.1   auto      Creating  -      172.22.0.0/24" in "\n".join(
+        host.lines
+    )
+
+
+def test_describe_lists_hosts_and_the_host_of_every_node(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    ready = model.Status(phase="Ready", tk8s="test", operator="op")
+    ctx.cluster = ctx.require_cluster().model_copy(update={"status": ready})
+    c = multi_on_disk(ctx, hosts)
+    hosts["b"].active.add("demo.target")
+    hosts["a"].responses[("kubectl",)] = Result(1, "", "")
+    lifecycle.describe(ctx, c, None)
+    out = hosts["a"].lines
+    i = out.index("Hosts:")
+    assert out[i + 1 : i + 5] == [
+        "  NAME     SSH                   IFACE    TARGET",
+        "  a        (this host)           ens18    inactive",
+        "  b        tux@192.168.1.231     ens18    active",
+        "  c        192.168.1.232         eth0     inactive",
+    ]
+    assert (
+        "  NAME                     ROLE           IP             RESOURCES      JOIN        HOST"
+        in out
+    )
+    assert any(ln.startswith("  demo-control-plane-2 ") and ln.endswith(" b") for ln in out)
+    text = "\n".join(out)
+    assert "  routers:  demo-router-1 192.168.1.65 on a, demo-router-2 192.168.1.66 on b" in text
+    assert "  nodes and LoadBalancer IPs (192.168.1.85-192.168.1.89) are on the LAN" in text
+    assert (
+        "             range 192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.89  shim 192.168.1.67"
+        in text
+    )
+    assert "from another machine" not in text and "State:       Degraded" in text
+
+
+def test_stop_and_start_touch_every_host(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    c = ctx.require_cluster()
+    units.run(ctx)
+    lifecycle.stop(ctx, c)
+    stops = {
+        n: [k.argv for k in h.calls if k.argv[:2] == ["systemctl", "stop"]]
+        for n, h in hosts.items()
+    }
+    assert stops["a"] == [
+        [
+            "systemctl",
+            "stop",
+            "demo.target",
+            "demo-router-1.service",
+            "demo-control-plane-1.service",
+            "demo-worker-1.service",
+        ]
+    ]
+    assert stops["c"] == [["systemctl", "stop", "demo.target", "demo-control-plane-3.service"]]
+    fresh = "".join(f"{n.name} True 2999-01-01T00:00:00Z\n" for n in c.spec.nodes)
+    hosts["a"].responses[("kubectl", "get", "nodes", "-o")] = Result(0, fresh, "")
+    hosts["a"].responses[("kubectl", "get", "nodes", "--no-headers")] = Result(0, "x Ready\n", "")
+    lifecycle.start(ctx, c)
+    for n, h in hosts.items():
+        assert ["systemctl", "start", "demo.target"] in [k.argv for k in h.calls], n
+    del hosts["c"].files[ctx.state_dir / "nodes" / "demo-control-plane-3" / "meminfo"]
+    with pytest.raises(lifecycle.ClusterError, match="files its nodes mount are missing"):
+        lifecycle.start(ctx, c)
+
+
+def test_load_cluster_keeps_the_callers_quiet_setting(
+    multi_ctx: tuple[Context, dict[str, FakeHost]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, hosts = multi_ctx
+    multi_on_disk(ctx, hosts)
+    seen: dict[str, object] = {}
+
+    def build(*a: object, **k: object) -> dict[str, FakeHost]:
+        seen.update(k)
+        return hosts
+
+    monkeypatch.setattr("tk8s.hosts.build", build)
+    ctx.hosts = {}
+    lifecycle.load_cluster(ctx, "demo")
+    assert seen["quiet"] is False  # the `$ ssh …` lines show like the local ones
+    assert hosts["a"].quiet is False
+
+
+def test_get_clusters_judges_a_multi_host_cluster_by_every_host(
+    multi_ctx: tuple[Context, dict[str, FakeHost]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, hosts = multi_ctx
+    ready = model.Status(phase="Ready", tk8s="test", operator="op")
+    ctx.cluster = ctx.require_cluster().model_copy(update={"status": ready})
+    multi_on_disk(ctx, hosts)
+    monkeypatch.setattr("tk8s.hosts.build", lambda *a, **k: hosts)
+    ctx.hosts = {}
+    ctx.cluster = None  # get clusters starts from nothing: every row is its own cluster
+    hosts["b"].active.add("demo.target")  # the operator's own target is down
+    lifecycle.list_clusters(ctx)
+    assert "demo         3+2     1.37.1   auto      Degraded  3      192.168.1.0/24" in "\n".join(
+        hosts["a"].lines
+    )
+
+
+def test_stop_and_start_include_an_operator_that_runs_no_node(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, _ = multi_ctx
+    op = FakeHost()
+    ctx.host = op
+    c = ctx.require_cluster()
+    units.run(ctx)
+    lifecycle.stop(ctx, c)
+    assert ["systemctl", "stop", "demo.target"] in [k.argv for k in op.calls]
+    fresh = "".join(f"{n.name} True 2999-01-01T00:00:00Z\n" for n in c.spec.nodes)
+    op.responses[("kubectl", "get", "nodes", "-o")] = Result(0, fresh, "")
+    op.responses[("kubectl", "get", "nodes", "--no-headers")] = Result(0, "x Ready\n", "")
+    lifecycle.start(ctx, c)
+    assert ["systemctl", "start", "demo.target"] in [k.argv for k in op.calls]
+
+
+def test_an_unreachable_host_reads_as_down_not_as_a_crash(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    """ssh exit 255 raises in general (an unreachable host is never "nothing there"), but the
+    read-only verbs have to describe an outage, not die in it."""
+    from tk8s.host import HostError
+
+    ctx, hosts = multi_ctx
+    ready = model.Status(phase="Ready", tk8s="test", operator="op")
+    c = ctx.require_cluster().model_copy(update={"status": ready})
+    ctx.cluster = c
+    multi_on_disk(ctx, hosts)
+    for h in hosts.values():
+        h.active.add("demo.target")
+    hosts["c"].responses[("systemctl", "is-active")] = HostError(["ssh"], 255, "No route to host")
+    hosts["c"].responses[("true",)] = HostError(["ssh"], 255, "No route to host")
+    assert lifecycle.state_of(ctx, c) == "Degraded"
+    hosts["a"].responses[("kubectl",)] = Result(1, "", "")
+    lifecycle.describe(ctx, c, None)
+    rows = [ln for ln in hosts["a"].lines if ln.startswith("  c        192.168.1.232")]
+    assert rows and rows[0].endswith("unreachable")
+    hosts["a"].lines.clear()
+    lifecycle.list_clusters(ctx)
+    assert "Degraded" in "\n".join(hosts["a"].lines)
+
+
+def test_stop_and_start_skip_an_unreachable_host_and_name_it(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    from tk8s.host import HostError
+
+    ctx, hosts = multi_ctx
+    c = ctx.require_cluster()
+    units.run(ctx)
+    down = HostError(["ssh"], 255, "No route to host")
+    hosts["b"].responses = {("systemctl",): down, **hosts["b"].responses}
+    with pytest.raises(lifecycle.ClusterError, match="host b unreachable; stopped c, a"):
+        lifecycle.stop(ctx, c)
+    stops_c = [k.argv for k in hosts["c"].calls if k.argv[:2] == ["systemctl", "stop"]]
+    assert stops_c == [["systemctl", "stop", "demo.target", "demo-control-plane-3.service"]]
+    fresh = "".join(f"{n.name} True 2999-01-01T00:00:00Z\n" for n in c.spec.nodes)
+    hosts["a"].responses[("kubectl", "get", "nodes", "-o")] = Result(0, fresh, "")
+    hosts["a"].responses[("kubectl", "get", "nodes", "--no-headers")] = Result(0, "x Ready\n", "")
+    with pytest.raises(lifecycle.ClusterError, match="host b unreachable; started c, a"):
+        lifecycle.start(ctx, c)
+    assert ["systemctl", "start", "demo.target"] in [k.argv for k in hosts["c"].calls]

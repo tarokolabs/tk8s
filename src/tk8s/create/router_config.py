@@ -63,16 +63,20 @@ def vrrp_block(c: model.Cluster, r: model.Router) -> str:
     if r.priority is None:
         return ""
     delay = '            preempt-delay "10"\n' if r.priority == 200 else ""
+    prefix = c.spec.network.nodes.prefixlen
+    # one VRID per segment (RFC 5798): on a shared LAN the floating address's last octet
+    # keeps two clusters apart; a single host's bridge is its own segment, 10 as before
+    vrid = int(c.floating_ip) & 0xFF if c.multi_host else 10
     return (
         "high-availability {\n"
         "    vrrp {\n"
         "        group tk8s {\n"
-        f"            address {c.floating_ip}/24 {{\n"
+        f"            address {c.floating_ip}/{prefix} {{\n"
         "            }\n"
         '            interface "eth0"\n'
         f"{delay}"
         f'            priority "{r.priority}"\n'
-        '            vrid "10"\n'
+        f'            vrid "{vrid}"\n'
         "        }\n"
         "    }\n"
         "}"

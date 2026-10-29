@@ -450,3 +450,156 @@ def test_node_sizes_names_a_line_it_cannot_parse(ctx: Context, host: FakeHost) -
         "FAIL  node sizes — demo-worker-1: unexpected line 'demo-worker-1 2 4Gi'; "
         "demo-worker-2: not in kubectl get nodes"
     ]
+
+
+# ---- several hosts
+
+from tests.fixtures import running_multi_answers  # noqa: E402
+from tk8s.verify.hosts import check_hosts  # noqa: E402
+from tk8s.verify.report import Report  # noqa: E402
+
+
+def test_hosts_check_passes_when_every_host_is_reachable_with_its_target_and_shim(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    running_multi_answers(hosts, ctx)
+    r = Report(ctx)
+    check_hosts(r)
+    assert hosts["a"].lines[-1] == "PASS  hosts: 3/3 reachable, target active, shim tk8s-demo up"
+    assert ["ip", "-o", "link", "show", "tk8s-demo"] in [c.argv for c in hosts["a"].calls]
+    assert ["ip", "-o", "link", "show", "tk8s-demo"] not in [c.argv for c in hosts["c"].calls]
+    assert (r.passed, r.failed) == (1, 0)
+
+
+def test_hosts_check_names_each_hosts_trouble(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    running_multi_answers(hosts, ctx)
+    hosts["b"].responses[("true",)] = Result(255, "", "Connection refused\n")
+    hosts["c"].active.discard("demo.target")
+    hosts["a"].responses[("ip", "-o", "link", "show", "tk8s-demo")] = Result(1, "", "")
+    r = Report(ctx)
+    check_hosts(r)
+    assert hosts["a"].lines[-1] == (
+        "FAIL  hosts — a: shim tk8s-demo missing; b: unreachable (Connection refused); "
+        "c: target inactive"
+    )
+
+
+def test_single_host_verify_has_no_hosts_line(ctx: Context, host: FakeHost) -> None:
+    healthy(ctx, host)
+    verify.run(ctx)
+    assert not any("hosts" in ln for ln in host.lines if ln.startswith(("PASS", "FAIL", "SKIP")))
+    assert "[hosts]" not in host.lines
+
+
+def test_verify_refuses_a_stopped_cluster_but_runs_on_a_degraded_one(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    c = ctx.require_cluster()
+    assert c.status is not None
+    ctx.cluster = c.model_copy(update={"status": c.status.model_copy(update={"phase": "Ready"})})
+    running_multi_answers(hosts, ctx)
+    for h in hosts.values():
+        h.active.discard("demo.target")
+    with pytest.raises(verify.VerifyError, match="cluster demo is not running"):
+        verify.run(ctx)
+    hosts["a"].active.add("demo.target")
+    hosts["b"].active.add("demo.target")  # c is down: Degraded, and the checks say so
+    hosts["a"].responses[("kubectl", "create", "ns")] = Result(0, "", "")
+    assert verify.run(ctx, only="hosts") == 1
+    assert "FAIL  hosts — c: target inactive" in hosts["a"].lines
+
+
+def test_storage_check_finds_the_pv_directory_on_any_node_host(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    running_multi_answers(hosts, ctx)
+    ctx.options.verify_timeout = 15
+    hosts["a"].responses[("kubectl", "logs", "-n", "tk-verify", "writer")] = Result(
+        0, "verify-ok\n", ""
+    )
+    hosts["a"].responses[("kubectl", "get", "pvc", "-n", "tk-verify", "pvc", "-o")] = Result(
+        0, "pvc-1234", ""
+    )
+    hosts["c"].dirs.add(ctx.state_dir / "storage" / "pvc-1234_tk-verify_pvc")
+    r = Report(ctx)
+    platform.check_storage(r)
+    assert f"PASS  PV data on host ({ctx.state_dir}/storage)" in hosts["a"].lines
+
+
+def test_xff_expects_the_operators_source_address_on_several_hosts(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    r = Report(ctx)
+    r.gateway_ip = "192.168.1.85"
+    hosts["a"].responses[("ip", "-4", "route", "get", "192.168.1.85")] = Result(
+        0, "192.168.1.85 dev tk8s-demo src 192.168.1.67 uid 1000\n", ""
+    )
+    hosts["a"].responses[("curl", "-s", "-m", "8", "-H")] = Result(0, "192.168.1.67", "")
+    from tk8s.verify.gateway import check_xff
+
+    check_xff(r)
+    assert "PASS  X-Forwarded-For carries the client IP (192.168.1.67)" in hosts["a"].lines
+
+
+def test_verify_runs_on_a_degraded_cluster_and_names_the_unreachable_host(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    from tk8s.host import HostError
+
+    ctx, hosts = multi_ctx
+    c = ctx.require_cluster()
+    assert c.status is not None
+    ctx.cluster = c.model_copy(update={"status": c.status.model_copy(update={"phase": "Ready"})})
+    running_multi_answers(hosts, ctx)
+    hosts["c"].responses[("true",)] = HostError(["ssh"], 255, "No route to host")
+    hosts["c"].responses[("systemctl", "is-active")] = HostError(["ssh"], 255, "No route to host")
+    hosts["a"].responses[("kubectl", "create", "ns")] = Result(0, "", "")
+    assert verify.run(ctx, only="hosts") == 1
+    assert "FAIL  hosts — c: unreachable (No route to host)" in hosts["a"].lines
+
+
+def test_router_check_names_a_router_whose_host_is_unreachable(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    from tk8s.host import HostError
+
+    ctx, hosts = multi_ctx
+    running_multi_answers(hosts, ctx)
+    ctx.options.verify_timeout = 15
+    hosts["a"].responses[("curl", "-sk", "--max-time", "5")] = Result(0, "ok", "")
+    down = HostError(["ssh"], 255, "No route to host")
+    hosts["b"].responses = {("podman",): down, **hosts["b"].responses}  # before the specifics
+    r = Report(ctx)
+    from tk8s.verify.ha import check_router
+
+    check_router(r)
+    lines = [ln for ln in hosts["a"].lines if ln.startswith(("PASS", "FAIL"))]
+    assert lines[0].startswith("PASS  apiserver router mh-router-1") or lines[0].startswith(
+        "PASS  apiserver router demo-router-1"
+    )
+    assert "FAIL  apiserver router demo-router-2 (192.168.1.66) — host b unreachable" in lines[1]
+    assert any(ln.startswith("FAIL  router VRRP") for ln in lines)
+
+
+def test_hosts_check_wants_the_shim_to_carry_its_address(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    running_multi_answers(hosts, ctx)
+    hosts["a"].responses[("ip", "-o", "-4", "addr", "show", "dev", "tk8s-demo")] = Result(0, "", "")
+    r = Report(ctx)
+    check_hosts(r)
+    assert "FAIL  hosts — a: shim tk8s-demo has no address (want 192.168.1.67)" in hosts["a"].lines
+    hosts["a"].responses[("ip", "-o", "-4", "addr", "show", "dev", "tk8s-demo")] = Result(
+        0, "5: tk8s-demo    inet 192.168.1.67/32 scope global tk8s-demo\n", ""
+    )
+    hosts["a"].lines.clear()
+    check_hosts(r)
+    assert hosts["a"].lines[-1] == "PASS  hosts: 3/3 reachable, target active, shim tk8s-demo up"

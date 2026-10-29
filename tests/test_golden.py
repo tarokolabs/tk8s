@@ -44,6 +44,21 @@ def normalise(out: str, tmp: Path) -> str:
             "bgp",
             ["create", "cluster", "bgp", "--control-planes", "3", "--ha", "bgp", "--dry-run"],
         ),
+        (
+            "multi",
+            [
+                "create",
+                "cluster",
+                "multi",
+                "--preset",
+                "ha",
+                "--hosts",
+                "a=local,b=tux@192.168.1.231,c=192.168.1.232",
+                "--ip-range",
+                "192.168.1.64-70,192.168.1.80-89",
+                "--dry-run",
+            ],
+        ),
     ],
 )
 def test_dry_run_matches_golden(

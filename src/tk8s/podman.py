@@ -11,7 +11,10 @@ Kind = Literal["container", "volume", "network", "image"]
 
 
 def exists(ctx: Context, kind: Kind, name: str) -> bool:
-    r = ctx.host.run(["podman", kind, "exists", name], sudo=True, check=False)
+    """A container is asked for on the host it runs on; images, volumes and networks on
+    ctx.host (per-host callers use ctx.on(host))."""
+    host = ctx.host_for(name) if kind == "container" else ctx.host
+    r = host.run(["podman", kind, "exists", name], sudo=True, check=False)
     return r.returncode == 0
 
 
@@ -22,7 +25,7 @@ def node_volumes(node: str) -> list[str]:
 def exec_(ctx: Context, node: str, *argv: str, input: str | None = None) -> Result:
     """A command inside the node, as root, output captured, never raising; stdin needs -i."""
     dash_i = ["-i"] if input is not None else []
-    return ctx.host.run(
+    return ctx.host_for(node).run(
         ["podman", "exec", *dash_i, node, *argv], sudo=True, input=input, capture=True, check=False
     )
 

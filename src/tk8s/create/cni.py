@@ -7,7 +7,7 @@ and the chart are vendored under manifests/, so nothing here fetches from helm.c
 from pathlib import Path
 from typing import Literal
 
-from .. import images, model
+from .. import hosts, images
 from ..phases import Context, Phase, PhaseFailed, wait_for
 from .kubeadm import kubectl, kubectl_env
 
@@ -15,13 +15,13 @@ Datapath = Literal["netkit", "veth"]
 
 
 def resolve_datapath(ctx: Context) -> Datapath:
-    """auto: netkit needs kernel 6.8; older kernels get veth."""
+    """auto: netkit needs kernel 6.8; older kernels get veth. On several hosts the oldest
+    kernel decides: one node without netkit would be one node without a network."""
     d = ctx.require_cluster().spec.datapath
     if d != "auto":
         return d
-    rel = ctx.host.run(["uname", "-r"], capture=True).stdout.strip()
-    major, minor = (int(x.split("-")[0]) for x in rel.split(".")[:2])
-    return "netkit" if (major, minor) >= (6, 8) else "veth"
+    oldest = min(hosts.kernel(h) for _, h in ctx.node_hosts())
+    return "netkit" if oldest >= (6, 8) else "veth"
 
 
 def cilium_install_argv(ctx: Context, action: str, datapath: Datapath) -> list[str]:
@@ -54,17 +54,20 @@ def cilium_install_argv(ctx: Context, action: str, datapath: Datapath) -> list[s
 
 
 def lb_pool_manifest(ctx: Context) -> str:
-    start, stop = ctx.require_cluster().spec.network.lb_range.split("-")
+    """The pool's blocks: one A-B per segment of lb_range (a lone address is its own block)."""
     text = (ctx.paths.home / "manifests" / "cilium-lb.yaml").read_text()
-    return text.replace("${LBNET}.200", start).replace("${LBNET}.219", stop)
+    blocks = ""
+    for seg in ctx.require_cluster().spec.network.lb_range.split(","):
+        start, _, stop = seg.partition("-")
+        blocks += f"  - start: {start}\n    stop: {stop or start}\n"
+    return text.replace("  - start: ${LBNET}.200\n    stop: ${LBNET}.219\n", blocks)
 
 
 def record_datapath(ctx: Context, datapath: Datapath) -> None:
     """cni records the datapath it resolved; a resume must not lose it when rewriting the file."""
     c = ctx.require_cluster()
     spec = c.spec.model_copy(update={"datapath_resolved": datapath})
-    ctx.cluster = c.model_copy(update={"spec": spec})
-    ctx.host.write(ctx.state_dir / "cluster.yaml", model.dumps(ctx.cluster))
+    ctx.save_cluster(c.model_copy(update={"spec": spec}))
 
 
 def _kubectl(ctx: Context, *args: str, input: str | None = None, check: bool = True) -> int:

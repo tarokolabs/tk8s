@@ -4,6 +4,7 @@ two-router cluster also has exactly one VRRP MASTER and one BACKUP."""
 
 from .. import model
 from ..create import router, router_state
+from ..host import HostError
 from .report import Report
 
 
@@ -68,7 +69,12 @@ def _check_bgp(r: Report, c: model.Cluster, rt: model.Router, ready: str) -> Non
 def _check_vrrp(r: Report, c: model.Cluster) -> None:
     """Exactly one MASTER and one BACKUP, whichever router holds which (router-1 takes the
     address back ten seconds after it boots, so the pair may be swapped for a moment)."""
-    states = {rt.name: router_state.vrrp(r.ctx, rt) or "unavailable" for rt in c.routers}
+    states: dict[str, str] = {}
+    for rt in c.routers:
+        try:
+            states[rt.name] = router_state.vrrp(r.ctx, rt) or "unavailable"
+        except HostError:
+            states[rt.name] = "unreachable"
     listed = ", ".join(f"{n} {s}" for n, s in states.items())
     if sorted(states.values()) == ["BACKUP", "MASTER"]:
         r.ok(f"router VRRP: {listed}")
@@ -87,9 +93,12 @@ def check_router(r: Report) -> None:
     c = r.ctx.require_cluster()
     ready = _readyz(r, str(c.endpoint_ip))
     for rt in c.routers:
-        if c.spec.network.ha == "proxy":
-            _check_proxy(r, c, rt, ready)
-        else:
-            _check_bgp(r, c, rt, ready)
+        try:
+            if c.spec.network.ha == "proxy":
+                _check_proxy(r, c, rt, ready)
+            else:
+                _check_bgp(r, c, rt, ready)
+        except HostError:  # the router's host is away: that is the finding
+            r.ng(f"apiserver router {_label(c, rt)}", f"host {rt.host} unreachable")
     if len(c.routers) == 2:
         _check_vrrp(r, c)
