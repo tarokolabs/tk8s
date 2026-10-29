@@ -684,3 +684,29 @@ def test_stop_and_start_include_an_operator_that_runs_no_node(
     op.responses[("kubectl", "get", "nodes", "--no-headers")] = Result(0, "x Ready\n", "")
     lifecycle.start(ctx, c)
     assert ["systemctl", "start", "demo.target"] in [k.argv for k in op.calls]
+
+
+def test_an_unreachable_host_reads_as_down_not_as_a_crash(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    """ssh exit 255 raises in general (an unreachable host is never "nothing there"), but the
+    read-only verbs have to describe an outage, not die in it."""
+    from tk8s.host import HostError
+
+    ctx, hosts = multi_ctx
+    ready = model.Status(phase="Ready", tk8s="test", operator="op")
+    c = ctx.require_cluster().model_copy(update={"status": ready})
+    ctx.cluster = c
+    multi_on_disk(ctx, hosts)
+    for h in hosts.values():
+        h.active.add("demo.target")
+    hosts["c"].responses[("systemctl", "is-active")] = HostError(["ssh"], 255, "No route to host")
+    hosts["c"].responses[("true",)] = HostError(["ssh"], 255, "No route to host")
+    assert lifecycle.state_of(ctx, c) == "Degraded"
+    hosts["a"].responses[("kubectl",)] = Result(1, "", "")
+    lifecycle.describe(ctx, c, None)
+    rows = [ln for ln in hosts["a"].lines if ln.startswith("  c        192.168.1.232")]
+    assert rows and rows[0].endswith("unreachable")
+    hosts["a"].lines.clear()
+    lifecycle.list_clusters(ctx)
+    assert "Degraded" in "\n".join(hosts["a"].lines)

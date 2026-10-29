@@ -21,7 +21,12 @@ def check_hosts(r: Report) -> None:
             why = reach.stderr.strip().splitlines()[-1] if reach.stderr.strip() else "no answer"
             trouble.append(f"{name}: unreachable ({why})")
             continue
-        if not h.is_active(f"{c.name}.target"):
+        try:
+            active = h.is_active(f"{c.name}.target")
+        except HostError as err:
+            trouble.append(f"{name}: unreachable ({str(err).rsplit(': ', 1)[-1]})")
+            continue
+        if not active:
             trouble.append(f"{name}: target inactive")
         if h is r.ctx.host and c.spec.network.shim is not None:
             up = h.run(["ip", "-o", "link", "show", shim], capture=True, check=False)

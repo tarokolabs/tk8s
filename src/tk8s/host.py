@@ -599,6 +599,10 @@ class FakeHost(Host):
         self.dirs.add(path)
 
     def is_active(self, unit: str) -> bool:
+        # an exception in the table for systemctl is-active stands in for a host that is away
+        answer = self._answer(["systemctl", "is-active", "--quiet", unit])
+        if isinstance(answer, Exception):
+            raise answer
         return unit in self.active
 
     def symlink(self, path: Path, target: Path) -> None:

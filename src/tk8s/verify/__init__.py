@@ -84,7 +84,8 @@ def run(ctx: Context, only: str | None = None) -> int:
         raise VerifyError(
             f"cluster {c.name} is not fully created; rerun tkctl create cluster {c.name}"
         )
-    if lifecycle.state_of(ctx, c) != "Running":
+    state = lifecycle.state_of(ctx, c)
+    if state not in ("Running", "Degraded"):  # Degraded: the checks say which host is out
         raise VerifyError(f"cluster {c.name} is not running (tkctl start cluster {c.name})")
     if only is not None and only not in {n for n, _, _ in CHECKS}:
         raise PhaseFailed(f"unknown phase {only!r}; phases: {', '.join(n for n, _, _ in CHECKS)}")

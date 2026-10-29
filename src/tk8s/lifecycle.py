@@ -8,6 +8,7 @@ from . import hosts, kubeconfig, model
 from .create import PHASES, units
 from .create.kubeadm import kubectl
 from .describe_router import describe_router
+from .host import Host, HostError
 from .phases import Context, poll_until
 
 
@@ -62,10 +63,19 @@ def state_of(ctx: Context, c: model.Cluster) -> str:
         return "Creating"
     if not c.multi_host:
         return "Running" if ctx.host.is_active(f"{c.name}.target") else "Stopped"
-    up = [h.is_active(f"{c.name}.target") for _, h in ctx.node_hosts()]
+    up = [target_up(h, c.name) for _, h in ctx.node_hosts()]
     if all(up):
         return "Running"
     return "Degraded" if any(up) else "Stopped"
+
+
+def target_up(host: Host, cluster: str) -> bool | None:
+    """Whether the cluster's target runs on the host; None when the host does not answer (an
+    outage is something to describe, not to die in)."""
+    try:
+        return host.is_active(f"{cluster}.target")
+    except HostError:
+        return None
 
 
 # ---- get clusters
@@ -194,9 +204,10 @@ def describe_hosts(ctx: Context, c: model.Cluster) -> None:
     ctx.say("Hosts:")
     ctx.say(f"  {'NAME':<8} {'SSH':<21} {'IFACE':<8} TARGET")
     for h in c.spec.hosts or []:
-        up = ctx.hosts[h.name].is_active(f"{c.name}.target") if h.name in ctx.hosts else False
+        up = target_up(ctx.hosts[h.name], c.name) if h.name in ctx.hosts else False
         ssh = h.ssh or "(this host)"
-        ctx.say(f"  {h.name:<8} {ssh:<21} {h.iface:<8} {'active' if up else 'inactive'}")
+        target = "unreachable" if up is None else ("active" if up else "inactive")
+        ctx.say(f"  {h.name:<8} {ssh:<21} {h.iface:<8} {target}")
 
 
 def describe_status(ctx: Context, c: model.Cluster) -> None:

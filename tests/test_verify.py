@@ -495,7 +495,7 @@ def test_single_host_verify_has_no_hosts_line(ctx: Context, host: FakeHost) -> N
     assert "[hosts]" not in host.lines
 
 
-def test_verify_refuses_a_degraded_multi_host_cluster(
+def test_verify_refuses_a_stopped_cluster_but_runs_on_a_degraded_one(
     multi_ctx: tuple[Context, dict[str, FakeHost]],
 ) -> None:
     ctx, hosts = multi_ctx
@@ -503,9 +503,15 @@ def test_verify_refuses_a_degraded_multi_host_cluster(
     assert c.status is not None
     ctx.cluster = c.model_copy(update={"status": c.status.model_copy(update={"phase": "Ready"})})
     running_multi_answers(hosts, ctx)
-    hosts["c"].active.discard("demo.target")
+    for h in hosts.values():
+        h.active.discard("demo.target")
     with pytest.raises(verify.VerifyError, match="cluster demo is not running"):
         verify.run(ctx)
+    hosts["a"].active.add("demo.target")
+    hosts["b"].active.add("demo.target")  # c is down: Degraded, and the checks say so
+    hosts["a"].responses[("kubectl", "create", "ns")] = Result(0, "", "")
+    assert verify.run(ctx, only="hosts") == 1
+    assert "FAIL  hosts — c: target inactive" in hosts["a"].lines
 
 
 def test_storage_check_finds_the_pv_directory_on_any_node_host(
@@ -540,3 +546,20 @@ def test_xff_expects_the_operators_source_address_on_several_hosts(
 
     check_xff(r)
     assert "PASS  X-Forwarded-For carries the client IP (192.168.1.67)" in hosts["a"].lines
+
+
+def test_verify_runs_on_a_degraded_cluster_and_names_the_unreachable_host(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    from tk8s.host import HostError
+
+    ctx, hosts = multi_ctx
+    c = ctx.require_cluster()
+    assert c.status is not None
+    ctx.cluster = c.model_copy(update={"status": c.status.model_copy(update={"phase": "Ready"})})
+    running_multi_answers(hosts, ctx)
+    hosts["c"].responses[("true",)] = HostError(["ssh"], 255, "No route to host")
+    hosts["c"].responses[("systemctl", "is-active")] = HostError(["ssh"], 255, "No route to host")
+    hosts["a"].responses[("kubectl", "create", "ns")] = Result(0, "", "")
+    assert verify.run(ctx, only="hosts") == 1
+    assert "FAIL  hosts — c: unreachable (No route to host)" in hosts["a"].lines
