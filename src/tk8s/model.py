@@ -15,6 +15,8 @@ Role = Literal["control-plane", "worker"]
 NODE_NAME = r"^[a-z][a-z0-9-]*$"
 CLUSTER_NAME = r"^[a-z][a-z0-9-]{0,15}$"
 MEMORY = r"^[0-9]+[gm]$"
+HOST_NAME = r"^[a-z][a-z0-9-]{0,31}$"
+RANGE = r"^[0-9.]+-[0-9.]+$"
 
 
 class Strict(BaseModel):
@@ -24,6 +26,14 @@ class Strict(BaseModel):
 # ---- what the user writes: a -f file, or the flags turned into the same shape
 
 
+class UserHost(Strict):
+    """A host of a multi-host cluster: the name cluster.yaml and the output call it, and how
+    to reach it ([user@]host[:port]); no ssh means the host tkctl runs on."""
+
+    name: str = Field(pattern=HOST_NAME)
+    ssh: str | None = None
+
+
 class NodeGroup(Strict):
     role: Role
     count: int = Field(default=1, ge=1)
@@ -31,6 +41,7 @@ class NodeGroup(Strict):
     cpu: int = Field(default=2, ge=1)
     memory: str = "4G"  # podman size (4G, 4096M); plan lower-cases it
     join: bool = True
+    host: str | None = None  # multi-host: the host name, or "auto"/omitted for round-robin
 
 
 class UserNetwork(Strict):
@@ -39,6 +50,8 @@ class UserNetwork(Strict):
     ha: Literal["proxy", "bgp"] | None = None
     routers: Literal[1, 2] | None = None
     vip: IPv4Address | None = None
+    range: str | None = Field(default=None, pattern=RANGE)  # multi-host: A-B on the hosts' LAN
+    router_hosts: list[str] | None = None  # multi-host: where the router container(s) run
 
 
 class UserSpec(Strict):
@@ -48,6 +61,7 @@ class UserSpec(Strict):
     gvisor: bool = False
     network: UserNetwork | None = None
     nodes: list[NodeGroup]
+    hosts: list[UserHost] | None = None  # present: a multi-host cluster
 
 
 class Metadata(Strict):
@@ -67,6 +81,7 @@ class NodeRequest(Strict):
     role: Role
     cpu: int | None = Field(default=None, ge=1)
     memory: str | None = Field(default=None, pattern=MEMORY)
+    host: str | None = None  # multi-host: --host, else the least loaded host
 
 
 def node_image(k8s: str) -> str:
@@ -76,6 +91,16 @@ def node_image(k8s: str) -> str:
 # ---- what the platform keeps in <state dir>/cluster.yaml
 
 
+class Host(Strict):
+    """A host of a multi-host cluster as plan recorded it: the LAN interface the macvlan network
+    hangs off and the address of the host's shim interface (both from the hosts' LAN)."""
+
+    name: str = Field(pattern=HOST_NAME)
+    ssh: str | None = None
+    iface: str
+    shim: IPv4Address
+
+
 class Node(Strict):
     role: Role
     name: str = Field(pattern=NODE_NAME)
@@ -83,6 +108,7 @@ class Node(Strict):
     cpu: int = Field(ge=1)
     memory: str = Field(pattern=MEMORY)
     join: bool = True
+    host: str | None = None  # multi-host: the host this node's container runs on
 
 
 class Network(Strict):
@@ -96,6 +122,8 @@ class Network(Strict):
     lb_range: str
     pods: IPv4Network
     services: IPv4Network
+    range: str | None = Field(default=None, pattern=RANGE)  # multi-host: the reserved LAN range
+    router_hosts: list[str] | None = None  # multi-host: one host per router container
 
     @model_validator(mode="after")
     def _vip_follows_ha(self) -> Network:
@@ -115,6 +143,7 @@ class Router(Strict):
     dir: str  # the state subdirectory (router, router-1, router-2)
     ip: IPv4Address
     priority: int | None
+    host: str | None = None  # multi-host: the host it runs on
 
 
 class Spec(Strict):
@@ -125,6 +154,37 @@ class Spec(Strict):
     gvisor: bool
     network: Network
     nodes: list[Node] = Field(min_length=1)
+    hosts: list[Host] | None = None  # present: a multi-host cluster
+
+    @model_validator(mode="after")
+    def _hosts_consistent(self) -> Spec:
+        """hosts, range and the placement fields come and go together, and every placement
+        names a listed host."""
+        net = self.network
+        if (self.hosts is None) != (net.range is None):
+            raise ValueError("spec.hosts and spec.network.range go together")
+        if self.hosts is None:
+            if any(n.host is not None for n in self.nodes):
+                raise ValueError("a node has a host on a single-host cluster (no spec.hosts)")
+            if net.router_hosts is not None:
+                raise ValueError("spec.network.router_hosts needs spec.hosts")
+            return self
+        names: list[str] = []
+        for h in self.hosts:
+            if h.name in names:
+                raise ValueError(f"host name {h.name} is used twice")
+            names.append(h.name)
+        if sum(1 for h in self.hosts if h.ssh is None) > 1:
+            raise ValueError("at most one host without ssh (the one tkctl runs on)")
+        for n in self.nodes:
+            if n.host not in names:
+                raise ValueError(f"node host {n.host} is not in spec.hosts")
+        if net.router_hosts is None or len(net.router_hosts) != net.routers:
+            raise ValueError(f"router_hosts must name {net.routers} hosts")
+        for r in net.router_hosts:
+            if r not in names:
+                raise ValueError(f"router host {r} is not in spec.hosts")
+        return self
 
 
 class Status(Strict):
@@ -134,6 +194,7 @@ class Status(Strict):
     # True from the version that sizes nodes (capacity/allocatable from cpu/memory); a cluster
     # created before it keeps today's units and reports the host, and verify skips the check.
     node_capacity: bool = False
+    operator: str | None = None  # multi-host: the hostname of the machine that manages it
 
 
 class Cluster(Strict):
@@ -164,24 +225,58 @@ class Cluster(Strict):
         return self.spec.network.router
 
     @property
+    def multi_host(self) -> bool:
+        return self.spec.hosts is not None
+
+    @property
+    def host_names(self) -> list[str]:
+        return [h.name for h in self.spec.hosts or []]
+
+    @property
+    def range_start(self) -> IPv4Address:
+        """The first address of the reserved LAN range (multi-host): the router's floating one."""
+        if self.spec.network.range is None:
+            raise ValueError(f"cluster {self.name} has no spec.network.range (single host)")
+        return IPv4Address(self.spec.network.range.split("-")[0])
+
+    def host_of(self, container: str) -> str | None:
+        """The host a node or router container runs on; None on a single-host cluster or for a
+        name the cluster does not have."""
+        for n in self.spec.nodes:
+            if n.name == container:
+                return n.host
+        for r in self.routers:
+            if r.name == container:
+                return r.host
+        return None
+
+    @property
     def routers(self) -> list[Router]:
+        """On a single host router-1 and -2 sit at .251/.252 of the node subnet; on several hosts
+        at the two addresses after the floating one in the range."""
         net = self.spec.network
+        hosts: list[str | None] = [None, None]
+        if net.router_hosts is not None:
+            hosts = list(net.router_hosts)
         if net.routers == 1:
-            return [Router(name=f"{self.name}-router", dir="router", ip=net.router, priority=None)]
-        base = int(net.nodes.network_address)
+            return [
+                Router(
+                    name=f"{self.name}-router",
+                    dir="router",
+                    ip=net.router,
+                    priority=None,
+                    host=hosts[0],
+                )
+            ]
+        if net.range is None:
+            base = int(net.nodes.network_address)
+            first, second = IPv4Address(base + 251), IPv4Address(base + 252)
+        else:
+            first, second = self.range_start + 1, self.range_start + 2
+        n = self.name
         return [
-            Router(
-                name=f"{self.name}-router-1",
-                dir="router-1",
-                ip=IPv4Address(base + 251),
-                priority=200,
-            ),
-            Router(
-                name=f"{self.name}-router-2",
-                dir="router-2",
-                ip=IPv4Address(base + 252),
-                priority=100,
-            ),
+            Router(name=f"{n}-router-1", dir="router-1", ip=first, priority=200, host=hosts[0]),
+            Router(name=f"{n}-router-2", dir="router-2", ip=second, priority=100, host=hosts[1]),
         ]
 
     @property
@@ -291,8 +386,16 @@ def peek(path: Path) -> tuple[int | None, str | None]:
     """(spec.network.index, spec.kubernetes) of any cluster.yaml on the host, however old or
     broken: subnet allocation and store pruning must not be blocked by another cluster's file."""
     try:
-        raw = yaml.safe_load(path.read_text())
-    except OSError, yaml.YAMLError:
+        return peek_text(path.read_text())
+    except OSError:
+        return None, None
+
+
+def peek_text(text: str) -> tuple[int | None, str | None]:
+    """peek() for a file already read (a copy on another host)."""
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError:
         return None, None
     spec = raw.get("spec") if isinstance(raw, dict) else None
     if not isinstance(spec, dict):

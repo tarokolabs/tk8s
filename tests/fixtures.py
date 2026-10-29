@@ -68,6 +68,92 @@ def ha_user() -> model.UserCluster:
     )
 
 
+# demo spread over three hosts (a is the operator, b and c over ssh), bgp mode with two routers,
+# resolved from the range 192.168.1.64-192.168.1.95 on the hosts' LAN 192.168.1.0/24 via ens18:
+# router .64 floating, router-1 .65 (a), router-2 .66 (b), shims .67/.68/.69, control planes
+# .70/.71/.72 on a/b/c, workers .73/.74 on a/b, LoadBalancer pool .76-.95, VIP 172.23.0.1.
+MULTI_YAML = """\
+apiVersion: taroko.io/v1alpha1
+kind: Cluster
+metadata:
+  name: demo
+spec:
+  kubernetes: "1.37.1"
+  cni: cilium
+  datapath: auto
+  gvisor: false
+  network:
+    index: 0
+    nodes: 192.168.1.0/24
+    gateway: 192.168.1.1
+    router: 192.168.1.64
+    ha: bgp
+    routers: 2
+    vip: 172.23.0.1
+    lb_range: 192.168.1.76-192.168.1.95
+    pods: 10.244.0.0/21
+    services: 10.98.0.0/24
+    range: 192.168.1.64-192.168.1.95
+    router_hosts:
+      - a
+      - b
+  nodes:
+    - role: control-plane
+      name: demo-control-plane-1
+      ip: 192.168.1.70
+      cpu: 2
+      memory: 4g
+      join: true
+      host: a
+    - role: control-plane
+      name: demo-control-plane-2
+      ip: 192.168.1.71
+      cpu: 2
+      memory: 4g
+      join: true
+      host: b
+    - role: control-plane
+      name: demo-control-plane-3
+      ip: 192.168.1.72
+      cpu: 2
+      memory: 4g
+      join: true
+      host: c
+    - role: worker
+      name: demo-worker-1
+      ip: 192.168.1.73
+      cpu: 2
+      memory: 4g
+      join: true
+      host: a
+    - role: worker
+      name: demo-worker-2
+      ip: 192.168.1.74
+      cpu: 2
+      memory: 4g
+      join: true
+      host: b
+  hosts:
+    - name: a
+      iface: ens18
+      shim: 192.168.1.67
+    - name: b
+      ssh: tux@192.168.1.231
+      iface: ens18
+      shim: 192.168.1.68
+    - name: c
+      ssh: 192.168.1.232
+      iface: ens18
+      shim: 192.168.1.69
+status:
+  phase: Creating
+  completed: {}
+  tk8s: test
+  node_capacity: true
+  operator: op
+"""
+
+
 def resolved(
     user: model.UserCluster,
     *,
