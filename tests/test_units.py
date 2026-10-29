@@ -403,7 +403,8 @@ def test_each_host_gets_its_own_network_units_target_and_routes(
     assert "ExecStart=ip route replace 192.168.1.88/31 dev tk8s-demo src 192.168.1.67\n" in routes
     assert "ExecStart=ip route replace 10.244.0.0/21 via 192.168.1.68 dev tk8s-demo\n" in routes
     assert "ExecStart=ip route replace 172.23.0.1/32 via 192.168.1.64 dev tk8s-demo\n" in routes
-    assert "ExecStop=-ip link del tk8s-demo\n" in routes and "Wants=" not in routes
+    assert "ExecStop=-ip link del tk8s-demo\n" in routes
+    assert "Wants=demo-control-plane" not in routes  # the first control plane is elsewhere
     boot = a[state / "router-1" / "tkctl.boot"]
     assert 'address "192.168.1.65/24"' in boot and "next-hop 192.168.1.1" in boot
     assert "address 192.168.1.64/24 {" in boot  # the VRRP group
@@ -503,3 +504,12 @@ def test_macvlan_containers_carry_their_own_dns_the_network_none(
     assert "DNS=1.1.1.1\n" in single[UNIT_DIR / "demo.network"]
     assert "DNS=" not in single[UNIT_DIR / "demo-control-plane-1.container"]
     assert "DNS=" not in single[UNIT_DIR / "demo-router.container"]
+
+
+def test_macvlan_routes_unit_waits_for_the_network(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, _ = multi_ctx
+    by = {hf.name: hf for hf in units.per_host(ctx)}
+    routes = by["a"].files[SYSTEMD / "demo-routes.service"]
+    assert "Wants=network-online.target\nAfter=network-online.target\n" in routes

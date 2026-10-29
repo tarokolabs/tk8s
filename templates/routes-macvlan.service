@@ -6,6 +6,9 @@
 [Unit]
 Description=tk8s cluster $cluster host routes (shim $shim on $iface)
 PartOf=$cluster.target
+# the shim hangs off $iface: it has to be up and addressed first (a reboot)
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=oneshot

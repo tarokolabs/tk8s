@@ -16,7 +16,7 @@
 | 權限 | `sudo` 免密碼；每一道 sudo 指令執行時都會印出 |
 | 網路 | 第一次需要對外連線，下載約 3 GB（含 router image）；之後建叢集不需要網路 |
 | 其他 | `curl`、`git` |
-| 多主機（`--hosts`） | 每台主機都符合以上條件、在同一個 L2 網段，跑 `tkctl` 的機器能以金鑰 ssh 到每台並 `sudo -n`；LAN 上保留一些位址給叢集（`--ip-range`，可以不連續）；主機有 `arping` 探測較快，沒有就用 ping |
+| 多主機（`--hosts`） | 每台主機都符合以上條件、在同一個 L2 網段，跑 `tkctl` 的機器能以金鑰 ssh 到每台並 `sudo -n`，ssh 登入的使用者用 POSIX shell（bash、sh）且 rc 檔不印東西（tkctl 讀的是指令輸出）；LAN 上保留一些位址給叢集（`--ip-range`，可以不連續）；主機有 `arping` 探測較快，沒有就用 ping |
 
 ## 安裝
 
@@ -50,7 +50,7 @@ tkctl create cluster ha --control-planes 3 --defer-join # 額外的 control plan
 tkctl create cluster ha --control-planes 3 --ha bgp     # 同樣三台，apiserver 入口改走 BGP + ECMP 的 anycast VIP
 tkctl create cluster ha --preset ha                      # 3 control plane + 3 worker、bgp、兩台 router；[plan] 會印出展開的旗標
 tkctl create cluster demo --routers 2                    # 兩台 VyOS router 跑 VRRP，.253 在兩台之間漂移；停一台叢集照常
-tkctl create cluster ha --preset ha --hosts a=local,b=tux@192.168.1.231,c=192.168.1.232 --ip-range 192.168.1.64-70,192.168.1.80-89
+tkctl create cluster ha --preset ha --hosts a=local,b=tux@192.168.1.231,c=192.168.1.232 --ip-range 192.168.1.64-79,192.168.1.208-223
                                                          # 節點、router 分散到三台主機（macvlan，節點拿 LAN 的位址），任一台主機掛掉叢集照常
 tkctl create cluster sandbox --gvisor                   # 多一個 gvisor 的 RuntimeClass
 tkctl create cluster old --k8s 1.36.5                   # 次新版

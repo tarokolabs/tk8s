@@ -142,6 +142,8 @@ tkctl 渲染的是 `tkctl.boot`；VyOS 開機前的 `vyos-preconfig-bootup.scrip
 
 **bgp 模式的非對稱路徑。** anycast VIP 的流量本來就是非對稱：節點送往 VIP 的封包經 router 的 ECMP 到某台 control plane，回覆從那台 control plane 直接回到節點，不經 router。單主機時一切在一台主機的 bridge 裡，沒有人在乎；跨主機時去程與回程走的是不同主機之間的線路，中間任何做 TCP 狀態追蹤的東西都會壞：lab 的 Proxmox 開著防火牆（`bridge-nf-call-iptables=1`、`PVEFW-FORWARD` 的 `INVALID -j DROP`），router 所在的 hypervisor 只看到 SYN、沒看到從別台回去的 SYN-ACK，之後的 ACK 與資料全被丟掉，症狀是 ping 與握手都通、TLS 的第一個資料封包就卡在 FIN-WAIT-1；而且因為 ECMP 以來源位址 hash，剛好分到 router 同一台主機上的 control plane 的節點不會遇到。解法在環境端：Proxmox 每台 node 設 host 防火牆選項 `nf_conntrack_allow_invalid: 1`（或關掉防火牆）；proxy 模式沒有這個前提（haproxy 終結連線，流量對稱）。
 
+**主機的核心參數。** shim 的來源位址是池裡的 `/32`，封包從 shim 出去、回覆從 parent 介面進來：主機若把 `rp_filter` 設成 1（RHEL 系的預設；Debian 是 0 或 2），回覆會被當成來源不對而丟掉，preflight 沒有檢查這個，症狀是操作台 ping 得到容器卻收不到回覆，把該介面的 `net.ipv4.conf.<iface>.rp_filter` 設成 2 即可。`arp_ignore=0`（預設）下，同一台主機上 parent 與 shim 都會回答對方位址的 ARP（ARP flux），對 macvlan 沒有影響，但 `ip neigh` 看到 shim 位址對應 parent 的 MAC 不要意外。
+
 **看得到的現象與邊界。** 主機的 `eth0` 位址連不到自己這台的容器（操作台經 shim），容器也連不到主機的 `eth0` 位址；`lscpu`／`nproc` 等節點內的現象同單主機。`verify` 多一段 `[hosts]`（每台 ssh 可達、target active、shim 存在），單主機不印。這版不支援：`--gvisor`（tarball 要送到每台）、`spec.network.nodes`／`router` 明寫、建立後增減主機（`spec.hosts` 固定；要加主機就重建）、不在同一個 L2 的操作台、把操作台搬到另一台**節點**主機（它需要 shim；搬到非節點的機器只要改 `status.operator` 並補上原操作台的 `ssh`）、`tkctl pull images --hosts`（在每台主機各跑，或讓 create 的 images phase 做）。沒有 `cluster.yaml` 的 `delete cluster` 只認得操作台這台，其他主機要各自跑一次。
 
 ## 主機的 sysctl

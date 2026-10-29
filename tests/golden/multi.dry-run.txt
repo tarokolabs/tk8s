@@ -666,6 +666,9 @@ WantedBy=multi-user.target
 [Unit]
 Description=tk8s cluster multi host routes (shim tk8s-multi on eth0)
 PartOf=multi.target
+# the shim hangs off eth0: it has to be up and addressed first (a reboot)
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=oneshot
