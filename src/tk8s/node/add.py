@@ -6,7 +6,7 @@ from ..create import addons, frr, kubeadm, nodes, preflight, router, units
 from ..create import images as create_images
 from ..create.plan import PlanError, check_memory_minimum
 from ..datatree import PreflightError
-from ..lifecycle import save_cluster
+from ..lifecycle import ClusterError, save_cluster
 from ..phases import Context, Phase, PhaseFailed, wait_for
 from .common import (
     find,
@@ -27,7 +27,10 @@ def plan_run(ctx: Context) -> None:
     c = ctx.require_cluster()
     if ctx.request is None:
         raise PhaseFailed("add node needs a request (role, size, join)")
-    n = plan_add(c, ctx.request)
+    try:
+        n = plan_add(c, ctx.request)
+    except ClusterError as err:
+        raise PhaseFailed(str(err)) from err
     grown = with_node(c, n)
     if units.sized(c):
         # the same refusals create makes, before the node is written into cluster.yaml: a node
@@ -35,13 +38,17 @@ def plan_run(ctx: Context) -> None:
         try:
             check_memory_minimum(n.memory)
             ctx.cluster = grown
-            preflight.check_host_fits(ctx)
+            if c.multi_host:
+                preflight.check_host_fits(ctx.on(ctx.host_for(n.name)), [n])
+            else:
+                preflight.check_host_fits(ctx)
         except (PlanError, PreflightError) as err:
             ctx.cluster = c
             raise PhaseFailed(str(err)) from err
     save_cluster(ctx, grown)
     ctx.node = n.name
-    ctx.say(f"  {n.name}: {n.role} at {n.ip}, {n.cpu} cpu, {n.memory}")
+    where = f" on {n.host}" if n.host else ""
+    ctx.say(f"  {n.name}: {n.role} at {n.ip}{where}, {n.cpu} cpu, {n.memory}")
 
 
 PLAN = Phase(
@@ -51,18 +58,20 @@ PLAN = Phase(
 
 def start_done(ctx: Context) -> bool:
     n = require_node(ctx)
-    if not ctx.host.is_active(f"{n}.service") or not router.all_synced(ctx, ctx.require_cluster()):
+    active = ctx.host_for(n).is_active(f"{n}.service")
+    if not active or not router.all_synced(ctx, ctx.require_cluster()):
         return False
     return nodes.systemd_state(ctx, n) in ("running", "degraded")
 
 
 def start_run(ctx: Context) -> None:
-    """daemon-reload picks the new unit up, the router learns the new backend list, the node
-    starts."""
+    """daemon-reload picks the new unit up (on the node's host), the router learns the new
+    backend list, the node starts."""
     n = require_node(ctx)
-    ctx.host.run(["systemctl", "daemon-reload"], sudo=True)
+    host = ctx.host_for(n)
+    host.run(["systemctl", "daemon-reload"], sudo=True)
     router.reload_all(ctx, ctx.require_cluster())
-    ctx.host.run(["systemctl", "start", f"{n}.service"], sudo=True)
+    host.run(["systemctl", "start", f"{n}.service"], sudo=True)
     nodes.wait_node(ctx, n)
 
 

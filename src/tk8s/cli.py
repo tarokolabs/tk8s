@@ -41,7 +41,8 @@ Usage:
   tkctl start cluster NAME
   tkctl use cluster NAME
   tkctl verify cluster NAME [--phase P] [--list-phases]
-  tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] [--no-join]
+  tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] [--host NAME]
+                         [--no-join]
   tkctl delete node CLUSTER NODE [--yes] [--phase P] [--list-phases]
   tkctl join node CLUSTER NODE
   tkctl pull images [--k8s VERSION] [--refresh]
@@ -193,6 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
     an.add_argument("--role")
     an.add_argument("--cpu", type=int)
     an.add_argument("--memory")
+    an.add_argument("--host")
     an.add_argument("--no-join", action="store_true")
     jn = (
         sub.add_parser("join", add_help=False)
@@ -257,7 +259,7 @@ def _usage_of(verb: str) -> str:
         "start": "usage: tkctl start cluster NAME",
         "use": "usage: tkctl use cluster NAME",
         "add": "usage: tkctl add node CLUSTER --role worker|control-plane "
-        "[--cpu N] [--memory SIZE] [--no-join]",
+        "[--cpu N] [--memory SIZE] [--host NAME] [--no-join]",
         "join": "usage: tkctl join node CLUSTER NODE",
     }[verb]
 

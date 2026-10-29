@@ -7,6 +7,7 @@ from pathlib import Path
 from .. import model, podman
 from ..create import kubeadm, nodefs, router, units
 from ..delete import node_volumes_gone, remove_containers, remove_node_volumes
+from ..host import Host
 from ..lifecycle import ClusterError, save_cluster
 from ..phases import Context, Phase, PhaseFailed, confirm, wait_for
 from .common import find, require_node, unit_file, without_node
@@ -86,12 +87,17 @@ DRAIN = Phase(
 )
 
 
+def _host(ctx: Context) -> Host:
+    """The host the node runs on (the operator on a single-host cluster)."""
+    return ctx.host_for(require_node(ctx))
+
+
 def stop_done(ctx: Context) -> bool:
-    return not ctx.host.is_active(f"{require_node(ctx)}.service")
+    return not _host(ctx).is_active(f"{require_node(ctx)}.service")
 
 
 def stop_run(ctx: Context) -> None:
-    ctx.host.run(["systemctl", "stop", f"{require_node(ctx)}.service"], sudo=True, check=False)
+    _host(ctx).run(["systemctl", "stop", f"{require_node(ctx)}.service"], sudo=True, check=False)
 
 
 STOP = Phase("stop", "stop the node's unit", stop_done, stop_run)
@@ -133,25 +139,25 @@ def node_dir(ctx: Context) -> Path:
 
 def units_done(ctx: Context) -> bool:
     c = trimmed(ctx)
+    host = _host(ctx)
     return (
-        not ctx.host.exists(unit_file(ctx))
-        and not ctx.host.exists(node_dir(ctx))
+        not host.exists(unit_file(ctx))
+        and not host.exists(node_dir(ctx))
         and units.done(ctx, c)
         and router.all_synced(ctx, c)
     )
 
 
 def units_run(ctx: Context) -> None:
-    """The target and config.boot are rendered without the node first, then its unit goes, then
-    systemd and the router learn about it."""
+    """The target and config.boot are rendered without the node first, then its unit goes (on
+    its host), then systemd there and the router learn about it."""
     n = require_node(ctx)
+    host = _host(ctx)
     units.run(ctx, trimmed(ctx))
-    ctx.host.run(["rm", "-f", str(unit_file(ctx))], sudo=True)
-    ctx.host.run(["rm", "-rf", str(node_dir(ctx))])
-    ctx.host.run(["systemctl", "daemon-reload"], sudo=True)
-    ctx.host.run(
-        ["systemctl", "reset-failed", f"{n}.service"], sudo=True, capture=True, check=False
-    )
+    host.run(["rm", "-f", str(unit_file(ctx))], sudo=True)
+    host.run(["rm", "-rf", str(node_dir(ctx))])
+    host.run(["systemctl", "daemon-reload"], sudo=True)
+    host.run(["systemctl", "reset-failed", f"{n}.service"], sudo=True, capture=True, check=False)
     router.reload_all(ctx, trimmed(ctx))
 
 

@@ -597,7 +597,7 @@ def test_node_verbs(
         (
             ["add", "node"],
             "usage: tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] "
-            "[--no-join]",
+            "[--host NAME] [--no-join]",
         ),
         (["join", "node", "demo"], "usage: tkctl join node CLUSTER NODE"),
         (["delete", "node", "demo"], "usage: tkctl delete node CLUSTER NODE [--yes]"),

@@ -205,7 +205,7 @@ def cmd_add_node(a: argparse.Namespace) -> int:
     if not a.cluster:
         raise UsageError(
             "usage: tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] "
-            "[--no-join]"
+            "[--host NAME] [--no-join]"
         )
     if a.role not in ("worker", "control-plane"):
         raise UsageError("--role must be worker or control-plane")
@@ -214,7 +214,7 @@ def cmd_add_node(a: argparse.Namespace) -> int:
     memory = normalize_memory(a.memory) if a.memory else None
     ctx = make_context()
     c = running_cluster(ctx, a.cluster)
-    ctx.request = model.NodeRequest(role=a.role, cpu=a.cpu, memory=memory)
+    ctx.request = model.NodeRequest(role=a.role, cpu=a.cpu, memory=memory, host=a.host)
     Runner([node_add.add_phase(join=not a.no_join)], record=False).run(ctx)
     print()
     if a.no_join:
