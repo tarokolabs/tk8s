@@ -1,0 +1,35 @@
+name: Bug report
+description: tkctl did not do what you expected — a create that stalls, a failing verify, a misbehaving node, a wrong doc.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command you ran, what you saw, and what you expected. Paste tkctl's output in full.
+      placeholder: |
+        tkctl create cluster demo --workers 2 stopped at [kubeadm/join] with:
+        ...
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Paste `tkctl version`, `podman --version`, `uname -r`, and the host's cores and memory (`nproc`, `free -g`).
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The commands in order, starting from a clean host; include the cluster.yaml if you used `-f`.
+      render: shell
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: |
+        `tkctl verify cluster <name>`, `tkctl describe cluster <name>`, and the kubelet log from inside the node (`sudo podman exec <node> journalctl -u kubelet -b --no-pager | tail -50`). Wrap long output in `<details>`.
+      render: shell
