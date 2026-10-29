@@ -448,10 +448,15 @@ def running_multi_answers(hosts: dict[str, FakeHost], ctx: Context) -> None:
     CNI plugins and the data tree on every host."""
     c = ctx.require_cluster()
     cps = [str(n.ip) for n in c.control_planes]
+    shim = c.spec.network.shim
     for name, h in hosts.items():
         h.responses[("id", "-u")] = Result(0, "1000\n", "")
         h.responses[("id", "-g")] = Result(0, "1000\n", "")
         h.active.add("demo.target")
+        if shim is not None:  # the operator's shim carries its address
+            h.responses[("ip", "-o", "-4", "addr", "show", "dev", "tk8s-demo")] = Result(
+                0, f"5: tk8s-demo    inet {shim}/32 scope global tk8s-demo\n", ""
+            )
         h.files[ctx.paths.cni_dir / "bridge"] = "elf"
         h.dirs.update({ctx.paths.data_dir, ctx.paths.clusters_dir, ctx.paths.wulin_dir})
         for n in c.spec.nodes:

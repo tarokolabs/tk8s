@@ -64,7 +64,10 @@ class Context:
         """Every host nodes run on, in cluster.yaml order; a single-host cluster is [("", host)]."""
         if self.cluster is None or not self.cluster.multi_host:
             return [("", self.host)]
-        return [(n, self.hosts[n]) for n in self.cluster.host_names if n in self.hosts]
+        for n in self.cluster.host_names:
+            if n not in self.hosts:
+                raise PhaseFailed(f"host {n} of cluster {self.cluster.name} has no connection")
+        return [(n, self.hosts[n]) for n in self.cluster.host_names]
 
     def remote_hosts(self) -> list[tuple[str, Host]]:
         return [(n, h) for n, h in self.node_hosts() if h is not self.host]

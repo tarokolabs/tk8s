@@ -277,3 +277,12 @@ def test_runner_record_updates_every_copy(
     Runner([Phase("x", "x", None, lambda ctx: None)]).run(ctx)
     for h in hosts.values():
         assert "  x: " in h.files[ctx.state_dir / "cluster.yaml"]
+
+
+def test_node_hosts_refuses_a_host_name_it_cannot_reach(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, _ = multi_ctx
+    del ctx.hosts["c"]
+    with pytest.raises(PhaseFailed, match="host c of cluster demo has no connection"):
+        ctx.node_hosts()

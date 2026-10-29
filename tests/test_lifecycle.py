@@ -710,3 +710,25 @@ def test_an_unreachable_host_reads_as_down_not_as_a_crash(
     hosts["a"].lines.clear()
     lifecycle.list_clusters(ctx)
     assert "Degraded" in "\n".join(hosts["a"].lines)
+
+
+def test_stop_and_start_skip_an_unreachable_host_and_name_it(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    from tk8s.host import HostError
+
+    ctx, hosts = multi_ctx
+    c = ctx.require_cluster()
+    units.run(ctx)
+    down = HostError(["ssh"], 255, "No route to host")
+    hosts["b"].responses = {("systemctl",): down, **hosts["b"].responses}
+    with pytest.raises(lifecycle.ClusterError, match="host b unreachable; stopped c, a"):
+        lifecycle.stop(ctx, c)
+    stops_c = [k.argv for k in hosts["c"].calls if k.argv[:2] == ["systemctl", "stop"]]
+    assert stops_c == [["systemctl", "stop", "demo.target", "demo-control-plane-3.service"]]
+    fresh = "".join(f"{n.name} True 2999-01-01T00:00:00Z\n" for n in c.spec.nodes)
+    hosts["a"].responses[("kubectl", "get", "nodes", "-o")] = Result(0, fresh, "")
+    hosts["a"].responses[("kubectl", "get", "nodes", "--no-headers")] = Result(0, "x Ready\n", "")
+    with pytest.raises(lifecycle.ClusterError, match="host b unreachable; started c, a"):
+        lifecycle.start(ctx, c)
+    assert ["systemctl", "start", "demo.target"] in [k.argv for k in hosts["c"].calls]

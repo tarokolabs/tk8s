@@ -32,6 +32,10 @@ def check_hosts(r: Report) -> None:
             up = h.run(["ip", "-o", "link", "show", shim], capture=True, check=False)
             if up.returncode != 0:
                 trouble.append(f"{name}: shim {shim} missing")
+                continue
+            addr = h.run(["ip", "-o", "-4", "addr", "show", "dev", shim], capture=True, check=False)
+            if f"inet {c.spec.network.shim}/32" not in addr.stdout:
+                trouble.append(f"{name}: shim {shim} has no address (want {c.spec.network.shim})")
     n = len(r.ctx.node_hosts())
     if trouble:
         r.ng("hosts", "; ".join(trouble))

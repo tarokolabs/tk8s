@@ -586,3 +586,20 @@ def test_router_check_names_a_router_whose_host_is_unreachable(
     )
     assert "FAIL  apiserver router demo-router-2 (192.168.1.66) — host b unreachable" in lines[1]
     assert any(ln.startswith("FAIL  router VRRP") for ln in lines)
+
+
+def test_hosts_check_wants_the_shim_to_carry_its_address(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    running_multi_answers(hosts, ctx)
+    hosts["a"].responses[("ip", "-o", "-4", "addr", "show", "dev", "tk8s-demo")] = Result(0, "", "")
+    r = Report(ctx)
+    check_hosts(r)
+    assert "FAIL  hosts — a: shim tk8s-demo has no address (want 192.168.1.67)" in hosts["a"].lines
+    hosts["a"].responses[("ip", "-o", "-4", "addr", "show", "dev", "tk8s-demo")] = Result(
+        0, "5: tk8s-demo    inet 192.168.1.67/32 scope global tk8s-demo\n", ""
+    )
+    hosts["a"].lines.clear()
+    check_hosts(r)
+    assert hosts["a"].lines[-1] == "PASS  hosts: 3/3 reachable, target active, shim tk8s-demo up"

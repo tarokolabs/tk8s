@@ -264,6 +264,7 @@ def stop(ctx: Context, c: model.Cluster) -> None:
     """systemctl waits only for the units it was given; the nodes and the LB are PartOf= the
     target and would still be stopping when a bare `stop <cluster>.target` returns: name them
     all (on every host, each its own)."""
+    done, away = [], []
     for name, h in ctx.target_hosts():
         units_ = [
             f"{c.name}.target",
@@ -272,9 +273,19 @@ def stop(ctx: Context, c: model.Cluster) -> None:
         ]
         # A node recorded in cluster.yaml but never given a unit (an add that died early) makes
         # systemctl exit non-zero after stopping everything else; that is not a failed stop.
-        r = h.run(["systemctl", "stop", *units_], sudo=True, capture=True, check=False)
+        try:
+            r = h.run(["systemctl", "stop", *units_], sudo=True, capture=True, check=False)
+        except HostError:  # the host is away: stop the others, then say so
+            away.append(name)
+            continue
+        done.append(name)
         if r.returncode != 0 and r.stderr.strip():
             ctx.say(f"  {r.stderr.strip().splitlines()[-1]}")
+    if away:
+        raise ClusterError(
+            f"host {', '.join(away)} unreachable; stopped {', '.join(done)}; stop the rest "
+            "when it is back (tkctl stop cluster again)"
+        )
     ctx.say(f"cluster {c.name} stopped")
 
 
@@ -296,8 +307,21 @@ def start(ctx: Context, c: model.Cluster) -> None:
             f"tkctl create cluster {c.name} writes them again"
         )
     since = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    for _, h in ctx.target_hosts():
-        h.run(["systemctl", "start", f"{c.name}.target"], sudo=True)
+    done, away = [], []
+    for name, h in ctx.target_hosts():
+        try:
+            h.run(["systemctl", "start", f"{c.name}.target"], sudo=True)
+        except HostError as err:
+            if err.returncode != 255:
+                raise
+            away.append(name)
+            continue
+        done.append(name)
+    if away:
+        raise ClusterError(
+            f"host {', '.join(away)} unreachable; started {', '.join(done)}; run tkctl start "
+            "cluster again when it is back"
+        )
 
     def all_fresh() -> bool:
         r = kubectl(ctx, "get", "nodes", "-o", f"jsonpath={READY_HEARTBEATS}")
