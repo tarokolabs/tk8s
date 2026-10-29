@@ -213,9 +213,16 @@ def parse_ssh(text: str) -> SshTarget:
 
 
 def default_control_dir() -> Path:
-    """Where the ControlMaster sockets go: the user's runtime directory (XDG)."""
+    """Where the ControlMaster sockets go: the user's runtime directory (XDG), or, where there
+    is none to create it in, a private directory under the temp dir (XDG's own fallback)."""
     runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
-    return Path(runtime) / "tk8s"
+    for d in (Path(runtime) / "tk8s", Path(tempfile.gettempdir()) / f"tk8s-{os.getuid()}"):
+        try:
+            d.mkdir(mode=0o700, parents=True, exist_ok=True)
+        except OSError:
+            continue
+        return d
+    raise HostError(["mkdir", str(runtime)], 1, "no runtime directory for ssh control sockets")
 
 
 class SshHost(Host):
