@@ -563,3 +563,26 @@ def test_verify_runs_on_a_degraded_cluster_and_names_the_unreachable_host(
     hosts["a"].responses[("kubectl", "create", "ns")] = Result(0, "", "")
     assert verify.run(ctx, only="hosts") == 1
     assert "FAIL  hosts — c: unreachable (No route to host)" in hosts["a"].lines
+
+
+def test_router_check_names_a_router_whose_host_is_unreachable(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    from tk8s.host import HostError
+
+    ctx, hosts = multi_ctx
+    running_multi_answers(hosts, ctx)
+    ctx.options.verify_timeout = 15
+    hosts["a"].responses[("curl", "-sk", "--max-time", "5")] = Result(0, "ok", "")
+    down = HostError(["ssh"], 255, "No route to host")
+    hosts["b"].responses = {("podman",): down, **hosts["b"].responses}  # before the specifics
+    r = Report(ctx)
+    from tk8s.verify.ha import check_router
+
+    check_router(r)
+    lines = [ln for ln in hosts["a"].lines if ln.startswith(("PASS", "FAIL"))]
+    assert lines[0].startswith("PASS  apiserver router mh-router-1") or lines[0].startswith(
+        "PASS  apiserver router demo-router-1"
+    )
+    assert "FAIL  apiserver router demo-router-2 (192.168.1.66) — host b unreachable" in lines[1]
+    assert any(ln.startswith("FAIL  router VRRP") for ln in lines)
