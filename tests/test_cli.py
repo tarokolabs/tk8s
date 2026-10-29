@@ -767,14 +767,17 @@ def test_preset_cannot_be_bypassed_by_an_abbreviated_or_glued_flag(
 
 
 def test_hosts_flag_expands_to_spec_hosts_and_range() -> None:
-    from tk8s.args import parse_hosts_flag
+    from tk8s.args import UsageError, parse_hosts_flag
 
-    hosts = parse_hosts_flag("a,b=tux@h:2222,pve-c")
+    hosts = parse_hosts_flag("a=local,b=tux@h:2222,pve-c")
     assert [(h.name, h.ssh) for h in hosts] == [
-        ("a", "a"),
+        ("a", None),
         ("b", "tux@h:2222"),
         ("pve-c", "pve-c"),
     ]
+    assert [(h.name, h.ssh) for h in parse_hosts_flag("local,b=h")] == [("local", None), ("b", "h")]
+    with pytest.raises(UsageError, match="only one host can be local"):
+        parse_hosts_flag("a=local,b=local")
 
 
 def test_dry_run_multi_host_prints_hosts_placement_and_remote_files(
@@ -788,19 +791,21 @@ def test_dry_run_multi_host_prints_hosts_placement_and_remote_files(
         "--control-planes",
         "3",
         "--hosts",
-        "a,b=tux@192.168.1.231,c=192.168.1.232",
+        "a=local,b=tux@192.168.1.231,c=192.168.1.232",
         "--ip-range",
-        "192.168.1.64-192.168.1.95",
+        "192.168.1.64-70,192.168.1.80-89",
         "--dry-run",
     )
     assert rc == 0
-    assert "  host a: eth0, shim 192.168.1.65\n" in out  # one router: no router-1/-2 addresses
+    assert "  host a: eth0 (this host, shim 192.168.1.65)\n" in out  # one router: no router-1/-2
+    assert "  host b: eth0\n" in out
     assert (
         "  placement: demo-control-plane-1 a, demo-control-plane-2 b, demo-control-plane-3 c" in out
     )
     assert "  routers: demo-router a\n" in out
     assert "warning" not in out
-    assert "    range: 192.168.1.64-192.168.1.95\n" in out and "  operator: dry-run\n" in out
+    assert "    range: 192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.89\n" in out
+    assert "  operator: dry-run\n" in out
     assert (
         "# ---- tux@192.168.1.231:/etc/containers/systemd/demo/demo-control-plane-2.container"
         in out
@@ -817,7 +822,7 @@ def test_dry_run_warns_when_one_host_holds_most_control_planes(
         "--control-planes",
         "3",
         "--hosts",
-        "a,b=h",
+        "a=local,b=h",
         "--ip-range",
         "192.168.1.64-192.168.1.95",
         "--dry-run",

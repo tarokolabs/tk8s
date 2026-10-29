@@ -54,9 +54,13 @@ def cilium_install_argv(ctx: Context, action: str, datapath: Datapath) -> list[s
 
 
 def lb_pool_manifest(ctx: Context) -> str:
-    start, stop = ctx.require_cluster().spec.network.lb_range.split("-")
+    """The pool's blocks: one A-B per segment of lb_range (a lone address is its own block)."""
     text = (ctx.paths.home / "manifests" / "cilium-lb.yaml").read_text()
-    return text.replace("${LBNET}.200", start).replace("${LBNET}.219", stop)
+    blocks = ""
+    for seg in ctx.require_cluster().spec.network.lb_range.split(","):
+        start, _, stop = seg.partition("-")
+        blocks += f"  - start: {start}\n    stop: {stop or start}\n"
+    return text.replace("  - start: ${LBNET}.200\n    stop: ${LBNET}.219\n", blocks)
 
 
 def record_datapath(ctx: Context, datapath: Datapath) -> None:

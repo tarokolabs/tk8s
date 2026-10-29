@@ -2,6 +2,7 @@
 its macvlan shim up. Nothing to say on a single host."""
 
 from ..create.units import shim_name
+from ..host import HostError, Result
 from .report import Report
 
 
@@ -12,17 +13,24 @@ def check_hosts(r: Report) -> None:
     shim = shim_name(c.name)
     trouble: list[str] = []
     for name, h in r.ctx.node_hosts():
-        reach = h.run(["true"], capture=True, check=False)
+        try:
+            reach = h.run(["true"], capture=True, check=False)
+        except HostError as err:
+            reach = Result(err.returncode, "", str(err).rsplit(": ", 1)[-1])
         if reach.returncode != 0:
             why = reach.stderr.strip().splitlines()[-1] if reach.stderr.strip() else "no answer"
             trouble.append(f"{name}: unreachable ({why})")
             continue
         if not h.is_active(f"{c.name}.target"):
             trouble.append(f"{name}: target inactive")
-        if h.run(["ip", "-o", "link", "show", shim], capture=True, check=False).returncode != 0:
-            trouble.append(f"{name}: shim {shim} missing")
+        if h is r.ctx.host and c.spec.network.shim is not None:
+            up = h.run(["ip", "-o", "link", "show", shim], capture=True, check=False)
+            if up.returncode != 0:
+                trouble.append(f"{name}: shim {shim} missing")
     n = len(r.ctx.node_hosts())
     if trouble:
         r.ng("hosts", "; ".join(trouble))
-    else:
+    elif c.spec.network.shim is not None:
         r.ok(f"hosts: {n}/{n} reachable, target active, shim {shim} up")
+    else:
+        r.ok(f"hosts: {n}/{n} reachable, target active")

@@ -693,16 +693,26 @@ def test_add_node_defaults_to_the_least_loaded_host_and_the_next_free_address(
     ctx, _ = multi_node_ctx(multi_ctx)
     c = ctx.require_cluster()  # a: 2 nodes, b: 2, c: 1
     n = node_common.plan_add(c, model.NodeRequest(role="worker"))
-    assert (n.name, n.host, str(n.ip)) == ("demo-worker-3", "c", "192.168.1.75")
+    assert (n.name, n.host, str(n.ip)) == ("demo-worker-3", "c", "192.168.1.82")
     n = node_common.plan_add(c, model.NodeRequest(role="worker", host="a"))
     assert n.host == "a"
     full = node_common.with_node(c, n)
     with pytest.raises(
         lifecycle.ClusterError,
-        match=r"no free node address left in 192.168.1.64-192.168.1.95 \(the last 20 are the "
-        r"LoadBalancer pool\)",
+        match=r"no free node address left in 192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.89 "
+        r"\(the last 5 are the LoadBalancer pool\)",
     ):
-        node_common.next_ip(full)
+        node_common.next_ip(
+            node_common.with_node(
+                node_common.with_node(
+                    full,
+                    n.model_copy(
+                        update={"name": "demo-worker-5", "ip": IPv4Address("192.168.1.83")}
+                    ),
+                ),
+                n.model_copy(update={"name": "demo-worker-6", "ip": IPv4Address("192.168.1.84")}),
+            )
+        )
 
 
 def test_add_node_host_unknown_or_on_single_host_is_refused(
@@ -733,8 +743,8 @@ def test_add_node_with_host_runs_units_and_start_there(
     assert ctx.node == "demo-worker-3"
     unit = ctx.paths.unit_dir / "demo" / "demo-worker-3.container"
     assert unit in hosts["c"].files and unit not in hosts["a"].files
-    assert "IP=192.168.1.75" in hosts["c"].files[unit]
-    assert "--mac-address 02:54:4b:a8:01:4b" in hosts["c"].files[unit]
+    assert "IP=192.168.1.82" in hosts["c"].files[unit]
+    assert "--mac-address 02:54:4b:a8:01:52" in hosts["c"].files[unit]
     assert "demo-worker-3.service" in hosts["c"].files[ctx.paths.systemd_dir / "demo.target"]
     a = argvs(hosts["c"])
     assert a.index(["systemctl", "daemon-reload"]) < a.index(
@@ -744,7 +754,7 @@ def test_add_node_with_host_runs_units_and_start_there(
     for h in hosts.values():
         saved = model.load_text(h.files[ctx.state_dir / "cluster.yaml"])
         assert saved.spec.nodes[-1].host == "c"
-    assert "  demo-worker-3: worker at 192.168.1.75 on c, 2 cpu, 4g" in hosts["a"].lines
+    assert "  demo-worker-3: worker at 192.168.1.82 on c, 2 cpu, 4g" in hosts["a"].lines
 
 
 def test_add_node_refuses_a_node_bigger_than_its_host(

@@ -1,9 +1,9 @@
 [plan] resolve cluster.yaml: defaults, subnet, node names
   preset ha: --control-planes 3 --workers 3 --ha bgp --routers 2
   cluster multi: 3 control planes + 3 workers, K8s 1.37.1, subnet 192.168.1.0/24
-  host a: eth0, shim 192.168.1.67
-  host b: eth0, shim 192.168.1.68
-  host c: eth0, shim 192.168.1.69
+  host a: eth0 (this host, shim 192.168.1.67)
+  host b: eth0
+  host c: eth0
   placement: multi-control-plane-1 a, multi-control-plane-2 b, multi-control-plane-3 c, multi-worker-1 a, multi-worker-2 b, multi-worker-3 c
   routers: multi-router-1 a, multi-router-2 b
 # ---- <TMP>/clusters/multi/cluster.yaml
@@ -24,52 +24,53 @@ spec:
     ha: bgp
     routers: 2
     vip: 172.23.0.1
-    lb_range: 192.168.1.76-192.168.1.95
+    lb_range: 192.168.1.85-192.168.1.89
     pods: 10.244.0.0/21
     services: 10.98.0.0/24
-    range: 192.168.1.64-192.168.1.95
+    range: 192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.89
     router_hosts:
       - a
       - b
+    shim: 192.168.1.67
   nodes:
     - role: control-plane
       name: multi-control-plane-1
-      ip: 192.168.1.70
+      ip: 192.168.1.68
       cpu: 2
       memory: 4g
       join: true
       host: a
     - role: control-plane
       name: multi-control-plane-2
-      ip: 192.168.1.71
+      ip: 192.168.1.69
       cpu: 2
       memory: 4g
       join: true
       host: b
     - role: control-plane
       name: multi-control-plane-3
-      ip: 192.168.1.72
+      ip: 192.168.1.70
       cpu: 2
       memory: 4g
       join: true
       host: c
     - role: worker
       name: multi-worker-1
-      ip: 192.168.1.73
+      ip: 192.168.1.80
       cpu: 2
       memory: 4g
       join: true
       host: a
     - role: worker
       name: multi-worker-2
-      ip: 192.168.1.74
+      ip: 192.168.1.81
       cpu: 2
       memory: 4g
       join: true
       host: b
     - role: worker
       name: multi-worker-3
-      ip: 192.168.1.75
+      ip: 192.168.1.82
       cpu: 2
       memory: 4g
       join: true
@@ -77,15 +78,12 @@ spec:
   hosts:
     - name: a
       iface: eth0
-      shim: 192.168.1.67
     - name: b
       ssh: tux@192.168.1.231
       iface: eth0
-      shim: 192.168.1.68
     - name: c
       ssh: 192.168.1.232
       iface: eth0
-      shim: 192.168.1.69
 status:
   phase: Creating
   completed: {}
@@ -111,52 +109,53 @@ spec:
     ha: bgp
     routers: 2
     vip: 172.23.0.1
-    lb_range: 192.168.1.76-192.168.1.95
+    lb_range: 192.168.1.85-192.168.1.89
     pods: 10.244.0.0/21
     services: 10.98.0.0/24
-    range: 192.168.1.64-192.168.1.95
+    range: 192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.89
     router_hosts:
       - a
       - b
+    shim: 192.168.1.67
   nodes:
     - role: control-plane
       name: multi-control-plane-1
-      ip: 192.168.1.70
+      ip: 192.168.1.68
       cpu: 2
       memory: 4g
       join: true
       host: a
     - role: control-plane
       name: multi-control-plane-2
-      ip: 192.168.1.71
+      ip: 192.168.1.69
       cpu: 2
       memory: 4g
       join: true
       host: b
     - role: control-plane
       name: multi-control-plane-3
-      ip: 192.168.1.72
+      ip: 192.168.1.70
       cpu: 2
       memory: 4g
       join: true
       host: c
     - role: worker
       name: multi-worker-1
-      ip: 192.168.1.73
+      ip: 192.168.1.80
       cpu: 2
       memory: 4g
       join: true
       host: a
     - role: worker
       name: multi-worker-2
-      ip: 192.168.1.74
+      ip: 192.168.1.81
       cpu: 2
       memory: 4g
       join: true
       host: b
     - role: worker
       name: multi-worker-3
-      ip: 192.168.1.75
+      ip: 192.168.1.82
       cpu: 2
       memory: 4g
       join: true
@@ -164,15 +163,12 @@ spec:
   hosts:
     - name: a
       iface: eth0
-      shim: 192.168.1.67
     - name: b
       ssh: tux@192.168.1.231
       iface: eth0
-      shim: 192.168.1.68
     - name: c
       ssh: 192.168.1.232
       iface: eth0
-      shim: 192.168.1.69
 status:
   phase: Creating
   completed: {}
@@ -198,52 +194,53 @@ spec:
     ha: bgp
     routers: 2
     vip: 172.23.0.1
-    lb_range: 192.168.1.76-192.168.1.95
+    lb_range: 192.168.1.85-192.168.1.89
     pods: 10.244.0.0/21
     services: 10.98.0.0/24
-    range: 192.168.1.64-192.168.1.95
+    range: 192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.89
     router_hosts:
       - a
       - b
+    shim: 192.168.1.67
   nodes:
     - role: control-plane
       name: multi-control-plane-1
-      ip: 192.168.1.70
+      ip: 192.168.1.68
       cpu: 2
       memory: 4g
       join: true
       host: a
     - role: control-plane
       name: multi-control-plane-2
-      ip: 192.168.1.71
+      ip: 192.168.1.69
       cpu: 2
       memory: 4g
       join: true
       host: b
     - role: control-plane
       name: multi-control-plane-3
-      ip: 192.168.1.72
+      ip: 192.168.1.70
       cpu: 2
       memory: 4g
       join: true
       host: c
     - role: worker
       name: multi-worker-1
-      ip: 192.168.1.73
+      ip: 192.168.1.80
       cpu: 2
       memory: 4g
       join: true
       host: a
     - role: worker
       name: multi-worker-2
-      ip: 192.168.1.74
+      ip: 192.168.1.81
       cpu: 2
       memory: 4g
       join: true
       host: b
     - role: worker
       name: multi-worker-3
-      ip: 192.168.1.75
+      ip: 192.168.1.82
       cpu: 2
       memory: 4g
       join: true
@@ -251,15 +248,12 @@ spec:
   hosts:
     - name: a
       iface: eth0
-      shim: 192.168.1.67
     - name: b
       ssh: tux@192.168.1.231
       iface: eth0
-      shim: 192.168.1.68
     - name: c
       ssh: 192.168.1.232
       iface: eth0
-      shim: 192.168.1.69
 status:
   phase: Creating
   completed: {}
@@ -309,21 +303,21 @@ interfaces {
 }
 protocols {
     bfd {
+        peer 192.168.1.68 {
+            interval {
+                multiplier "3"
+                receive "300"
+                transmit "300"
+            }
+        }
+        peer 192.168.1.69 {
+            interval {
+                multiplier "3"
+                receive "300"
+                transmit "300"
+            }
+        }
         peer 192.168.1.70 {
-            interval {
-                multiplier "3"
-                receive "300"
-                transmit "300"
-            }
-        }
-        peer 192.168.1.71 {
-            interval {
-                multiplier "3"
-                receive "300"
-                transmit "300"
-            }
-        }
-        peer 192.168.1.72 {
             interval {
                 multiplier "3"
                 receive "300"
@@ -339,33 +333,33 @@ protocols {
                 }
             }
         }
+        neighbor 192.168.1.68 {
+            address-family {
+                ipv4-unicast {
+                }
+            }
+            bfd {
+            }
+            remote-as "65001"
+            timers {
+                holdtime "9"
+                keepalive "3"
+            }
+        }
+        neighbor 192.168.1.69 {
+            address-family {
+                ipv4-unicast {
+                }
+            }
+            bfd {
+            }
+            remote-as "65001"
+            timers {
+                holdtime "9"
+                keepalive "3"
+            }
+        }
         neighbor 192.168.1.70 {
-            address-family {
-                ipv4-unicast {
-                }
-            }
-            bfd {
-            }
-            remote-as "65001"
-            timers {
-                holdtime "9"
-                keepalive "3"
-            }
-        }
-        neighbor 192.168.1.71 {
-            address-family {
-                ipv4-unicast {
-                }
-            }
-            bfd {
-            }
-            remote-as "65001"
-            timers {
-                holdtime "9"
-                keepalive "3"
-            }
-        }
-        neighbor 192.168.1.72 {
             address-family {
                 ipv4-unicast {
                 }
@@ -508,7 +502,7 @@ ContainerName=multi-control-plane-1
 Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
 HostName=multi-control-plane-1
 Network=multi.network
-IP=192.168.1.70
+IP=192.168.1.68
 Environment=TZ=Asia/Taipei
 # api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
 # mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
@@ -533,7 +527,7 @@ Volume=<TMP>/clusters/multi/nodes/multi-control-plane-1/sys-node:/sys/devices/sy
 Volume=<TMP>/clusters/multi/nodes/multi-control-plane-1/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
 Volume=<TMP>/clusters/multi/nodes/multi-control-plane-1/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
 StopTimeout=60
-PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:46
+PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:44
 
 [Service]
 # The node image stops with SIGRTMIN+3; systemd inside exits 130 on halt.
@@ -592,7 +586,7 @@ ContainerName=multi-worker-1
 Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
 HostName=multi-worker-1
 Network=multi.network
-IP=192.168.1.73
+IP=192.168.1.80
 Environment=TZ=Asia/Taipei
 # api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
 # mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
@@ -617,7 +611,7 @@ Volume=<TMP>/clusters/multi/nodes/multi-worker-1/sys-node:/sys/devices/system/no
 Volume=<TMP>/clusters/multi/nodes/multi-worker-1/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
 Volume=<TMP>/clusters/multi/nodes/multi-worker-1/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
 StopTimeout=60
-PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:49
+PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:50
 
 [Service]
 # The node image stops with SIGRTMIN+3; systemd inside exits 130 on halt.
@@ -653,14 +647,22 @@ RemainAfterExit=yes
 ExecStart=-ip link add tk8s-multi link eth0 type macvlan mode bridge
 ExecStart=ip link set tk8s-multi up
 ExecStart=ip addr replace 192.168.1.67/32 dev tk8s-multi
-ExecStart=ip route replace 192.168.1.64/27 dev tk8s-multi src 192.168.1.67
-ExecStart=ip route replace 10.244.0.0/21 via 192.168.1.70 dev tk8s-multi
-ExecStart=ip route replace 10.98.0.0/24 via 192.168.1.70 dev tk8s-multi
+ExecStart=ip route replace 192.168.1.64/30 dev tk8s-multi src 192.168.1.67
+ExecStart=ip route replace 192.168.1.68/31 dev tk8s-multi src 192.168.1.67
+ExecStart=ip route replace 192.168.1.70/32 dev tk8s-multi src 192.168.1.67
+ExecStart=ip route replace 192.168.1.80/29 dev tk8s-multi src 192.168.1.67
+ExecStart=ip route replace 192.168.1.88/31 dev tk8s-multi src 192.168.1.67
+ExecStart=ip route replace 10.244.0.0/21 via 192.168.1.68 dev tk8s-multi
+ExecStart=ip route replace 10.98.0.0/24 via 192.168.1.68 dev tk8s-multi
 ExecStart=ip route replace 172.23.0.1/32 via 192.168.1.64 dev tk8s-multi
-ExecStop=-ip route del 10.244.0.0/21 via 192.168.1.70 dev tk8s-multi
-ExecStop=-ip route del 10.98.0.0/24 via 192.168.1.70 dev tk8s-multi
+ExecStop=-ip route del 10.244.0.0/21 via 192.168.1.68 dev tk8s-multi
+ExecStop=-ip route del 10.98.0.0/24 via 192.168.1.68 dev tk8s-multi
 ExecStop=-ip route del 172.23.0.1/32 via 192.168.1.64 dev tk8s-multi
-ExecStop=-ip route del 192.168.1.64/27 dev tk8s-multi
+ExecStop=-ip route del 192.168.1.64/30 dev tk8s-multi
+ExecStop=-ip route del 192.168.1.68/31 dev tk8s-multi
+ExecStop=-ip route del 192.168.1.70/32 dev tk8s-multi
+ExecStop=-ip route del 192.168.1.80/29 dev tk8s-multi
+ExecStop=-ip route del 192.168.1.88/31 dev tk8s-multi
 ExecStop=-ip link del tk8s-multi
 
   $ ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/multi/nodes/multi-control-plane-1/sys-node/node0/cpu0
@@ -706,21 +708,21 @@ interfaces {
 }
 protocols {
     bfd {
+        peer 192.168.1.68 {
+            interval {
+                multiplier "3"
+                receive "300"
+                transmit "300"
+            }
+        }
+        peer 192.168.1.69 {
+            interval {
+                multiplier "3"
+                receive "300"
+                transmit "300"
+            }
+        }
         peer 192.168.1.70 {
-            interval {
-                multiplier "3"
-                receive "300"
-                transmit "300"
-            }
-        }
-        peer 192.168.1.71 {
-            interval {
-                multiplier "3"
-                receive "300"
-                transmit "300"
-            }
-        }
-        peer 192.168.1.72 {
             interval {
                 multiplier "3"
                 receive "300"
@@ -736,33 +738,33 @@ protocols {
                 }
             }
         }
+        neighbor 192.168.1.68 {
+            address-family {
+                ipv4-unicast {
+                }
+            }
+            bfd {
+            }
+            remote-as "65001"
+            timers {
+                holdtime "9"
+                keepalive "3"
+            }
+        }
+        neighbor 192.168.1.69 {
+            address-family {
+                ipv4-unicast {
+                }
+            }
+            bfd {
+            }
+            remote-as "65001"
+            timers {
+                holdtime "9"
+                keepalive "3"
+            }
+        }
         neighbor 192.168.1.70 {
-            address-family {
-                ipv4-unicast {
-                }
-            }
-            bfd {
-            }
-            remote-as "65001"
-            timers {
-                holdtime "9"
-                keepalive "3"
-            }
-        }
-        neighbor 192.168.1.71 {
-            address-family {
-                ipv4-unicast {
-                }
-            }
-            bfd {
-            }
-            remote-as "65001"
-            timers {
-                holdtime "9"
-                keepalive "3"
-            }
-        }
-        neighbor 192.168.1.72 {
             address-family {
                 ipv4-unicast {
                 }
@@ -905,7 +907,7 @@ ContainerName=multi-control-plane-2
 Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
 HostName=multi-control-plane-2
 Network=multi.network
-IP=192.168.1.71
+IP=192.168.1.69
 Environment=TZ=Asia/Taipei
 # api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
 # mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
@@ -930,7 +932,7 @@ Volume=<TMP>/clusters/multi/nodes/multi-control-plane-2/sys-node:/sys/devices/sy
 Volume=<TMP>/clusters/multi/nodes/multi-control-plane-2/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
 Volume=<TMP>/clusters/multi/nodes/multi-control-plane-2/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
 StopTimeout=60
-PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:47
+PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:45
 
 [Service]
 # The node image stops with SIGRTMIN+3; systemd inside exits 130 on halt.
@@ -988,7 +990,7 @@ ContainerName=multi-worker-2
 Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
 HostName=multi-worker-2
 Network=multi.network
-IP=192.168.1.74
+IP=192.168.1.81
 Environment=TZ=Asia/Taipei
 # api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
 # mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
@@ -1013,7 +1015,7 @@ Volume=<TMP>/clusters/multi/nodes/multi-worker-2/sys-node:/sys/devices/system/no
 Volume=<TMP>/clusters/multi/nodes/multi-worker-2/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
 Volume=<TMP>/clusters/multi/nodes/multi-worker-2/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
 StopTimeout=60
-PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:4a
+PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:51
 
 [Service]
 # The node image stops with SIGRTMIN+3; systemd inside exits 130 on halt.
@@ -1028,36 +1030,10 @@ WantedBy=multi-user.target
 # Generated by tkctl. Start or stop every node of cluster multi together.
 [Unit]
 Description=tk8s cluster multi
-Wants=multi-router-2.service multi-control-plane-2.service multi-worker-2.service multi-routes.service
+Wants=multi-router-2.service multi-control-plane-2.service multi-worker-2.service
 
 [Install]
 WantedBy=multi-user.target
-
-# ---- tux@192.168.1.231:/etc/systemd/system/multi-routes.service
-# Generated by tkctl. A macvlan shim so this host can reach the containers of cluster multi on
-# its own LAN interface (macvlan keeps the parent interface and its children apart), the routes to
-# the cluster's addresses through it, and the routes to the pod and service subnets through the
-# first control plane (bgp mode adds the apiserver VIP through the router). Started with the
-# target, so they survive a reboot.
-[Unit]
-Description=tk8s cluster multi host routes (shim tk8s-multi on eth0)
-PartOf=multi.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=-ip link add tk8s-multi link eth0 type macvlan mode bridge
-ExecStart=ip link set tk8s-multi up
-ExecStart=ip addr replace 192.168.1.68/32 dev tk8s-multi
-ExecStart=ip route replace 192.168.1.64/27 dev tk8s-multi src 192.168.1.68
-ExecStart=ip route replace 10.244.0.0/21 via 192.168.1.70 dev tk8s-multi
-ExecStart=ip route replace 10.98.0.0/24 via 192.168.1.70 dev tk8s-multi
-ExecStart=ip route replace 172.23.0.1/32 via 192.168.1.64 dev tk8s-multi
-ExecStop=-ip route del 10.244.0.0/21 via 192.168.1.70 dev tk8s-multi
-ExecStop=-ip route del 10.98.0.0/24 via 192.168.1.70 dev tk8s-multi
-ExecStop=-ip route del 172.23.0.1/32 via 192.168.1.64 dev tk8s-multi
-ExecStop=-ip route del 192.168.1.64/27 dev tk8s-multi
-ExecStop=-ip link del tk8s-multi
 
   $ ssh tux@192.168.1.231 'ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/multi/nodes/multi-control-plane-2/sys-node/node0/cpu0'
   $ ssh tux@192.168.1.231 'ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/multi/nodes/multi-control-plane-2/sys-node/node0/cpu1'
@@ -1128,7 +1104,7 @@ ContainerName=multi-control-plane-3
 Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
 HostName=multi-control-plane-3
 Network=multi.network
-IP=192.168.1.72
+IP=192.168.1.70
 Environment=TZ=Asia/Taipei
 # api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
 # mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
@@ -1153,7 +1129,7 @@ Volume=<TMP>/clusters/multi/nodes/multi-control-plane-3/sys-node:/sys/devices/sy
 Volume=<TMP>/clusters/multi/nodes/multi-control-plane-3/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
 Volume=<TMP>/clusters/multi/nodes/multi-control-plane-3/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
 StopTimeout=60
-PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:48
+PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:46
 
 [Service]
 # The node image stops with SIGRTMIN+3; systemd inside exits 130 on halt.
@@ -1211,7 +1187,7 @@ ContainerName=multi-worker-3
 Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
 HostName=multi-worker-3
 Network=multi.network
-IP=192.168.1.75
+IP=192.168.1.82
 Environment=TZ=Asia/Taipei
 # api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
 # mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
@@ -1236,7 +1212,7 @@ Volume=<TMP>/clusters/multi/nodes/multi-worker-3/sys-node:/sys/devices/system/no
 Volume=<TMP>/clusters/multi/nodes/multi-worker-3/kubelet-reserved.conf:/etc/kubernetes/kubelet.conf.d/10-tk8s-reserved.conf:ro
 Volume=<TMP>/clusters/multi/nodes/multi-worker-3/kubelet-config-dir.conf:/etc/systemd/system/kubelet.service.d/20-tk8s-config-dir.conf:ro
 StopTimeout=60
-PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:4b
+PodmanArgs=--privileged --cgroupns=private --cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:52
 
 [Service]
 # The node image stops with SIGRTMIN+3; systemd inside exits 130 on halt.
@@ -1251,36 +1227,10 @@ WantedBy=multi-user.target
 # Generated by tkctl. Start or stop every node of cluster multi together.
 [Unit]
 Description=tk8s cluster multi
-Wants=multi-control-plane-3.service multi-worker-3.service multi-routes.service
+Wants=multi-control-plane-3.service multi-worker-3.service
 
 [Install]
 WantedBy=multi-user.target
-
-# ---- 192.168.1.232:/etc/systemd/system/multi-routes.service
-# Generated by tkctl. A macvlan shim so this host can reach the containers of cluster multi on
-# its own LAN interface (macvlan keeps the parent interface and its children apart), the routes to
-# the cluster's addresses through it, and the routes to the pod and service subnets through the
-# first control plane (bgp mode adds the apiserver VIP through the router). Started with the
-# target, so they survive a reboot.
-[Unit]
-Description=tk8s cluster multi host routes (shim tk8s-multi on eth0)
-PartOf=multi.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=-ip link add tk8s-multi link eth0 type macvlan mode bridge
-ExecStart=ip link set tk8s-multi up
-ExecStart=ip addr replace 192.168.1.69/32 dev tk8s-multi
-ExecStart=ip route replace 192.168.1.64/27 dev tk8s-multi src 192.168.1.69
-ExecStart=ip route replace 10.244.0.0/21 via 192.168.1.70 dev tk8s-multi
-ExecStart=ip route replace 10.98.0.0/24 via 192.168.1.70 dev tk8s-multi
-ExecStart=ip route replace 172.23.0.1/32 via 192.168.1.64 dev tk8s-multi
-ExecStop=-ip route del 10.244.0.0/21 via 192.168.1.70 dev tk8s-multi
-ExecStop=-ip route del 10.98.0.0/24 via 192.168.1.70 dev tk8s-multi
-ExecStop=-ip route del 172.23.0.1/32 via 192.168.1.64 dev tk8s-multi
-ExecStop=-ip route del 192.168.1.64/27 dev tk8s-multi
-ExecStop=-ip link del tk8s-multi
 
   $ ssh 192.168.1.232 'ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/multi/nodes/multi-control-plane-3/sys-node/node0/cpu0'
   $ ssh 192.168.1.232 'ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/multi/nodes/multi-control-plane-3/sys-node/node0/cpu1'
@@ -1293,7 +1243,7 @@ ExecStop=-ip link del tk8s-multi
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: InitConfiguration
 localAPIEndpoint:
-  advertiseAddress: 192.168.1.70
+  advertiseAddress: 192.168.1.68
   bindPort: 6443
 nodeRegistration:
   criSocket: unix:///var/run/crio/crio.sock
@@ -1315,9 +1265,9 @@ apiServer:
     - api.multi.k8s
     - 192.168.1.64
     - 172.23.0.1
+    - 192.168.1.68
+    - 192.168.1.69
     - 192.168.1.70
-    - 192.168.1.71
-    - 192.168.1.72
   extraArgs:
     - name: audit-log-format
       value: legacy

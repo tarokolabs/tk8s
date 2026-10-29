@@ -30,7 +30,10 @@ ADDR_Q = ("ip", "-j", "-4", "addr", "show", "dev", "ens18")
 def test_lan_facts_from_the_default_route_and_the_interface_address() -> None:
     h = FakeHost(responses={ROUTE_Q: Result(0, ROUTE, ""), ADDR_Q: Result(0, ADDR, "")})
     assert lan_facts(h, "a") == LanFacts(
-        "ens18", IPv4Network("192.168.1.0/24"), IPv4Address("192.168.1.1")
+        "ens18",
+        IPv4Network("192.168.1.0/24"),
+        IPv4Address("192.168.1.1"),
+        IPv4Address("192.168.1.230"),
     )
 
 
@@ -51,7 +54,10 @@ def test_odd_routes_or_addresses_are_a_named_error(route: str, addr: str, messag
 
 def test_dry_run_lan_is_the_slash_24_around_the_range_start() -> None:
     assert dry_run_lan(IPv4Address("192.168.1.64")) == LanFacts(
-        "eth0", IPv4Network("192.168.1.0/24"), IPv4Address("192.168.1.1")
+        "eth0",
+        IPv4Network("192.168.1.0/24"),
+        IPv4Address("192.168.1.1"),
+        IPv4Address("192.168.1.254"),
     )
 
 
@@ -71,9 +77,29 @@ def test_in_use_lists_ip_and_mac_of_answering_addresses() -> None:
     )
     addrs = [IPv4Address("192.168.1.64"), IPv4Address("192.168.1.65")]
     assert in_use(h, "ens18", addrs) == [("192.168.1.64", "AA:BB:CC:DD:EE:FF")]
-    h.responses = {("arping",): Result(127, "", "arping: command not found")}
-    with pytest.raises(HostsError, match="arping not found"):
+    h.responses = {("arping",): Result(2, "", "arping: socket: Operation not permitted")}
+    with pytest.raises(HostsError, match=r"arping 192\.168\.1\.64 on ens18 failed"):
         in_use(h, "ens18", addrs)
+
+
+def test_in_use_falls_back_to_ping_and_the_neighbour_table_without_arping() -> None:
+    neigh = (
+        '[{"dst":"192.168.1.64","dev":"ens18","lladdr":"aa:bb:cc:dd:ee:ff","state":["REACHABLE"]}]'
+    )
+    h = FakeHost(
+        responses={
+            ("arping", "-V"): Result(127, "", "arping: command not found"),
+            ("ip", "-j", "neigh", "show", "192.168.1.64"): Result(0, neigh, ""),
+            ("ip", "-j", "neigh", "show", "192.168.1.65"): Result(0, "[]", ""),
+        }
+    )
+    addrs = [IPv4Address("192.168.1.64"), IPv4Address("192.168.1.65")]
+    assert in_use(h, "ens18", addrs) == [("192.168.1.64", "aa:bb:cc:dd:ee:ff")]
+    pings = [c.argv for c in h.calls if c.argv[:1] == ["ping"]]
+    assert pings == [
+        ["ping", "-c", "1", "-W", "1", "-I", "ens18", "192.168.1.64"],
+        ["ping", "-c", "1", "-W", "1", "-I", "ens18", "192.168.1.65"],
+    ]
 
 
 def test_build_maps_names_to_the_operator_or_an_ssh_host(

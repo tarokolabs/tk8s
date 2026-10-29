@@ -430,7 +430,7 @@ def test_multi_host_render_writes_the_init_config_on_the_first_control_planes_ho
     assert policy in hosts["b"].files and policy not in hosts["a"].files
     assert kubeadm.render_done(ctx)
     text = hosts["b"].files[ctx.state_dir / "init-config.yaml"]
-    assert "advertiseAddress: 192.168.1.70" in text and "    - 192.168.1.64\n" in text
+    assert "advertiseAddress: 192.168.1.68" in text and "    - 192.168.1.64\n" in text
 
 
 def test_multi_host_join_runs_on_each_nodes_host_with_one_token(
@@ -466,6 +466,6 @@ def test_multi_host_join_runs_on_each_nodes_host_with_one_token(
         if c.argv[:3] == ["podman", "exec", "demo-control-plane-2"] and "bash" in c.argv
     )
     assert (
-        "--control-plane --certificate-key abcd --apiserver-advertise-address 192.168.1.71"
+        "--control-plane --certificate-key abcd --apiserver-advertise-address 192.168.1.69"
         in cp2.argv[-1]
     )

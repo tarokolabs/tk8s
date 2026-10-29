@@ -581,10 +581,10 @@ def test_describe_lists_hosts_and_the_host_of_every_node(
     out = hosts["a"].lines
     i = out.index("Hosts:")
     assert out[i + 1 : i + 5] == [
-        "  NAME     SSH                   IFACE    SHIM            TARGET",
-        "  a        (this host)           ens18    192.168.1.67    inactive",
-        "  b        tux@192.168.1.231     ens18    192.168.1.68    active",
-        "  c        192.168.1.232         ens18    192.168.1.69    inactive",
+        "  NAME     SSH                   IFACE    TARGET",
+        "  a        (this host)           ens18    inactive",
+        "  b        tux@192.168.1.231     ens18    active",
+        "  c        192.168.1.232         eth0     inactive",
     ]
     assert (
         "  NAME                     ROLE           IP             RESOURCES      JOIN        HOST"
@@ -593,7 +593,11 @@ def test_describe_lists_hosts_and_the_host_of_every_node(
     assert any(ln.startswith("  demo-control-plane-2 ") and ln.endswith(" b") for ln in out)
     text = "\n".join(out)
     assert "  routers:  demo-router-1 192.168.1.65 on a, demo-router-2 192.168.1.66 on b" in text
-    assert "  nodes and LoadBalancer IPs (192.168.1.76-192.168.1.95) are on the LAN" in text
+    assert "  nodes and LoadBalancer IPs (192.168.1.85-192.168.1.89) are on the LAN" in text
+    assert (
+        "             range 192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.89  shim 192.168.1.67"
+        in text
+    )
     assert "from another machine" not in text and "State:       Degraded" in text
 
 

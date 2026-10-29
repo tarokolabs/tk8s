@@ -6,6 +6,7 @@ and routers land on different hosts first) and cuts the reserved LAN range in a 
 """
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network
 from typing import Literal
@@ -16,7 +17,7 @@ from ..paths import Paths
 from ..phases import Context, Phase
 from . import nodefs
 
-LB_POOL = 20  # LoadBalancer addresses, the tail of the range (the single-host pool is 20 too)
+LB_POOL = 5  # LoadBalancer addresses: the tail of the pool (the single-host pool is 20)
 
 
 class PlanError(Exception):
@@ -113,53 +114,100 @@ def validate_hosts(u: model.UserCluster) -> None:
 # ---- several hosts: placement and the address range
 
 
-def parse_range(text: str) -> tuple[IPv4Address, IPv4Address]:
-    try:
-        a, b = (IPv4Address(x) for x in text.split("-"))
-    except ValueError as err:
-        raise PlanError(f"spec.network.range must be A-B (two IPv4 addresses): {text!r}") from err
-    if b < a:
-        raise PlanError(f"spec.network.range {text}: the end is before the start")
-    return a, b
+def parse_range(text: str) -> list[IPv4Address]:
+    """The address pool: comma-separated A-B segments in order, B spelled in full or as the
+    last octet only (192.168.1.64-70). No address twice."""
+    pool: list[IPv4Address] = []
+    for seg in text.split(","):
+        seg = seg.strip()
+        a_text, _, b_text = seg.partition("-")
+        try:
+            a = IPv4Address(a_text)
+            if b_text and "." not in b_text:
+                b_text = ".".join([*a_text.split(".")[:3], b_text])
+            b = IPv4Address(b_text)
+        except ValueError as err:
+            raise PlanError(
+                f"spec.network.range must be A-B[,C-D] (IPv4 addresses, the end may be a last "
+                f"octet): {seg!r}"
+            ) from err
+        if b < a:
+            raise PlanError(f"spec.network.range {seg}: the end is before the start")
+        for i in range(int(a), int(b) + 1):
+            ip = IPv4Address(i)
+            if ip in pool:
+                raise PlanError(f"spec.network.range: {ip} is listed twice")
+            pool.append(ip)
+    return pool
+
+
+def ranges_text(addrs: Sequence[IPv4Address]) -> str:
+    """Addresses as A-B segments (a lone address as itself), in the given order."""
+    out: list[str] = []
+    run: list[IPv4Address] = []
+    for ip in [*addrs, None]:
+        if run and (ip is None or int(ip) != int(run[-1]) + 1):
+            out.append(str(run[0]) if len(run) == 1 else f"{run[0]}-{run[-1]}")
+            run = []
+        if ip is not None:
+            run.append(ip)
+    return ",".join(out)
+
+
+def normalize_range(text: str) -> str:
+    """The pool written out in full, the form cluster.yaml keeps."""
+    return ranges_text(parse_range(text))
 
 
 @dataclass(frozen=True)
 class Allocation:
     router: IPv4Address  # the floating address: the nodes' gateway, proxy mode's entry
     routers: list[IPv4Address]  # router-1 and -2 (two routers), empty with one
-    shims: list[IPv4Address]  # one per host
+    shim: IPv4Address | None  # the operator's, when it is one of the hosts
     nodes: list[IPv4Address]
-    lb_range: str
+    free: list[IPv4Address]  # left for add node
+    lb_range: str  # the pool's last LB_POOL addresses
 
 
 def allocate(
-    rng: tuple[IPv4Address, IPv4Address], *, hosts: int, routers: Literal[1, 2], nodes: int
+    pool: list[IPv4Address], *, shim: bool, routers: Literal[1, 2], nodes: int
 ) -> Allocation:
-    """The range cut in a fixed order: the router's floating address, the router containers'
-    own (two routers), a shim per host, the nodes, and the LoadBalancer pool at the tail."""
-    a, b = rng
-    size = int(b) - int(a) + 1
+    """The pool cut in a fixed order: the router's floating address, the router containers'
+    own (two routers), the operator's shim (when it runs nodes), the nodes, free addresses for
+    add node, and the LoadBalancer pool at the tail."""
     physical = 2 if routers == 2 else 0
-    need = 1 + physical + hosts + nodes + LB_POOL
-    if size < need:
+    shims = 1 if shim else 0
+    need = 1 + physical + shims + nodes + LB_POOL
+    if len(pool) < need:
         raise PlanError(
-            f"spec.network.range {a}-{b} has {size} addresses; this cluster needs {need} "
-            f"(1 router address, {physical} router container addresses, {hosts} host shims, "
-            f"{nodes} nodes, {LB_POOL} LoadBalancer addresses)"
+            f"spec.network.range {ranges_text(pool)} has {len(pool)} addresses; this cluster "
+            f"needs {need} (1 router address, {physical} router container addresses, "
+            f"{shims} operator shim, {nodes} nodes, {LB_POOL} LoadBalancer addresses)"
         )
-    cursor = int(a) + 1
-    routers_ = [IPv4Address(cursor + i) for i in range(physical)]
+    cursor = 1
+    routers_ = pool[cursor : cursor + physical]
     cursor += physical
-    shims = [IPv4Address(cursor + i) for i in range(hosts)]
-    cursor += hosts
-    node_ips = [IPv4Address(cursor + i) for i in range(nodes)]
+    shim_ip = pool[cursor] if shim else None
+    cursor += shims
+    node_ips = pool[cursor : cursor + nodes]
+    cursor += nodes
     return Allocation(
-        router=a,
+        router=pool[0],
         routers=routers_,
-        shims=shims,
+        shim=shim_ip,
         nodes=node_ips,
-        lb_range=f"{IPv4Address(int(b) - LB_POOL + 1)}-{b}",
+        free=pool[cursor : len(pool) - LB_POOL],
+        lb_range=ranges_text(pool[len(pool) - LB_POOL :]),
     )
+
+
+def node_region(c: model.Cluster) -> list[IPv4Address]:
+    """The pool addresses nodes may take (after the fixed head, before the LoadBalancer tail)."""
+    net = c.spec.network
+    pool = parse_range(net.range or "")
+    physical = 2 if net.routers == 2 else 0
+    head = 1 + physical + (1 if net.shim is not None else 0)
+    return pool[head : len(pool) - LB_POOL]
 
 
 def place(groups: list[model.NodeGroup], hosts: list[str]) -> list[str]:
@@ -346,6 +394,7 @@ def network_multi(
             "lb_range": alloc.lb_range,
             "range": rng,
             "router_hosts": router_hosts,
+            "shim": alloc.shim,
         }
     )
 
@@ -358,7 +407,7 @@ def resolve(
     used_indices: set[int],
     allow_overlap: bool,
     tk8s_version: str,
-    lan: LanFacts | None = None,
+    lans: dict[str, LanFacts] | None = None,
     operator: str | None = None,
 ) -> model.Cluster:
     validate(u)
@@ -390,41 +439,38 @@ def resolve(
         hosts = None
     else:
         assert s.network is not None and s.network.range is not None
-        if lan is None:
+        if lans is None:
             raise PlanError("a multi-host cluster needs the hosts' LAN facts to be planned")
-        rng = parse_range(s.network.range)
-        if rng[0] not in lan.subnet or rng[1] not in lan.subnet:
-            raise PlanError(
-                f"spec.network.range {s.network.range} is outside the hosts' network {lan.subnet}"
-            )
-        if existing is not None and existing.spec.hosts is not None:
-            was = existing.spec.hosts[0].iface, existing.spec.network.nodes
-            if was != (lan.iface, lan.subnet):
-                raise PlanError(
-                    f"cluster.yaml says {was[0]} on {was[1]}, the hosts now say {lan.iface} on "
-                    f"{lan.subnet}; delete the cluster and create it again"
-                )
         names = [h.name for h in s.hosts]
+        first = lans[names[0]]
+        for n in names[1:]:
+            if (lans[n].subnet, lans[n].gateway) != (first.subnet, first.gateway):
+                raise PlanError(
+                    f"host {n} is on {lans[n].subnet} via {lans[n].gateway}, host {names[0]} on "
+                    f"{first.subnet} via {first.gateway}; every host must share one LAN"
+                )
+        pool = parse_range(s.network.range)
+        rng = ranges_text(pool)
+        if any(ip not in first.subnet for ip in pool):
+            raise PlanError(
+                f"spec.network.range {rng} is outside the hosts' network {first.subnet}"
+            )
+        for n in names:
+            if lans[n].address in pool:
+                raise PlanError(
+                    f"host {n}'s own address {lans[n].address} is inside spec.network.range {rng}"
+                )
         placed = place(s.nodes, names)
         router_hosts = place_routers(s.network.router_hosts, names, want_routers)
-        alloc = allocate(
-            rng, hosts=len(names), routers=want_routers, nodes=sum(g.count for g in s.nodes)
-        )
+        shim = any(h.ssh is None for h in s.hosts)
+        alloc = allocate(pool, shim=shim, routers=want_routers, nodes=sum(g.count for g in s.nodes))
         net = network_multi(
-            index,
-            lan,
-            s.network.range,
-            s.network.ha,
-            s.network.vip,
-            want_routers,
-            alloc,
-            router_hosts,
+            index, first, rng, s.network.ha, s.network.vip, want_routers, alloc, router_hosts
         )
         nodes = expand_nodes(u.metadata.name, s.nodes, index, ips=alloc.nodes, hosts=placed)
-        hosts = [
-            model.Host(name=h.name, ssh=h.ssh, iface=lan.iface, shim=alloc.shims[i])
-            for i, h in enumerate(s.hosts)
-        ]
+        hosts = [model.Host(name=h.name, ssh=h.ssh, iface=lans[h.name].iface) for h in s.hosts]
+        if existing is not None:
+            check_resume(u.metadata.name, existing, hosts, nodes, net)
     spec = model.Spec(
         kubernetes=s.kubernetes or k8s_default,
         cni=s.cni,
@@ -443,6 +489,41 @@ def resolve(
         )
     )
     return model.Cluster(metadata=u.metadata, spec=spec, status=status)
+
+
+def check_resume(
+    name: str,
+    existing: model.Cluster,
+    hosts: list[model.Host],
+    nodes: list[model.Node],
+    net: model.Network,
+) -> None:
+    """A resume must describe the same hosts and the same placement: units already written on
+    hosts that drop out, or nodes that move, would be left running with their addresses."""
+    was = existing.spec
+    if was.hosts is None:
+        raise PlanError(
+            f"cluster {name} is being created on a single host; rerun without --hosts, "
+            f"or delete it first: tkctl delete cluster {name}"
+        )
+    for h in hosts:
+        old = next((x for x in was.hosts if x.name == h.name), None)
+        if old is not None and old.iface != h.iface:
+            raise PlanError(
+                f"cluster.yaml says host {h.name} on {old.iface}, the host now says {h.iface}; "
+                f"delete the cluster and create it again"
+            )
+    if [(h.name, h.ssh) for h in was.hosts] != [(h.name, h.ssh) for h in hosts]:
+        raise PlanError(
+            f"cluster {name} is being created on hosts {', '.join(h.name for h in was.hosts)}; "
+            f"rerun with the same --hosts, or delete it first: tkctl delete cluster {name}"
+        )
+    same = [(n.name, n.ip, n.host) for n in was.nodes] == [(n.name, n.ip, n.host) for n in nodes]
+    if not same or was.network.router_hosts != net.router_hosts or was.network.range != net.range:
+        raise PlanError(
+            f"cluster {name} is being created with another placement or range; rerun with the "
+            f"same flags, or delete it first: tkctl delete cluster {name}"
+        )
 
 
 def load_existing(paths: Paths, name: str) -> model.Cluster | None:
@@ -491,7 +572,11 @@ def placement_lines(c: model.Cluster) -> list[str]:
     """What plan (and preflight's warning) say about a multi-host cluster; nothing otherwise."""
     if not c.multi_host:
         return []
-    out = [f"host {h.name}: {h.iface}, shim {h.shim}" for h in c.spec.hosts or []]
+    shim = c.spec.network.shim
+    out = [
+        f"host {h.name}: {h.iface}" + (f" (this host, shim {shim})" if h.ssh is None else "")
+        for h in c.spec.hosts or []
+    ]
     out.append("placement: " + ", ".join(f"{n.name} {n.host}" for n in c.spec.nodes))
     out.append("routers: " + ", ".join(f"{r.name} {r.host}" for r in c.routers))
     warning = majority_warning(c)

@@ -67,8 +67,8 @@ class Host:
         full = _full_argv(argv, sudo, env)
         if self.label is None:
             self._say("  $ " + shlex.join(full))
-        else:
-            self._say("  $ " + shlex.join(["ssh", self.label, shlex.join(full)]))
+        else:  # the label is already in ssh's own words (user@host, -p port)
+            self._say(f"  $ ssh {self.label} {shlex.quote(shlex.join(full))}")
 
     def run(
         self,
@@ -204,6 +204,11 @@ class SshTarget:
     def __str__(self) -> str:
         return f"{self.user}@{self.host}" if self.user else self.host
 
+    @property
+    def label(self) -> str:
+        """What the `$ ssh` line shows: the port option too, so the line can be pasted."""
+        return f"-p {self.port} {self}" if self.port else str(self)
+
 
 def parse_ssh(text: str) -> SshTarget:
     m = re.fullmatch(r"(?:([^@\s:]+)@)?([^@\s:]+)(?::([0-9]+))?", text)
@@ -250,7 +255,7 @@ class SshHost(Host):
         ssh: str = "ssh",
         control_dir: Path | None = None,
     ) -> None:
-        super().__init__(say, quiet=quiet, label=str(target))
+        super().__init__(say, quiet=quiet, label=target.label)
         self.target = target
         self._ssh = ssh
         self._control_dir = control_dir or default_control_dir()
@@ -292,6 +297,7 @@ class SshHost(Host):
             p = subprocess.run(
                 full,
                 input=input,
+                stdin=subprocess.DEVNULL if input is None else None,  # never tkctl's own stdin
                 text=True,
                 env=_base_env(*SSH_PASS_THROUGH),
                 capture_output=capture,
@@ -300,6 +306,10 @@ class SshHost(Host):
             r = Result(p.returncode, p.stdout or "", p.stderr or "")
         except FileNotFoundError:
             r = Result(127, "", f"{full[0]}: command not found")
+        if r.returncode == 255:
+            # ssh's own failure (no route, host key, auth), not the command's: an unreachable
+            # host must never read as "nothing there"
+            raise HostError(full, 255, r.stderr or "ssh failed")
         if check and r.returncode != 0:
             raise HostError(full, r.returncode, r.stderr)
         return r
@@ -318,6 +328,7 @@ class SshHost(Host):
             p = subprocess.run(
                 full,
                 input=input,
+                stdin=subprocess.DEVNULL if input is None else None,
                 env=_base_env(*SSH_PASS_THROUGH),
                 capture_output=True,
                 check=False,

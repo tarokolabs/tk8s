@@ -16,7 +16,7 @@ from ..datatree import PreflightError, data_dirs
 from ..host import Host
 from ..phases import Context, Phase, PhaseFailed
 from . import nodefs
-from .plan import majority_warning
+from .plan import majority_warning, parse_range
 
 __all__ = ["PHASE", "PreflightError", "data_dirs"]
 
@@ -24,7 +24,7 @@ NM_CONF = Path("/etc/NetworkManager/conf.d/90-tk8s.conf")
 NM_TEXT = (
     "# tk8s: the cluster shim interfaces (tk8s-*) are managed by tkctl's routes units\n"
     "[keyfile]\n"
-    "unmanaged-devices=interface-name:tk8s-*\n"
+    "unmanaged-devices+=interface-name:tk8s-*\n"
 )
 NETWORKD_CONF = Path("/etc/systemd/network/90-tk8s-unmanaged.network")
 NETWORKD_TEXT = (
@@ -130,16 +130,6 @@ def check_host_fits(ctx: Context, nodes: list[model.Node] | None = None) -> str:
 # ---- several hosts
 
 
-def check_reachable(host: Host, name: str) -> None:
-    r = host.run(["true"], capture=True, check=False)
-    if r.returncode != 0:
-        why = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else f"exit {r.returncode}"
-        raise PreflightError(
-            f"host {name}: ssh failed ({why}); ssh to it once by hand so the host key is known "
-            "and the key and sudo work"
-        )
-
-
 def check_lan(ctx: Context, name: str, host: Host, want: model.Host) -> None:
     """The host is on the LAN cluster.yaml was planned for, by the same interface."""
     net = ctx.require_cluster().spec.network
@@ -154,10 +144,14 @@ def check_lan(ctx: Context, name: str, host: Host, want: model.Host) -> None:
         )
 
 
-def check_operator_lan(ctx: Context) -> None:
+def check_operator(ctx: Context) -> None:
+    """An operator that runs no node still needs the tools (kubectl, podman for the image
+    list, sudo for its routes unit), the data tree, and a place on the cluster's LAN."""
     net = ctx.require_cluster().spec.network
     if any(h is ctx.host for _, h in ctx.node_hosts()):
-        return  # a node host: check_lan covers it
+        return  # a node host: the per-host checks cover it
+    check_tools(ctx)
+    data_dirs(ctx)
     try:
         lan = hosts.lan_facts(ctx.host, "operator")
     except hosts.HostsError as err:
@@ -167,6 +161,21 @@ def check_operator_lan(ctx: Context) -> None:
             f"the operator host is not on the cluster's LAN ({net.nodes}; it is on "
             f"{lan.subnet}); run tkctl on a host of that network"
         )
+    ctx.say("  operator: tools, data tree and LAN ok (runs no node)")
+
+
+def check_hostnames(ctx: Context) -> None:
+    """status.operator is a hostname: two hosts with the same one (clones of a template) would
+    make a copy look like the original."""
+    seen: dict[str, str] = {}
+    for name, h in [*ctx.node_hosts(), ("operator", ctx.host)]:
+        hn = hosts.local_hostname(h)
+        if hn in seen and seen[hn] != name and not (h is ctx.host and seen[hn] in ctx.hosts):
+            raise PreflightError(
+                f"hosts {seen[hn]} and {name} both answer to hostname {hn}; tkctl tells the "
+                "operator apart by hostname, so give each host its own"
+            )
+        seen.setdefault(hn, name)
 
 
 def check_name_free(ctx: Context, name: str, host: Host) -> None:
@@ -212,9 +221,8 @@ def check_kernels(ctx: Context) -> None:
 
 
 def cluster_addresses(c: model.Cluster) -> list[IPv4Address]:
-    """Everything the cluster will answer for on the LAN: the whole reserved range."""
-    a, b = (IPv4Address(x) for x in (c.spec.network.range or "").split("-"))
-    return [IPv4Address(i) for i in range(int(a), int(b) + 1)]
+    """Everything the cluster will answer for on the LAN: the whole reserved pool."""
+    return parse_range(c.spec.network.range or "")
 
 
 def check_addresses_free(ctx: Context) -> None:
@@ -251,15 +259,22 @@ def run_one(ctx: Context, nodes: list[model.Node] | None) -> str:
 
 def run_multi(ctx: Context) -> None:
     c = ctx.require_cluster()
-    check_operator_lan(ctx)
+    check_operator(ctx)
     for name, h in ctx.node_hosts():
         want = next(x for x in c.spec.hosts or [] if x.name == name)
-        check_reachable(h, name)
-        line = run_one(ctx.on(h), [n for n in c.spec.nodes if n.host == name])
+        try:
+            hosts.check_reachable(h, name)
+        except hosts.HostsError as err:
+            raise PreflightError(str(err)) from err
+        try:
+            line = run_one(ctx.on(h), [n for n in c.spec.nodes if n.host == name])
+        except PreflightError as err:
+            raise PreflightError(f"host {name}: {err}") from err
         check_lan(ctx, name, h, want)
         check_name_free(ctx, name, h)
         unmanaged_drop_ins(h)
         ctx.say(f"  host {name}: {line}")
+    check_hostnames(ctx)
     check_kernels(ctx)
     check_addresses_free(ctx)
     warning = majority_warning(c)

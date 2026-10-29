@@ -206,7 +206,7 @@ def test_single_host_cluster_has_no_host_fields_in_its_yaml() -> None:
     ("old", "new", "message"),
     [
         (
-            "    range: 192.168.1.64-192.168.1.95\n",
+            "    range: 192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.89\n",
             "",
             "spec.hosts and spec.network.range go together",
         ),

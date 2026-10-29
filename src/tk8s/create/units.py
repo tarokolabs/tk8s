@@ -35,8 +35,13 @@ def shim_name(cluster: str) -> str:
 
 
 def range_prefixes(rng: str) -> list[IPv4Network]:
-    a, b = (IPv4Address(x) for x in rng.split("-"))
-    return list(summarize_address_range(a, b))
+    """The pool's segments as prefixes, for the shim's routes."""
+    out: list[IPv4Network] = []
+    for seg in rng.split(","):
+        a_text, _, b_text = seg.partition("-")
+        a, b = IPv4Address(a_text), IPv4Address(b_text or a_text)
+        out += list(summarize_address_range(a, b))
+    return out
 
 
 @dataclass(frozen=True)
@@ -160,17 +165,20 @@ def render(
             node_mounts=node_mounts,
             mac_arg=f" --mac-address {mac(n.ip)}" if c.multi_host else "",
         )
+    # routes (and the shim) belong to the operator: the one machine that talks to the cluster
+    # from its host network; a node host that is not the operator needs none
+    operator_here = me is None or me.ssh is None
     wants = [
         *(f"{r.name}.service" for r in mine_routers),
         *(f"{n.name}.service" for n in mine_nodes),
-        f"{c.name}-routes.service",
+        *([f"{c.name}-routes.service"] if operator_here else []),
     ]
     files[p.systemd_dir / f"{c.name}.target"] = template(
         p.home, "cluster.target", cluster=c.name, wants=" ".join(wants)
     )
-    if me is not None:
+    if me is not None and me.ssh is None:
         files[p.systemd_dir / f"{c.name}-routes.service"] = render_routes_macvlan(ctx, c, me)
-    else:
+    elif me is None:
         files[p.systemd_dir / f"{c.name}-routes.service"] = template(
             p.home,
             "routes.service",
@@ -193,7 +201,7 @@ def render_routes_macvlan(ctx: Context, c: model.Cluster, me: model.Host) -> str
     """The routes unit of a node host: the shim, the routes to the cluster's range through it,
     then the pod, service and VIP routes as on a single host but out of the shim."""
     net, cp, shim = c.spec.network, c.first_control_plane, shim_name(c.name)
-    assert net.range is not None
+    assert net.range is not None and net.shim is not None
     prefixes = range_prefixes(net.range)
     return template(
         ctx.paths.home,
@@ -201,9 +209,9 @@ def render_routes_macvlan(ctx: Context, c: model.Cluster, me: model.Host) -> str
         cluster=c.name,
         shim=shim,
         iface=me.iface,
-        shim_ip=me.shim,
+        shim_ip=net.shim,
         range_routes="".join(
-            f"\nExecStart=ip route replace {px} dev {shim} src {me.shim}" for px in prefixes
+            f"\nExecStart=ip route replace {px} dev {shim} src {net.shim}" for px in prefixes
         ),
         range_routes_stop="".join(f"\nExecStop=-ip route del {px} dev {shim}" for px in prefixes),
         cp_ip=cp.ip,

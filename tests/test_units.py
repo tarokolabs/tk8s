@@ -357,10 +357,11 @@ def test_mac_and_shim_name_are_derived_from_the_address_and_the_cluster() -> Non
     assert [str(p) for p in units.range_prefixes("192.168.1.64-192.168.1.95")] == [
         "192.168.1.64/27"
     ]
-    assert [str(p) for p in units.range_prefixes("192.168.1.65-192.168.1.68")] == [
+    assert [str(p) for p in units.range_prefixes("192.168.1.65-192.168.1.68,192.168.1.90")] == [
         "192.168.1.65/32",
         "192.168.1.66/31",
         "192.168.1.68/32",
+        "192.168.1.90/32",
     ]
 
 
@@ -377,13 +378,10 @@ def test_each_host_gets_its_own_network_units_target_and_routes(
     assert "Subnet=192.168.1.0/24\nGateway=192.168.1.1\n" in net
     assert "Options=no_default_route=1\nPodmanArgs=--route 0.0.0.0/0,192.168.1.64\n" in net
     cp1 = a[UNIT_DIR / "demo-control-plane-1.container"]
-    assert "IP=192.168.1.70\n" in cp1
-    assert cp1.endswith(
-        "--cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:46\n\n[Service]"
-        + cp1.split("[Service]")[1]
-    )
+    assert "IP=192.168.1.68\n" in cp1
+    assert "--cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:44\n\n[Service]" in cp1
     assert UNIT_DIR / "demo-control-plane-2.container" not in a
-    assert "IP=192.168.1.71\n" in b[UNIT_DIR / "demo-control-plane-2.container"]
+    assert "IP=192.168.1.69\n" in b[UNIT_DIR / "demo-control-plane-2.container"]
     assert (
         "After=demo-control-plane-1.service" not in b[UNIT_DIR / "demo-control-plane-2.container"]
     )
@@ -391,21 +389,21 @@ def test_each_host_gets_its_own_network_units_target_and_routes(
         "Wants=demo-router-1.service demo-control-plane-1.service demo-worker-1.service "
         "demo-routes.service\n"
     ) in a[SYSTEMD / "demo.target"]
+    # only the operator talks to the cluster from its host network: b and c get no routes unit
     assert (
-        "Wants=demo-router-2.service demo-control-plane-2.service demo-worker-2.service "
-        "demo-routes.service\n"
+        "Wants=demo-router-2.service demo-control-plane-2.service demo-worker-2.service\n"
     ) in b[SYSTEMD / "demo.target"]
+    assert SYSTEMD / "demo-routes.service" not in b
+    assert SYSTEMD / "demo-routes.service" not in by["c"].files
     routes = a[SYSTEMD / "demo-routes.service"]
     assert "ExecStart=-ip link add tk8s-demo link ens18 type macvlan mode bridge\n" in routes
     assert "ExecStart=ip addr replace 192.168.1.67/32 dev tk8s-demo\n" in routes
-    assert "ExecStart=ip route replace 192.168.1.64/27 dev tk8s-demo src 192.168.1.67\n" in routes
-    assert "ExecStart=ip route replace 10.244.0.0/21 via 192.168.1.70 dev tk8s-demo\n" in routes
+    assert "ExecStart=ip route replace 192.168.1.64/30 dev tk8s-demo src 192.168.1.67\n" in routes
+    assert "ExecStart=ip route replace 192.168.1.80/29 dev tk8s-demo src 192.168.1.67\n" in routes
+    assert "ExecStart=ip route replace 192.168.1.88/31 dev tk8s-demo src 192.168.1.67\n" in routes
+    assert "ExecStart=ip route replace 10.244.0.0/21 via 192.168.1.68 dev tk8s-demo\n" in routes
     assert "ExecStart=ip route replace 172.23.0.1/32 via 192.168.1.64 dev tk8s-demo\n" in routes
     assert "ExecStop=-ip link del tk8s-demo\n" in routes and "Wants=" not in routes
-    assert (
-        "ExecStart=ip addr replace 192.168.1.68/32 dev tk8s-demo\n"
-        in b[SYSTEMD / "demo-routes.service"]
-    )
     boot = a[state / "router-1" / "tkctl.boot"]
     assert 'address "192.168.1.65/24"' in boot and "next-hop 192.168.1.1" in boot
     assert "address 192.168.1.64/24 {" in boot  # the VRRP group
@@ -431,7 +429,7 @@ def test_an_operator_outside_the_node_hosts_gets_routes_only(
     assert set(files) == {SYSTEMD / "demo.target", SYSTEMD / "demo-routes.service"}
     assert "Wants=demo-routes.service\n" in files[SYSTEMD / "demo.target"]
     routes = files[SYSTEMD / "demo-routes.service"]
-    assert "ExecStart=ip route replace 10.244.0.0/21 via 192.168.1.70\n" in routes
+    assert "ExecStart=ip route replace 10.244.0.0/21 via 192.168.1.68\n" in routes
     assert "ExecStart=ip route replace 172.23.0.1/32 via 192.168.1.64\n" in routes
     assert "tk8s-demo" not in routes
 

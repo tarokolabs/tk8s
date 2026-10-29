@@ -9,14 +9,14 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 Role = Literal["control-plane", "worker"]
 NODE_NAME = r"^[a-z][a-z0-9-]*$"
 CLUSTER_NAME = r"^[a-z][a-z0-9-]{0,15}$"
 MEMORY = r"^[0-9]+[gm]$"
 HOST_NAME = r"^[a-z][a-z0-9-]{0,31}$"
-RANGE = r"^[0-9.]+-[0-9.]+$"
+RANGE = r"^[0-9.]+-[0-9.]+(, *[0-9.]+-[0-9.]+)*$"  # A-B[,C-D...]; B may be a last octet
 
 
 class Strict(BaseModel):
@@ -28,10 +28,15 @@ class Strict(BaseModel):
 
 class UserHost(Strict):
     """A host of a multi-host cluster: the name cluster.yaml and the output call it, and how
-    to reach it ([user@]host[:port]); no ssh means the host tkctl runs on."""
+    to reach it ([user@]host[:port]); no ssh (or `local`) means the host tkctl runs on."""
 
     name: str = Field(pattern=HOST_NAME)
     ssh: str | None = None
+
+    @field_validator("ssh")
+    @classmethod
+    def _local_is_none(cls, v: str | None) -> str | None:
+        return None if v == "local" else v
 
 
 class NodeGroup(Strict):
@@ -92,13 +97,12 @@ def node_image(k8s: str) -> str:
 
 
 class Host(Strict):
-    """A host of a multi-host cluster as plan recorded it: the LAN interface the macvlan network
-    hangs off and the address of the host's shim interface (both from the hosts' LAN)."""
+    """A host of a multi-host cluster as plan recorded it, with the LAN interface the macvlan
+    network hangs off (the host's own default route interface)."""
 
     name: str = Field(pattern=HOST_NAME)
     ssh: str | None = None
     iface: str
-    shim: IPv4Address
 
 
 class Node(Strict):
@@ -122,8 +126,9 @@ class Network(Strict):
     lb_range: str
     pods: IPv4Network
     services: IPv4Network
-    range: str | None = Field(default=None, pattern=RANGE)  # multi-host: the reserved LAN range
+    range: str | None = Field(default=None, pattern=RANGE)  # multi-host: the reserved pool
     router_hosts: list[str] | None = None  # multi-host: one host per router container
+    shim: IPv4Address | None = None  # multi-host: the operator's shim, when it runs nodes too
 
     @model_validator(mode="after")
     def _vip_follows_ha(self) -> Network:

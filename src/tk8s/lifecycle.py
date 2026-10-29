@@ -131,6 +131,9 @@ def describe(ctx: Context, c: model.Cluster, output: str | None) -> None:
         f"services {net.services}  lb-ipam {net.lb_range}  router {net.router}{vip}"
     )
     if c.multi_host:
+        shim = f"  shim {net.shim}" if net.shim is not None else ""
+        ctx.say(f"             range {net.range}{shim}")
+    if c.multi_host:
         describe_hosts(ctx, c)
     ctx.say("Nodes:")
     host_col = f" {'JOIN':<11} HOST" if c.multi_host else " JOIN"
@@ -182,13 +185,11 @@ def describe(ctx: Context, c: model.Cluster, output: str | None) -> None:
 
 def describe_hosts(ctx: Context, c: model.Cluster) -> None:
     ctx.say("Hosts:")
-    ctx.say(f"  {'NAME':<8} {'SSH':<21} {'IFACE':<8} {'SHIM':<15} TARGET")
+    ctx.say(f"  {'NAME':<8} {'SSH':<21} {'IFACE':<8} TARGET")
     for h in c.spec.hosts or []:
         up = ctx.hosts[h.name].is_active(f"{c.name}.target") if h.name in ctx.hosts else False
         ssh = h.ssh or "(this host)"
-        ctx.say(
-            f"  {h.name:<8} {ssh:<21} {h.iface:<8} {h.shim!s:<15} {'active' if up else 'inactive'}"
-        )
+        ctx.say(f"  {h.name:<8} {ssh:<21} {h.iface:<8} {'active' if up else 'inactive'}")
 
 
 def describe_status(ctx: Context, c: model.Cluster) -> None:

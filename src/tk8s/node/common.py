@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .. import model
 from ..create.kubeadm import kubectl
-from ..create.plan import LB_POOL, parse_range
+from ..create.plan import LB_POOL, node_region
 from ..lifecycle import ClusterError
 from ..phases import Context, PhaseFailed
 
@@ -40,18 +40,14 @@ def next_ip(c: model.Cluster) -> IPv4Address:
 
 
 def _next_ip_in_range(c: model.Cluster) -> IPv4Address:
-    rng = c.spec.network.range or ""
-    start, end = parse_range(rng)
-    physical = 2 if c.spec.network.routers == 2 else 0
-    first = int(start) + 1 + physical + len(c.host_names)
-    last = int(end) - LB_POOL
-    used = {int(n.ip) for n in c.spec.nodes}
-    free = next((i for i in range(first, last + 1) if i not in used), None)
+    used = {n.ip for n in c.spec.nodes}
+    free = next((ip for ip in node_region(c) if ip not in used), None)
     if free is None:
         raise ClusterError(
-            f"no free node address left in {rng} (the last {LB_POOL} are the LoadBalancer pool)"
+            f"no free node address left in {c.spec.network.range} "
+            f"(the last {LB_POOL} are the LoadBalancer pool)"
         )
-    return IPv4Address(free)
+    return free
 
 
 def least_loaded(c: model.Cluster) -> str:

@@ -53,8 +53,8 @@ def apply_preset(a: argparse.Namespace, raw: list[str]) -> str | None:
 
 
 def parse_hosts_flag(text: str) -> list[model.UserHost]:
-    """--hosts a,b=tux@h:2222,c: each item [name=][user@]host[:port]; without name= the host
-    is the name (so it has to look like one)."""
+    """--hosts a=local,b=tux@h:2222,c: each item [name=][user@]host[:port]; without name= the
+    host is the name (so it has to look like one). `local` is this host (the operator)."""
     out: list[model.UserHost] = []
     for item in text.split(","):
         item = item.strip()
@@ -68,9 +68,11 @@ def parse_hosts_flag(text: str) -> list[model.UserHost]:
                 f"invalid host name '{name}': use lowercase letters, digits and '-', start "
                 "with a letter (write name=user@host to name a host)"
             )
-        out.append(model.UserHost(name=name, ssh=ssh))
+        out.append(model.UserHost(name=name, ssh=ssh))  # "local" becomes ssh None in the model
     if not out:
         raise UsageError("--hosts needs at least one host")
+    if sum(1 for h in out if h.ssh is None) > 1:
+        raise UsageError("only one host can be local (the one tkctl runs on)")
     return out
 
 
@@ -160,11 +162,6 @@ def user_cluster_from_flags(a: argparse.Namespace) -> model.UserCluster:
     if a.hosts and not a.ip_range:
         raise UsageError("--hosts needs --ip-range A-B (addresses reserved on the hosts' LAN)")
     hosts = parse_hosts_flag(a.hosts) if a.hosts else None
-    if hosts is not None:
-        # the first host is the operator unless every host is named with an ssh target
-        first = hosts[0]
-        if first.ssh == first.name:
-            hosts[0] = model.UserHost(name=first.name, ssh=None)
     network = (
         model.UserNetwork(ha=a.ha, routers=a.routers, range=a.ip_range)
         if a.ha or a.routers == 2 or a.ip_range

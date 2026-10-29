@@ -71,9 +71,10 @@ def ha_user() -> model.UserCluster:
 
 
 # demo spread over three hosts (a is the operator, b and c over ssh), bgp mode with two routers,
-# resolved from the range 192.168.1.64-192.168.1.95 on the hosts' LAN 192.168.1.0/24 via ens18:
-# router .64 floating, router-1 .65 (a), router-2 .66 (b), shims .67/.68/.69, control planes
-# .70/.71/.72 on a/b/c, workers .73/.74 on a/b, LoadBalancer pool .76-.95, VIP 172.23.0.1.
+# resolved from the pool 192.168.1.64-70,192.168.1.80-89 (17 addresses) on the hosts' LAN
+# 192.168.1.0/24 (c reaches it by eth0, the others by ens18): router .64 floating, router-1 .65
+# (a), router-2 .66 (b), the operator's shim .67, control planes .68/.69/.70 on a/b/c, workers
+# .80/.81 on a/b, .82-.84 free for add node, LoadBalancer pool .85-.89, VIP 172.23.0.1.
 MULTI_YAML = """\
 apiVersion: taroko.io/v1alpha1
 kind: Cluster
@@ -92,45 +93,46 @@ spec:
     ha: bgp
     routers: 2
     vip: 172.23.0.1
-    lb_range: 192.168.1.76-192.168.1.95
+    lb_range: 192.168.1.85-192.168.1.89
     pods: 10.244.0.0/21
     services: 10.98.0.0/24
-    range: 192.168.1.64-192.168.1.95
+    range: 192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.89
     router_hosts:
       - a
       - b
+    shim: 192.168.1.67
   nodes:
     - role: control-plane
       name: demo-control-plane-1
-      ip: 192.168.1.70
+      ip: 192.168.1.68
       cpu: 2
       memory: 4g
       join: true
       host: a
     - role: control-plane
       name: demo-control-plane-2
-      ip: 192.168.1.71
+      ip: 192.168.1.69
       cpu: 2
       memory: 4g
       join: true
       host: b
     - role: control-plane
       name: demo-control-plane-3
-      ip: 192.168.1.72
+      ip: 192.168.1.70
       cpu: 2
       memory: 4g
       join: true
       host: c
     - role: worker
       name: demo-worker-1
-      ip: 192.168.1.73
+      ip: 192.168.1.80
       cpu: 2
       memory: 4g
       join: true
       host: a
     - role: worker
       name: demo-worker-2
-      ip: 192.168.1.74
+      ip: 192.168.1.81
       cpu: 2
       memory: 4g
       join: true
@@ -138,15 +140,12 @@ spec:
   hosts:
     - name: a
       iface: ens18
-      shim: 192.168.1.67
     - name: b
       ssh: tux@192.168.1.231
       iface: ens18
-      shim: 192.168.1.68
     - name: c
       ssh: 192.168.1.232
-      iface: ens18
-      shim: 192.168.1.69
+      iface: eth0
 status:
   phase: Creating
   completed: {}
@@ -156,7 +155,13 @@ status:
 """
 
 
-MULTI_LAN = LanFacts("ens18", IPv4Network("192.168.1.0/24"), IPv4Address("192.168.1.1"))
+_LAN = IPv4Network("192.168.1.0/24")
+_GW = IPv4Address("192.168.1.1")
+MULTI_LANS = {
+    "a": LanFacts("ens18", _LAN, _GW, IPv4Address("192.168.1.230")),
+    "b": LanFacts("ens18", _LAN, _GW, IPv4Address("192.168.1.231")),
+    "c": LanFacts("eth0", _LAN, _GW, IPv4Address("192.168.1.232")),
+}
 
 
 def multi_user() -> model.UserCluster:
@@ -169,7 +174,7 @@ def multi_user() -> model.UserCluster:
                 model.UserHost(name="b", ssh="tux@192.168.1.231"),
                 model.UserHost(name="c", ssh="192.168.1.232"),
             ],
-            network=model.UserNetwork(ha="bgp", routers=2, range="192.168.1.64-192.168.1.95"),
+            network=model.UserNetwork(ha="bgp", routers=2, range="192.168.1.64-70,192.168.1.80-89"),
             nodes=[
                 model.NodeGroup(role="control-plane", count=3),
                 model.NodeGroup(role="worker", count=2),
@@ -198,7 +203,7 @@ def resolved(
     existing: model.Cluster | None = None,
     used_indices: set[int] | None = None,
     allow_overlap: bool = False,
-    lan: LanFacts | None = None,
+    lans: dict[str, LanFacts] | None = None,
     operator: str | None = None,
 ) -> model.Cluster:
     return resolve(
@@ -208,7 +213,7 @@ def resolved(
         used_indices=used_indices or set(),
         allow_overlap=allow_overlap,
         tk8s_version="test",
-        lan=lan,
+        lans=lans,
         operator=operator,
     )
 

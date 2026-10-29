@@ -278,7 +278,7 @@ def test_ssh_host_prints_a_pasteable_ssh_line_and_runs_through_a_stub(tmp_path: 
     h = SshHost(lines.append, parse_ssh("tux@h:2222"), ssh=str(stub), control_dir=tmp_path / "cm")
     r = h.run(["podman", "ps"], sudo=True, capture=True)
     assert r == Result(0, "out\n", "")
-    assert lines == ["  $ ssh tux@h 'sudo -n podman ps'"]
+    assert lines == ["  $ ssh -p 2222 tux@h 'sudo -n podman ps'"]
     argv = (tmp_path / "argv").read_text().splitlines()
     assert argv[:2] == ["-o", "BatchMode=yes"]
     assert argv[argv.index("-p") + 1] == "2222"
@@ -323,7 +323,13 @@ def test_ssh_failure_is_a_host_error_with_the_stderr(tmp_path: Path) -> None:
     with pytest.raises(HostError, match="exited 255: Host key verification failed") as e:
         h.run(["true"], capture=True)
     assert e.value.returncode == 255
-    assert h.read(Path("/f")) is None and not h.exists(Path("/f")) and h.listdir(Path("/d")) == []
+    for ask in (
+        lambda: h.read(Path("/f")),
+        lambda: h.exists(Path("/f")),
+        lambda: h.listdir(Path("/d")),
+    ):
+        with pytest.raises(HostError):  # an unreachable host never reads as "nothing there"
+            ask()
 
 
 def test_fake_and_dry_run_hosts_with_a_label_print_ssh_lines() -> None:
@@ -349,3 +355,37 @@ def test_control_dir_refuses_a_planted_or_shared_directory(
     (tmp_path / "tmp" / f"tk8s-{os.getuid()}").symlink_to(tmp_path)  # a planted symlink
     with pytest.raises(HostError, match="no private directory"):
         default_control_dir()
+
+
+def test_ssh_itself_failing_raises_even_when_the_command_may_fail(tmp_path: Path) -> None:
+    """255 is ssh's own exit code (no route, host key, auth): an unreachable host must never
+    read as "the file is not there" or "the unit is inactive"."""
+    stub = stub_ssh(
+        tmp_path, 'echo "ssh: connect to host h port 22: No route to host" >&2; exit 255'
+    )
+    h = SshHost(lambda _: None, parse_ssh("h"), ssh=str(stub), control_dir=tmp_path / "cm")
+    with pytest.raises(HostError, match="No route to host"):
+        h.run(["test", "-e", "/x"], check=False, capture=True)
+    with pytest.raises(HostError):
+        h.exists(Path("/x"))
+    with pytest.raises(HostError):
+        h.is_active("x.target")
+    with pytest.raises(HostError):
+        h.read(Path("/x"))
+
+
+def test_ssh_does_not_read_tkctls_stdin(tmp_path: Path) -> None:
+    stub = stub_ssh(tmp_path, "")
+    h = SshHost(lambda _: None, parse_ssh("h"), ssh=str(stub), control_dir=tmp_path / "cm")
+    h.run(["true"], capture=True)
+    assert (tmp_path / "stdin").read_text() == ""  # /dev/null, not the caller's stdin
+    h.write(Path("/f"), "fed\n")
+    assert (tmp_path / "stdin").read_text() == "fed\n"
+
+
+def test_printed_ssh_line_carries_the_port() -> None:
+    f = FakeHost(label="tux@h -p 2222")
+    f.run(["true"])
+    assert f.lines == ["  $ ssh tux@h -p 2222 true"]
+    assert parse_ssh("tux@h:2222").label == "-p 2222 tux@h"
+    assert parse_ssh("h").label == "h"

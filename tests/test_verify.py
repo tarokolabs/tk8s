@@ -467,7 +467,8 @@ def test_hosts_check_passes_when_every_host_is_reachable_with_its_target_and_shi
     r = Report(ctx)
     check_hosts(r)
     assert hosts["a"].lines[-1] == "PASS  hosts: 3/3 reachable, target active, shim tk8s-demo up"
-    assert ["ip", "-o", "link", "show", "tk8s-demo"] in [c.argv for c in hosts["c"].calls]
+    assert ["ip", "-o", "link", "show", "tk8s-demo"] in [c.argv for c in hosts["a"].calls]
+    assert ["ip", "-o", "link", "show", "tk8s-demo"] not in [c.argv for c in hosts["c"].calls]
     assert (r.passed, r.failed) == (1, 0)
 
 
