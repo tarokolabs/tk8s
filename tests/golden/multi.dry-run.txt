@@ -276,10 +276,8 @@ Gateway=192.168.1.1
 # the LAN), not the LAN gateway. no_default_route keeps netavark from adding the gateway too.
 Options=no_default_route=1
 PodmanArgs=--route 0.0.0.0/0,192.168.1.64
-DNS=1.1.1.1
-DNS=1.0.0.1
-DNS=8.8.8.8
-DNS=8.8.4.4
+# No resolvers here: netavark serves no DNS on a macvlan network and refuses the setting; the
+# containers carry their own resolvers (set in each .container).
 
 # ---- <TMP>/clusters/multi/router-1/tkctl.boot
 high-availability {
@@ -439,6 +437,10 @@ Image=ghcr.io/tarokolabs/tk8s/router:2026.10.07-0712
 HostName=multi-router-1
 Network=multi.network
 IP=192.168.1.65
+DNS=1.1.1.1
+DNS=1.0.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
 # tkctl.boot and the bootup scripts, rendered from cluster.yaml; VyOS writes config.boot and its archive here.
 Volume=<TMP>/clusters/multi/router-1:/opt/vyatta/etc/config
 # VyOS wants the network stack and systemd as PID 1 (podman's systemd mode).
@@ -519,6 +521,10 @@ Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
 HostName=multi-control-plane-1
 Network=multi.network
 IP=192.168.1.68
+DNS=1.1.1.1
+DNS=1.0.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
 Environment=TZ=Asia/Taipei
 # api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
 # mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
@@ -603,6 +609,10 @@ Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
 HostName=multi-worker-1
 Network=multi.network
 IP=192.168.1.80
+DNS=1.1.1.1
+DNS=1.0.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
 Environment=TZ=Asia/Taipei
 # api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
 # mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
@@ -698,10 +708,8 @@ Gateway=192.168.1.1
 # the LAN), not the LAN gateway. no_default_route keeps netavark from adding the gateway too.
 Options=no_default_route=1
 PodmanArgs=--route 0.0.0.0/0,192.168.1.64
-DNS=1.1.1.1
-DNS=1.0.0.1
-DNS=8.8.8.8
-DNS=8.8.4.4
+# No resolvers here: netavark serves no DNS on a macvlan network and refuses the setting; the
+# containers carry their own resolvers (set in each .container).
 
 # ---- tux@192.168.1.231:<TMP>/clusters/multi/router-2/tkctl.boot
 high-availability {
@@ -860,6 +868,10 @@ Image=ghcr.io/tarokolabs/tk8s/router:2026.10.07-0712
 HostName=multi-router-2
 Network=multi.network
 IP=192.168.1.66
+DNS=1.1.1.1
+DNS=1.0.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
 # tkctl.boot and the bootup scripts, rendered from cluster.yaml; VyOS writes config.boot and its archive here.
 Volume=<TMP>/clusters/multi/router-2:/opt/vyatta/etc/config
 # VyOS wants the network stack and systemd as PID 1 (podman's systemd mode).
@@ -940,6 +952,10 @@ Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
 HostName=multi-control-plane-2
 Network=multi.network
 IP=192.168.1.69
+DNS=1.1.1.1
+DNS=1.0.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
 Environment=TZ=Asia/Taipei
 # api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
 # mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
@@ -1023,6 +1039,10 @@ Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
 HostName=multi-worker-2
 Network=multi.network
 IP=192.168.1.81
+DNS=1.1.1.1
+DNS=1.0.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
 Environment=TZ=Asia/Taipei
 # api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
 # mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
@@ -1084,10 +1104,8 @@ Gateway=192.168.1.1
 # the LAN), not the LAN gateway. no_default_route keeps netavark from adding the gateway too.
 Options=no_default_route=1
 PodmanArgs=--route 0.0.0.0/0,192.168.1.64
-DNS=1.1.1.1
-DNS=1.0.0.1
-DNS=8.8.8.8
-DNS=8.8.4.4
+# No resolvers here: netavark serves no DNS on a macvlan network and refuses the setting; the
+# containers carry their own resolvers (set in each .container).
 
 # ---- 192.168.1.232:<TMP>/clusters/multi/logs/apiserver/audit-policy.yaml
 apiVersion: audit.k8s.io/v1
@@ -1153,6 +1171,10 @@ Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
 HostName=multi-control-plane-3
 Network=multi.network
 IP=192.168.1.70
+DNS=1.1.1.1
+DNS=1.0.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
 Environment=TZ=Asia/Taipei
 # api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
 # mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the
@@ -1236,6 +1258,10 @@ Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
 HostName=multi-worker-3
 Network=multi.network
 IP=192.168.1.82
+DNS=1.1.1.1
+DNS=1.0.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
 Environment=TZ=Asia/Taipei
 # api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
 # mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the

@@ -44,6 +44,10 @@ def range_prefixes(rng: str) -> list[IPv4Network]:
     return out
 
 
+# the resolvers of a macvlan container (the bridge network hands them out itself)
+MACVLAN_DNS = "\nDNS=1.1.1.1\nDNS=1.0.0.1\nDNS=8.8.8.8\nDNS=8.8.4.4"
+
+
 @dataclass(frozen=True)
 class HostFiles:
     """What one host gets: the files in write order and the fake NUMA cpu symlinks."""
@@ -135,6 +139,7 @@ def render(
             router_image=router.image(v),
             state_dir=state,
             mac_arg=f" --mac-address {mac(r.ip)}" if c.multi_host else "",
+            dns=MACVLAN_DNS if c.multi_host else "",
         )
     if me is not None:
         # kubeadm join --control-plane copies init's ClusterConfiguration, audit-policy-file
@@ -169,6 +174,7 @@ def render(
             memory=n.memory,
             node_mounts=node_mounts,
             mac_arg=f" --mac-address {mac(n.ip)}" if c.multi_host else "",
+            dns=MACVLAN_DNS if c.multi_host else "",
         )
     # routes (and the shim) belong to the operator: the one machine that talks to the cluster
     # from its host network; a node host that is not the operator needs none

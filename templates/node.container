@@ -8,7 +8,7 @@ ContainerName=$name
 Image=$image
 HostName=$name
 Network=$cluster.network
-IP=$ip
+IP=$ip$dns
 Environment=TZ=Asia/Taipei
 # api.<cluster>.k8s is the controlPlaneEndpoint: every node resolves it to the router (proxy
 # mode, the kubeadm HA picture: one load balancer in front of the control planes) or to the

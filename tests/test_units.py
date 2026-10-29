@@ -486,3 +486,20 @@ def test_vrrp_id_follows_the_floating_address_on_several_hosts(
     assert 'vrid "64"' in boot  # 192.168.1.64: two clusters on one LAN never share a VRID
     single = units.render(two_router_ctx)[two_router_ctx.state_dir / "router-1" / "tkctl.boot"]
     assert 'vrid "10"' in single
+
+
+def test_macvlan_containers_carry_their_own_dns_the_network_none(
+    multi_ctx: tuple[Context, dict[str, FakeHost]], ctx: Context
+) -> None:
+    """netavark refuses DNS= on a macvlan network (no aardvark there): the resolvers go into
+    each container instead; a bridge network keeps them as before."""
+    multi, _ = multi_ctx
+    by = {hf.name: hf for hf in units.per_host(multi)}
+    assert "DNS=" not in by["a"].files[UNIT_DIR / "demo.network"]
+    cp1 = by["a"].files[UNIT_DIR / "demo-control-plane-1.container"]
+    assert "IP=192.168.1.68\nDNS=1.1.1.1\nDNS=1.0.0.1\nDNS=8.8.8.8\nDNS=8.8.4.4\n" in cp1
+    assert "DNS=1.1.1.1\n" in by["a"].files[UNIT_DIR / "demo-router-1.container"]
+    single = units.render(ctx)
+    assert "DNS=1.1.1.1\n" in single[UNIT_DIR / "demo.network"]
+    assert "DNS=" not in single[UNIT_DIR / "demo-control-plane-1.container"]
+    assert "DNS=" not in single[UNIT_DIR / "demo-router.container"]
