@@ -5,9 +5,11 @@ and the e2e CI. TK_VERIFY_TIMEOUT is the per-check wait in seconds (default 180)
 Each check is a phase (tkctl verify cluster NAME --phase <check>); verify walks them itself so
 the output keeps the [section] lines people and tklab's logs expect."""
 
+from .. import lifecycle
 from ..phases import Context, Phase, PhaseFailed
 from .gateway import check_gateway, check_gatewayclass, check_httproute, check_tcproute, check_xff
 from .ha import check_router
+from .hosts import check_hosts
 from .platform import (
     check_cilium,
     check_kube_system,
@@ -24,6 +26,7 @@ from .runtime import check_gvisor_network, check_runtimeclass_crun, check_runtim
 __all__ = ["NS", "PHASES", "Report", "VerifyError", "run"]
 
 CHECKS = [
+    ("hosts", "every host reachable, its target active, its shim up (several hosts)", check_hosts),
     ("nodes", "every node Ready", check_nodes),
     ("node-sizes", "capacity and allocatable follow cluster.yaml", check_node_sizes),
     ("kubelet", "no runtime cgroup errors in the kubelet log", check_kubelet),
@@ -52,6 +55,7 @@ PREREQUISITES = {
     "gvisor-network": ["runtimeclass-gvisor"],
 }
 SECTIONS = {
+    "hosts": "hosts",
     "nodes": "nodes",
     "kubelet": "kubelet",
     "kube-system": "system",
@@ -80,7 +84,7 @@ def run(ctx: Context, only: str | None = None) -> int:
         raise VerifyError(
             f"cluster {c.name} is not fully created; rerun tkctl create cluster {c.name}"
         )
-    if not ctx.host.is_active(f"{c.name}.target"):
+    if lifecycle.state_of(ctx, c) != "Running":
         raise VerifyError(f"cluster {c.name} is not running (tkctl start cluster {c.name})")
     if only is not None and only not in {n for n, _, _ in CHECKS}:
         raise PhaseFailed(f"unknown phase {only!r}; phases: {', '.join(n for n, _, _ in CHECKS)}")
@@ -96,6 +100,8 @@ def run(ctx: Context, only: str | None = None) -> int:
         for name, _, check in CHECKS:
             if wanted is not None and name not in wanted:
                 continue
+            if name == "hosts" and not c.multi_host:
+                continue  # nothing to print on a single host, not even the section
             section = _section_of(name)
             if section != printed:
                 ctx.say("")

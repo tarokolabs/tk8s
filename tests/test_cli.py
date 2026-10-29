@@ -398,7 +398,9 @@ def test_verify_cluster_verb(
     assert rc == 1 and calls[0][1] == "nodes"
     assert calls[0][0].options.verify_timeout == 30  # type: ignore[attr-defined]
     rc, out = run(capsys, "verify", "cluster", "--list-phases")
-    assert rc == 0 and out.splitlines()[0].startswith("nodes") and "tcproute" in out
+    first, second = out.splitlines()[:2]
+    assert rc == 0 and first.startswith("hosts") and second.startswith("nodes")
+    assert "tcproute" in out
 
 
 def test_stdout_is_line_buffered_so_redirected_logs_show_each_step(

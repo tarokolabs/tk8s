@@ -450,3 +450,76 @@ def test_node_sizes_names_a_line_it_cannot_parse(ctx: Context, host: FakeHost) -
         "FAIL  node sizes — demo-worker-1: unexpected line 'demo-worker-1 2 4Gi'; "
         "demo-worker-2: not in kubectl get nodes"
     ]
+
+
+# ---- several hosts
+
+from tests.fixtures import running_multi_answers  # noqa: E402
+from tk8s.verify.hosts import check_hosts  # noqa: E402
+from tk8s.verify.report import Report  # noqa: E402
+
+
+def test_hosts_check_passes_when_every_host_is_reachable_with_its_target_and_shim(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    running_multi_answers(hosts, ctx)
+    r = Report(ctx)
+    check_hosts(r)
+    assert hosts["a"].lines[-1] == "PASS  hosts: 3/3 reachable, target active, shim tk8s-demo up"
+    assert ["ip", "-o", "link", "show", "tk8s-demo"] in [c.argv for c in hosts["c"].calls]
+    assert (r.passed, r.failed) == (1, 0)
+
+
+def test_hosts_check_names_each_hosts_trouble(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    running_multi_answers(hosts, ctx)
+    hosts["b"].responses[("true",)] = Result(255, "", "Connection refused\n")
+    hosts["c"].active.discard("demo.target")
+    hosts["a"].responses[("ip", "-o", "link", "show", "tk8s-demo")] = Result(1, "", "")
+    r = Report(ctx)
+    check_hosts(r)
+    assert hosts["a"].lines[-1] == (
+        "FAIL  hosts — a: shim tk8s-demo missing; b: unreachable (Connection refused); "
+        "c: target inactive"
+    )
+
+
+def test_single_host_verify_has_no_hosts_line(ctx: Context, host: FakeHost) -> None:
+    healthy(ctx, host)
+    verify.run(ctx)
+    assert not any("hosts" in ln for ln in host.lines if ln.startswith(("PASS", "FAIL", "SKIP")))
+    assert "[hosts]" not in host.lines
+
+
+def test_verify_refuses_a_degraded_multi_host_cluster(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    c = ctx.require_cluster()
+    assert c.status is not None
+    ctx.cluster = c.model_copy(update={"status": c.status.model_copy(update={"phase": "Ready"})})
+    running_multi_answers(hosts, ctx)
+    hosts["c"].active.discard("demo.target")
+    with pytest.raises(verify.VerifyError, match="cluster demo is not running"):
+        verify.run(ctx)
+
+
+def test_storage_check_finds_the_pv_directory_on_any_node_host(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    running_multi_answers(hosts, ctx)
+    ctx.options.verify_timeout = 15
+    hosts["a"].responses[("kubectl", "logs", "-n", "tk-verify", "writer")] = Result(
+        0, "verify-ok\n", ""
+    )
+    hosts["a"].responses[("kubectl", "get", "pvc", "-n", "tk-verify", "pvc", "-o")] = Result(
+        0, "pvc-1234", ""
+    )
+    hosts["c"].dirs.add(ctx.state_dir / "storage" / "pvc-1234_tk-verify_pvc")
+    r = Report(ctx)
+    platform.check_storage(r)
+    assert f"PASS  PV data on host ({ctx.state_dir}/storage)" in hosts["a"].lines
