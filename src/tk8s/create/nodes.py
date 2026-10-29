@@ -1,7 +1,7 @@
 """nodes: the CNI plugins the nodes mount, then start the cluster target and wait for every
 node's systemd and CRI-O and for the router to boot and list the control planes."""
 
-from .. import podman
+from .. import model, podman
 from ..datatree import owner
 from ..phases import Context, Phase, PhaseFailed, wait_for
 from . import router
@@ -10,10 +10,20 @@ from . import router
 
 
 def cni_plugins_done(ctx: Context) -> bool:
-    return ctx.host.exists(ctx.paths.cni_dir / "bridge")
+    return all(h.exists(ctx.paths.cni_dir / "bridge") for _, h in ctx.node_hosts())
 
 
 def cni_plugins_run(ctx: Context) -> None:
+    """Download the plugins into CNI_DIR on every node host that lacks them."""
+    for name, h in ctx.node_hosts():
+        if h.exists(ctx.paths.cni_dir / "bridge"):
+            continue
+        if name:
+            ctx.say(f"  host {name}:")
+        _cni_plugins_into(ctx.on(h))
+
+
+def _cni_plugins_into(ctx: Context) -> None:
     """Download the plugins into CNI_DIR (copied in place, never rm -r)."""
     cni = ctx.paths.cni_dir
     if ctx.options.offline:
@@ -47,20 +57,22 @@ def systemd_state(ctx: Context, node: str) -> str:
 
 def up_done(ctx: Context) -> bool:
     c = ctx.require_cluster()
-    if not ctx.host.is_active(f"{c.name}.target"):
+    if not all(h.is_active(f"{c.name}.target") for _, h in ctx.node_hosts()):
         return False
     if any(systemd_state(ctx, n.name) not in ("running", "degraded") for n in c.spec.nodes):
         return False
     return router.all_booted_and_synced(ctx, c)
 
 
-def remove_stale_volumes(ctx: Context) -> None:
+def remove_stale_volumes(ctx: Context, nodes: list[model.Node] | None = None) -> None:
     """A leftover <node>-var volume from an earlier cluster carries old kubelet/etcd state and
-    makes kubeadm preflight fail. Drop it when the node container is new and no cluster exists."""
+    makes kubeadm preflight fail. Drop it when the node container is new and no cluster exists.
+    `nodes`: the ones on ctx.host (a host of a multi-host cluster); the kubeconfig that says
+    "a cluster exists" is the operator's, so the caller passes `has_kubeconfig`."""
     c = ctx.require_cluster()
-    if ctx.host.exists(ctx.state_dir / "kubeconfig"):
+    if nodes is None and ctx.host.exists(ctx.state_dir / "kubeconfig"):
         return
-    for n in c.spec.nodes:
+    for n in c.spec.nodes if nodes is None else nodes:
         if podman.exists(ctx, "container", n.name):
             continue
         for v in podman.node_volumes(n.name):
@@ -97,16 +109,29 @@ def wait_node(ctx: Context, node: str) -> None:
     ctx.say(f"  {node}: systemd {last[-1]}, crio active")
 
 
-def up_run(ctx: Context) -> None:
+def _start_on(ctx: Context, nodes: list[model.Node] | None) -> None:
+    """The host-side start: the directories the nodes mount, stale volumes, the target."""
     c = ctx.require_cluster()
     ctx.host.mkdir(ctx.state_dir / "storage")
     ctx.host.mkdir(ctx.state_dir / "logs")
     if not ctx.host.exists(ctx.paths.wulin_dir):
         ctx.host.mkdir(ctx.paths.wulin_dir, sudo=True, owner=owner(ctx))
-    remove_stale_volumes(ctx)
+    remove_stale_volumes(ctx, nodes)
     ctx.host.run(["systemctl", "daemon-reload"], sudo=True)
     ctx.host.run(["systemctl", "reset-failed", f"{c.name}*"], sudo=True, check=False)
     ctx.host.run(["systemctl", "enable", "--now", "--quiet", f"{c.name}.target"], sudo=True)
+
+
+def up_run(ctx: Context) -> None:
+    c = ctx.require_cluster()
+    if not c.multi_host:
+        _start_on(ctx, None)
+    else:
+        fresh = not ctx.host.exists(ctx.state_dir / "kubeconfig")
+        for name, h in ctx.node_hosts():
+            ctx.say(f"  host {name}:")
+            mine = [n for n in c.spec.nodes if n.host == name] if fresh else []
+            _start_on(ctx.on(h), mine)
     for n in c.spec.nodes:
         wait_node(ctx, n.name)
     router.wait(ctx)

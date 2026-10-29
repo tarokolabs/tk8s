@@ -261,16 +261,16 @@ def listing(ctx: Context, k8s: str) -> list[tuple[str, str]]:
     return out + rows
 
 
-def status(ctx: Context, k8s: str) -> list[tuple[str, str]]:
+def status(ctx: Context, k8s: str, *, images: list[str] | None = None) -> list[tuple[str, str]]:
     """("present" | "missing", image) for every wanted image of the store, in list order. Only
     looks; the caller makes sure the node image and the cilium CLI, which wanted() runs, are on
-    the host."""
+    the host, or passes the list (`images`) computed elsewhere (another host of the cluster)."""
     env = _store_env(ctx.paths, k8s)
     have_store = ctx.host.exists(conf_path(ctx.paths, k8s)) and ctx.host.exists(
         store_dir(ctx.paths, k8s)
     )
     out: list[tuple[str, str]] = []
-    for img in wanted(ctx, k8s):
+    for img in wanted(ctx, k8s) if images is None else images:
         present = (
             have_store
             and ctx.host.run(
@@ -298,17 +298,20 @@ def _pull(ctx: Context, k8s: str, img: str) -> None:
         raise ImagesError(f"images: pull of {img} failed twice; rerun to resume") from err
 
 
-def ensure(ctx: Context, k8s: str) -> None:
+def ensure(ctx: Context, k8s: str, *, images: list[str] | None = None, cli: bool = True) -> None:
     """Every image the version needs is in the store (skips what is there; TK_OFFLINE=1 checks
-    only). Serialised per version: a second ensure waits for the first, then finds everything."""
+    only). Serialised per version: a second ensure waits for the first, then finds everything.
+    A host of a multi-host cluster gets the list computed on the operator (`images`) and no
+    cilium CLI (`cli=False`): only the operator runs it."""
     data_dirs(ctx)  # tkctl pull images may be the first command on a fresh host
     with with_lock(ctx.paths.images_dir / f"{k8s}.lock"):
         init_store(ctx, k8s)
         start = time.monotonic()
         ensure_node_image(ctx, k8s)
         ensure_router_image(ctx)
-        ensure_cilium_cli(ctx)
-        rows = status(ctx, k8s)
+        if cli:
+            ensure_cilium_cli(ctx)
+        rows = status(ctx, k8s, images=images)
         present = [i for s, i in rows if s == "present"]
         missing = [i for s, i in rows if s == "missing"]
         where = store_dir(ctx.paths, k8s)

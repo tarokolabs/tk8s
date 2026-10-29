@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 from .. import kubeconfig, model, podman
-from ..host import Result
+from ..host import Host, Result
 from ..phases import Context, Phase, PhaseFailed, wait_for
 from ..render import template
 from . import frr, router
@@ -55,18 +55,25 @@ def audit_policy(ctx: Context) -> tuple[Path, str]:
     return path, (ctx.paths.home / "manifests" / "audit-policy.yaml").read_text()
 
 
+def _cp_host(ctx: Context) -> Host:
+    """kubeadm init reads the files from the node: they go to the first control plane's host."""
+    return ctx.host_for(ctx.require_cluster().first_control_plane.name)
+
+
 def render_done(ctx: Context) -> bool:
     policy, text = audit_policy(ctx)
+    host = _cp_host(ctx)
     return (
-        ctx.host.read(ctx.state_dir / "init-config.yaml") == render_init(ctx)
-        and ctx.host.read(policy) == text
+        host.read(ctx.state_dir / "init-config.yaml") == render_init(ctx)
+        and host.read(policy) == text
     )
 
 
 def render_run(ctx: Context) -> None:
-    ctx.host.write(ctx.state_dir / "init-config.yaml", render_init(ctx), mode=0o600)
+    host = _cp_host(ctx)
+    host.write(ctx.state_dir / "init-config.yaml", render_init(ctx), mode=0o600)
     policy, text = audit_policy(ctx)
-    ctx.host.write(policy, text)
+    host.write(policy, text)
 
 
 RENDER = Phase(

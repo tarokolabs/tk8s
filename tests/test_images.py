@@ -371,3 +371,43 @@ def test_images_phase_is_not_done_without_the_cilium_cli(ctx: Context, host: Fak
     host.files[images.conf_path(ctx.paths, K8S)] = images.storage_conf(ctx.paths, K8S)
     host.responses[("cilium", "version", "--client")] = MISSING
     assert not images_phase.done(ctx)
+
+
+def test_multi_host_images_phase_fills_every_hosts_store_from_one_list(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    sources(hosts["a"])  # the image list is computed once, on the operator
+    for h in hosts.values():
+        h.responses[("id", "-u")] = Result(0, "1000\n", "")
+        h.responses[("id", "-g")] = Result(0, "1000\n", "")
+        h.responses[("podman", "image", "exists")] = MISSING
+    assert not images_phase.done(ctx)
+    images_phase.run(ctx)
+    for name, h in hosts.items():
+        assert len(store_pulls(h)) == 15, name
+        assert ["podman", "pull", NODE] in [c.argv for c in h.calls], name
+        assert any(c.argv[:2] == ["mkdir", str(ctx.paths.images_dir / K8S)] for c in h.calls)
+    # the list is computed on the operator only; the cilium CLI is installed there only
+    for name in ("b", "c"):
+        assert not any(c.argv[:1] in (["curl"], ["cilium"]) for c in hosts[name].calls), name
+        assert not any(c.argv[:3] == ["podman", "run", "--rm"] for c in hosts[name].calls), name
+    assert "  host b:" in hosts["a"].lines and "  host c:" in hosts["a"].lines
+    for h in hosts.values():  # once everything is there, the phase is done
+        h.responses[("podman", "image", "exists")] = PRESENT
+        h.dirs.add(images.store_dir(ctx.paths, K8S))
+        h.files[images.conf_path(ctx.paths, K8S)] = images.storage_conf(ctx.paths, K8S)
+    assert images_phase.done(ctx)
+
+
+def test_multi_host_images_phase_is_done_only_when_every_host_has_everything(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    sources(hosts["a"])
+    for h in hosts.values():
+        h.dirs.add(images.store_dir(ctx.paths, K8S))
+        h.files[images.conf_path(ctx.paths, K8S)] = images.storage_conf(ctx.paths, K8S)
+    assert images_phase.done(ctx)
+    hosts["c"].responses[("podman", "image", "exists", "registry.k8s.io/pause:3.10.2")] = MISSING
+    assert not images_phase.done(ctx)

@@ -407,3 +407,65 @@ def test_kubectl_helper_names_the_cluster_kubeconfig_and_never_raises(
     assert call.env == {"KUBECONFIG": str(ctx.state_dir / "kubeconfig")}
     kubeadm.kubectl(ctx, "apply", "-f", "-", input="kind: X\n")
     assert host.calls[-1].input == "kind: X\n"
+
+
+# ---- several hosts
+
+
+def test_multi_host_render_writes_the_init_config_on_the_first_control_planes_host(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    c = ctx.require_cluster()
+    moved = [
+        n.model_copy(update={"host": "b"}) if n.name.endswith("plane-1") else n
+        for n in c.spec.nodes
+    ]
+    ctx.cluster = c.model_copy(update={"spec": c.spec.model_copy(update={"nodes": moved})})
+    assert not kubeadm.render_done(ctx)
+    Runner([kubeadm.PHASE], only="kubeadm/render").run(ctx)
+    assert ctx.state_dir / "init-config.yaml" in hosts["b"].files
+    assert ctx.state_dir / "init-config.yaml" not in hosts["a"].files
+    policy, _ = kubeadm.audit_policy(ctx)
+    assert policy in hosts["b"].files and policy not in hosts["a"].files
+    assert kubeadm.render_done(ctx)
+    text = hosts["b"].files[ctx.state_dir / "init-config.yaml"]
+    assert "advertiseAddress: 192.168.1.70" in text and "    - 192.168.1.64\n" in text
+
+
+def test_multi_host_join_runs_on_each_nodes_host_with_one_token(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    hosts["a"].responses[
+        ("podman", "exec", "demo-control-plane-1", "kubeadm", "token", "create")
+    ] = Result(0, "kubeadm join api.demo.k8s:6443 --token t --discovery-token-ca-cert-hash h\n", "")
+    hosts["a"].files[ctx.state_dir / ".certificate-key"] = "abcd\n"
+    for n in ctx.require_cluster().spec.nodes[1:]:  # not joined, then joined
+        hosts["a"].responses[("kubectl", "get", "node", n.name)] = [
+            Result(1, "", "not found"),
+            Result(0, n.name, ""),
+        ]
+    for name, h in hosts.items():
+        for n in ctx.require_cluster().spec.nodes[1:]:
+            if n.host == name:
+                h.responses[("podman", "exec", n.name, "bash", "-c")] = Result(0, "", "")
+    kubeadm.join_run(ctx)
+    joins = {
+        name: [c.argv[2] for c in h.calls if c.argv[:2] == ["podman", "exec"] and "bash" in c.argv]
+        for name, h in hosts.items()
+    }
+    assert joins == {
+        "a": ["demo-worker-1"],
+        "b": ["demo-control-plane-2", "demo-worker-2"],
+        "c": ["demo-control-plane-3"],
+    }
+    cp2 = next(
+        c
+        for c in hosts["b"].calls
+        if c.argv[:3] == ["podman", "exec", "demo-control-plane-2"] and "bash" in c.argv
+    )
+    assert (
+        "--control-plane --certificate-key abcd --apiserver-advertise-address 192.168.1.71"
+        in cp2.argv[-1]
+    )

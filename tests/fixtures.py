@@ -327,12 +327,13 @@ def bgp_router_answers(
     established: int = 3,
     hops: int = 3,
     bfd_up: int = 3,
+    ips: list[str] | None = None,
 ) -> None:
-    """The demo bgp router (3 control planes .1 .2 .3) as vtysh reports it: the first `established`
-    peers Established and the rest Active, `hops` ECMP next hops to the VIP, the first `bfd_up` BFD
-    sessions up. The JSON shapes are FRR 10's, trimmed to the keys tkctl reads. `router` picks the
-    container (demo-router-1/-2 for a two-router cluster)."""
-    ips = ["172.22.0.1", "172.22.0.2", "172.22.0.3"]
+    """The demo bgp router (3 control planes .1 .2 .3, or `ips`) as vtysh reports it: the first
+    `established` peers Established and the rest Active, `hops` ECMP next hops to the VIP, the
+    first `bfd_up` BFD sessions up. The JSON shapes are FRR 10's, trimmed to the keys tkctl
+    reads. `router` picks the container (demo-router-1/-2 for a two-router cluster)."""
+    ips = ips or ["172.22.0.1", "172.22.0.2", "172.22.0.3"]
     summary = {
         "as": 65000,
         "peers": {
@@ -434,3 +435,25 @@ def ready_host(
     )
     r[("cilium", "install")] = Result(0, '      image: "quay.io/cilium/cilium:v1@sha256:a"\n', "")
     return c
+
+
+def running_multi_answers(hosts: dict[str, FakeHost], ctx: Context) -> None:
+    """The MULTI_YAML cluster up on its three hosts: every host's target active, every node's
+    systemd running on its host, both routers booted and peering with the three control planes,
+    CNI plugins and the data tree on every host."""
+    c = ctx.require_cluster()
+    cps = [str(n.ip) for n in c.control_planes]
+    for name, h in hosts.items():
+        h.responses[("id", "-u")] = Result(0, "1000\n", "")
+        h.responses[("id", "-g")] = Result(0, "1000\n", "")
+        h.active.add("demo.target")
+        h.files[ctx.paths.cni_dir / "bridge"] = "elf"
+        h.dirs.update({ctx.paths.data_dir, ctx.paths.clusters_dir, ctx.paths.wulin_dir})
+        for n in c.spec.nodes:
+            if n.host == name:
+                h.responses[("podman", "exec", n.name, "systemctl", "is-system-running")] = Result(
+                    0, "running\n", ""
+                )
+        for r in c.routers:
+            if r.host == name:
+                bgp_router_answers(h, router=r.name, ips=cps)
