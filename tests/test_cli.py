@@ -860,3 +860,12 @@ def test_delete_cluster_on_a_copy_host_refuses_and_keeps_everything(
     rc, out = run(capsys, "delete", "cluster", "demo", "--yes")
     assert rc == 1 and "cluster demo is managed from op; run tkctl there" in out
     assert (state / "cluster.yaml").exists()
+
+
+def test_a_malformed_ip_range_is_a_usage_error_not_a_traceback(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    argv = ["--hosts", "a=local,b=h", "--ip-range", "192.168.1.70-79,x", "--dry-run"]
+    rc, out = run(capsys, "create", "cluster", *argv)
+    assert rc == 1 and "invalid --ip-range '192.168.1.70-79,x'" in out
+    assert "Traceback" not in out

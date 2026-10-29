@@ -564,3 +564,16 @@ def test_a_pool_touching_the_networks_own_addresses_is_refused() -> None:
     u = u.model_copy(update={"spec": u.spec.model_copy(update={"network": net})})
     with pytest.raises(PlanError, match=r"192\.168\.1\.255 is the broadcast address of 192"):
         resolved(u, lans=MULTI_LANS, operator="op")
+
+
+def test_a_segment_may_be_a_single_address() -> None:
+    assert parse_range("192.168.1.70-72,192.168.1.216") == [ip(70), ip(71), ip(72), ip(216)]
+    assert normalize_range("192.168.1.216") == "192.168.1.216"
+    u = multi_user()
+    pool = "192.168.1.64-70,192.168.1.80-88,192.168.1.90"
+    net = model.UserNetwork(ha="bgp", routers=2, range=pool)
+    u = u.model_copy(update={"spec": u.spec.model_copy(update={"network": net})})
+    c = resolved(u, lans=MULTI_LANS, operator="op")
+    full = "192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.88,192.168.1.90"
+    assert c.spec.network.range == full
+    assert c.spec.network.lb_range == "192.168.1.85-192.168.1.88,192.168.1.90"

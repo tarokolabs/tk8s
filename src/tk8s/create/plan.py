@@ -116,8 +116,8 @@ def validate_hosts(u: model.UserCluster) -> None:
 
 
 def parse_range(text: str) -> list[IPv4Address]:
-    """The address pool: comma-separated A-B segments in order, B spelled in full or as the
-    last octet only (192.168.1.64-70). No address twice."""
+    """The address pool: comma-separated A-B segments (or lone addresses) in order, B spelled
+    in full or as the last octet only (192.168.1.64-70). No address twice."""
     pool: list[IPv4Address] = []
     for seg in text.split(","):
         seg = seg.strip()
@@ -126,7 +126,7 @@ def parse_range(text: str) -> list[IPv4Address]:
             a = IPv4Address(a_text)
             if b_text and "." not in b_text:
                 b_text = ".".join([*a_text.split(".")[:3], b_text])
-            b = IPv4Address(b_text)
+            b = IPv4Address(b_text or a_text)
         except ValueError as err:
             raise PlanError(
                 f"spec.network.range must be A-B[,C-D] (IPv4 addresses, the end may be a last "

@@ -162,6 +162,11 @@ def user_cluster_from_flags(a: argparse.Namespace) -> model.UserCluster:
     if a.hosts and not a.ip_range:
         raise UsageError("--hosts needs --ip-range A-B (addresses reserved on the hosts' LAN)")
     hosts = parse_hosts_flag(a.hosts) if a.hosts else None
+    if a.ip_range and not re.fullmatch(model.RANGE, a.ip_range):
+        raise UsageError(
+            f"invalid --ip-range '{a.ip_range}': comma-separated A-B segments (or single "
+            "addresses), e.g. 192.168.1.64-79,192.168.1.208-223"
+        )
     network = (
         model.UserNetwork(ha=a.ha, routers=a.routers, range=a.ip_range)
         if a.ha or a.routers == 2 or a.ip_range

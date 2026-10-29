@@ -16,7 +16,7 @@ NODE_NAME = r"^[a-z][a-z0-9-]*$"
 CLUSTER_NAME = r"^[a-z][a-z0-9-]{0,15}$"
 MEMORY = r"^[0-9]+[gm]$"
 HOST_NAME = r"^[a-z][a-z0-9-]{0,31}$"
-RANGE = r"^[0-9.]+-[0-9.]+(, *[0-9.]+-[0-9.]+)*$"  # A-B[,C-D...]; B may be a last octet
+RANGE = r"^[0-9.]+(-[0-9.]+)?(, *[0-9.]+(-[0-9.]+)?)*$"  # A-B or A [,C-D...]; B may be a last octet
 
 
 class Strict(BaseModel):
