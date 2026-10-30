@@ -53,7 +53,7 @@ tkctl create cluster demo --routers 2                    # 兩台 VyOS router �
 tkctl create cluster ha --preset ha --hosts a=local,b=tux@192.168.1.231,c=192.168.1.232 --ip-range 192.168.1.64-79,192.168.1.208-223
                                                          # 節點、router 分散到三台主機（macvlan，節點拿 LAN 的位址），任一台主機掛掉叢集照常
 tkctl create cluster sandbox --gvisor                   # 多一個 gvisor 的 RuntimeClass
-tkctl create cluster old --k8s 1.36.5                   # 次新版
+tkctl create cluster old --k8s 1.36.6                   # 次新版
 tkctl create cluster big --cpu 4 --memory 8G
 tkctl create cluster bare --skip-phases cni,addons    # 只做到 kubeadm，CNI 自己裝（叢集停在 Creating）
 ```
@@ -64,7 +64,7 @@ tkctl create cluster bare --skip-phases cni,addons    # 只做到 kubeadm，CNI 
 [preflight] check the host: podman, systemd, cgroup v2, swap, sudo, sysctls, data tree, node sizes
   preflight ok: podman 5.4.2, systemd, cgroup v2, swap off, host bridge-nf off, ip_forward on, /opt/taroko owned by student, host 8 cpu, 32102 MiB
 [plan] resolve cluster.yaml: defaults, subnet, node names
-  cluster demo: 1 control plane + 2 workers, K8s 1.37.1, subnet 172.22.0.0/24
+  cluster demo: 1 control plane + 2 workers, K8s 1.37.2, subnet 172.22.0.0/24
 [images] already done
 [units] write the Quadlet units, the target, the routes and the LB config
   $ sudo -n install -D -m 644 /dev/stdin /etc/containers/systemd/demo/demo.network
@@ -179,7 +179,7 @@ kind: Cluster
 metadata:
   name: tkdt
 spec:
-  kubernetes: "1.37.1"
+  kubernetes: "1.37.2"
   datapath: auto           # auto | netkit | veth
   gvisor: false
   nodes:

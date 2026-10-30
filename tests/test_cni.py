@@ -15,8 +15,8 @@ def healthy(host: FakeHost, ctx: Context) -> None:
     host.responses[("kubectl", "-n", "kube-system", "get", "secret")] = Result(0, "", "")
     host.responses[("kubectl", "get", "nodes", "--no-headers")] = Result(
         0,
-        "demo-control-plane-1 Ready control-plane 1m v1.37.1\n"
-        "demo-worker-1 Ready <none> 1m v1.37.1\n",
+        "demo-control-plane-1 Ready control-plane 1m v1.37.2\n"
+        "demo-worker-1 Ready <none> 1m v1.37.2\n",
         "",
     )
 
@@ -122,8 +122,8 @@ def test_nodes_never_ready_fails_by_name(ctx: Context, host: FakeHost) -> None:
     healthy(host, ctx)
     host.responses[("kubectl", "get", "nodes", "--no-headers")] = Result(
         0,
-        "demo-control-plane-1 Ready control-plane 1m v1.37.1\n"
-        "demo-worker-1 NotReady <none> 1m v1.37.1\n",
+        "demo-control-plane-1 Ready control-plane 1m v1.37.2\n"
+        "demo-worker-1 NotReady <none> 1m v1.37.2\n",
         "",
     )
     with pytest.raises(PhaseFailed, match="nodes are not Ready after 5 minutes"):

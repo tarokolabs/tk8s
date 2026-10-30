@@ -15,8 +15,8 @@ from tk8s.phases import Context
 from tk8s.verify import platform
 
 NODES = (
-    "demo-control-plane-1 Ready control-plane 1m v1.37.1\ndemo-worker-1 Ready <none> 1m v1.37.1\n"
-    "demo-worker-2 Ready <none> 1m v1.37.1\n"
+    "demo-control-plane-1 Ready control-plane 1m v1.37.2\ndemo-worker-1 Ready <none> 1m v1.37.2\n"
+    "demo-worker-2 Ready <none> 1m v1.37.2\n"
 )
 
 
@@ -37,7 +37,7 @@ def healthy(ctx: Context, host: FakeHost) -> None:
     host.active.add("demo.target")
     host.responses[("kubectl", "get", "nodes", "--no-headers")] = Result(0, NODES, "")
     host.responses[("kubectl", "get", "nodes", "-o", "custom-columns")] = Result(
-        0, "demo-control-plane-1 v1.37.1 cri-o://1.37.2 6.12\n", ""
+        0, "demo-control-plane-1 v1.37.2 cri-o://1.37.2 6.12\n", ""
     )
     host.responses[("podman", "exec", "demo-control-plane-1", "journalctl")] = Result(0, "", "")
     host.responses[("kubectl", "get", "pods", "-n", "kube-system", "--no-headers")] = [

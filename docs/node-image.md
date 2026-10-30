@@ -30,8 +30,8 @@ kind 的節點同樣是 systemd 當 PID 1，但用自己的 entrypoint 腳本做
 ### 自己 build
 
 ```bash
-sudo podman build --build-arg VER=1.37.1 --build-arg CRIO=v1.37.2 \
-  -t ghcr.io/tarokolabs/tk8s/node:v1.37.1 images/node
+sudo podman build --build-arg VER=1.37.2 --build-arg CRIO=v1.37.2 \
+  -t ghcr.io/tarokolabs/tk8s/node:v1.37.2 images/node
 ```
 
 `tkctl pull images --k8s <版本>` 在 tag 沒發布時會自動做同一件事。`--k8s` 指定的 minor 必須在 `versions.yaml` 的 `crio` 表裡才能建置；已下載到本機的 image 不受此限。

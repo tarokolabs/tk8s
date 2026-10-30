@@ -8,7 +8,7 @@ HOME = Path(__file__).resolve().parents[1]
 
 def test_real_versions_yaml_loads_and_pins_everything() -> None:
     v = versions.load(HOME / "versions.yaml")
-    assert v.kubernetes.default == "1.37.1" and v.kubernetes.previous == "1.36.5"
+    assert v.kubernetes.default == "1.37.2" and v.kubernetes.previous == "1.36.6"
     for k in (
         "cni_plugins",
         "cilium_cli",
@@ -33,7 +33,7 @@ def test_crio_table_covers_both_supported_minors() -> None:
 
 def test_uv_is_pinned() -> None:
     v = versions.load(HOME / "versions.yaml")
-    assert v.uv == "0.13.1"
+    assert v.uv == "0.13.6"
 
 
 def test_vyos_is_pinned_by_build_and_checksum_and_haproxy_is_gone() -> None:

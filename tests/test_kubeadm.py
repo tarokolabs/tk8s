@@ -5,7 +5,7 @@ from tk8s.phases import Context, Runner
 
 def test_init_config_names_cluster_endpoint_and_sans(ctx: Context) -> None:
     text = kubeadm.render_init(ctx)
-    assert 'kubernetesVersion: 1.37.1\ncontrolPlaneEndpoint: "api.demo.k8s:6443"' in text
+    assert 'kubernetesVersion: 1.37.2\ncontrolPlaneEndpoint: "api.demo.k8s:6443"' in text
     assert (
         "  certSANs:\n    - api.demo.k8s\n    - 172.22.0.253\n    - 172.22.0.1\n  extraArgs:"
         in text
@@ -28,7 +28,7 @@ from tk8s.phases import PhaseFailed  # noqa: E402
 
 KEY = "0123456789abcdef" * 4
 INIT_OUT = (
-    "[init] Using Kubernetes version: v1.37.1\n...\n"
+    "[init] Using Kubernetes version: v1.37.2\n...\n"
     "  kubeadm join api.demo.k8s:6443 --token abc.def --discovery-token-ca-cert-hash sha256:1234 "
     f"\\\n\t--control-plane --certificate-key {KEY}\n"
 )

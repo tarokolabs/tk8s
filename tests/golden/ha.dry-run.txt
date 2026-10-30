@@ -1,12 +1,12 @@
 [plan] resolve cluster.yaml: defaults, subnet, node names
-  cluster ha: 3 control planes + 2 workers, K8s 1.37.1, subnet 172.22.0.0/24
+  cluster ha: 3 control planes + 2 workers, K8s 1.37.2, subnet 172.22.0.0/24
 # ---- <TMP>/clusters/ha/cluster.yaml
 apiVersion: taroko.io/v1alpha1
 kind: Cluster
 metadata:
   name: ha
 spec:
-  kubernetes: "1.37.1"
+  kubernetes: "1.37.2"
   cni: cilium
   datapath: auto
   gvisor: false
@@ -171,7 +171,7 @@ PartOf=ha.target
 
 [Container]
 ContainerName=ha-router
-Image=ghcr.io/tarokolabs/tk8s/router:2026.10.07-0712
+Image=ghcr.io/tarokolabs/tk8s/router:2026.10.29-0020
 # The container's hostname must be the one config.boot sets: VyOS runs sudo at every commit and a
 # hostname it cannot resolve stalls the boot for minutes.
 HostName=ha-router
@@ -237,7 +237,7 @@ PartOf=ha.target
 
 [Container]
 ContainerName=ha-control-plane-1
-Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.2
 HostName=ha-control-plane-1
 Network=ha.network
 IP=172.22.0.1
@@ -257,7 +257,7 @@ Volume=ha-control-plane-1-usr-local-bin:/usr/local/bin
 # The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
 # reads it as an additional image store, so nothing a create needs is pulled; read-only
 # because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
-Volume=<TMP>/images/1.37.1:/var/lib/containers/shared:ro
+Volume=<TMP>/images/1.37.2:/var/lib/containers/shared:ro
 Volume=<TMP>/clusters/ha:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 Volume=<TMP>/clusters/ha/nodes/ha-control-plane-1/meminfo:/proc/meminfo:ro
@@ -321,7 +321,7 @@ After=ha-control-plane-1.service
 
 [Container]
 ContainerName=ha-control-plane-2
-Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.2
 HostName=ha-control-plane-2
 Network=ha.network
 IP=172.22.0.2
@@ -341,7 +341,7 @@ Volume=ha-control-plane-2-usr-local-bin:/usr/local/bin
 # The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
 # reads it as an additional image store, so nothing a create needs is pulled; read-only
 # because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
-Volume=<TMP>/images/1.37.1:/var/lib/containers/shared:ro
+Volume=<TMP>/images/1.37.2:/var/lib/containers/shared:ro
 Volume=<TMP>/clusters/ha:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 Volume=<TMP>/clusters/ha/nodes/ha-control-plane-2/meminfo:/proc/meminfo:ro
@@ -405,7 +405,7 @@ After=ha-control-plane-1.service
 
 [Container]
 ContainerName=ha-control-plane-3
-Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.2
 HostName=ha-control-plane-3
 Network=ha.network
 IP=172.22.0.3
@@ -425,7 +425,7 @@ Volume=ha-control-plane-3-usr-local-bin:/usr/local/bin
 # The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
 # reads it as an additional image store, so nothing a create needs is pulled; read-only
 # because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
-Volume=<TMP>/images/1.37.1:/var/lib/containers/shared:ro
+Volume=<TMP>/images/1.37.2:/var/lib/containers/shared:ro
 Volume=<TMP>/clusters/ha:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 Volume=<TMP>/clusters/ha/nodes/ha-control-plane-3/meminfo:/proc/meminfo:ro
@@ -489,7 +489,7 @@ After=ha-control-plane-1.service
 
 [Container]
 ContainerName=ha-worker-1
-Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.2
 HostName=ha-worker-1
 Network=ha.network
 IP=172.22.0.4
@@ -509,7 +509,7 @@ Volume=ha-worker-1-usr-local-bin:/usr/local/bin
 # The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
 # reads it as an additional image store, so nothing a create needs is pulled; read-only
 # because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
-Volume=<TMP>/images/1.37.1:/var/lib/containers/shared:ro
+Volume=<TMP>/images/1.37.2:/var/lib/containers/shared:ro
 Volume=<TMP>/clusters/ha:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 Volume=<TMP>/clusters/ha/nodes/ha-worker-1/meminfo:/proc/meminfo:ro
@@ -573,7 +573,7 @@ After=ha-control-plane-1.service
 
 [Container]
 ContainerName=ha-worker-2
-Image=ghcr.io/tarokolabs/tk8s/node:v1.37.1
+Image=ghcr.io/tarokolabs/tk8s/node:v1.37.2
 HostName=ha-worker-2
 Network=ha.network
 IP=172.22.0.5
@@ -593,7 +593,7 @@ Volume=ha-worker-2-usr-local-bin:/usr/local/bin
 # The host's shared image store for this Kubernetes version (images:ensure fills it). CRI-O
 # reads it as an additional image store, so nothing a create needs is pulled; read-only
 # because one writer per store is the rule. Podman mounts it after the /var volume (deeper path).
-Volume=<TMP>/images/1.37.1:/var/lib/containers/shared:ro
+Volume=<TMP>/images/1.37.2:/var/lib/containers/shared:ro
 Volume=<TMP>/clusters/ha:/opt/taroko
 Volume=<TMP>/wulin:/opt/taroko/wulin
 Volume=<TMP>/clusters/ha/nodes/ha-worker-2/meminfo:/proc/meminfo:ro
@@ -677,7 +677,7 @@ nodeRegistration:
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: ClusterConfiguration
 clusterName: ha
-kubernetesVersion: 1.37.1
+kubernetesVersion: 1.37.2
 controlPlaneEndpoint: "api.ha.k8s:6443"
 networking:
   dnsDomain: ha.k8s

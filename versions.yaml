@@ -1,34 +1,34 @@
 # Single source of truth for pinned component versions.
 # Read by tk8s (versions.py), install.sh, build-images.sh and the release workflow (sed).
 kubernetes:
-  default: "1.37.1"
-  previous: "1.36.5"
+  default: "1.37.2"
+  previous: "1.36.6"
 # CRI-O for the node image, by Kubernetes minor (CRI-O's minor follows Kubernetes'; the patch is
 # pinned here). Static bundle from https://storage.googleapis.com/cri-o/artifacts/, with a checksum.
 crio:
   "1.37": "v1.37.2"
   "1.36": "v1.36.7"
-cilium: "1.20.2"
-cilium_cli: "v0.20.1"
+cilium: "1.20.4"
+cilium_cli: "v0.20.2"
 cni_plugins: "v1.9.1"
-metrics_server: "v0.9.0"
+metrics_server: "v0.9.1"
 local_path_provisioner: "v0.0.37"
 # gVisor release (single gvisor.tar.zstd per release); installed into nodes by addons:gvisor
-gvisor: "20261005.0"
+gvisor: "20261026.0"
 gateway_api: "v1.6.3"
 # The router container of every cluster (VyOS rolling, built from the nightly ISO by
 # images/router/; the apiserver load balancer and, from Plan 2 on, the BGP router). The build
 # number is the nightly tag without "-rolling"; the checksum is of the generic-amd64 ISO. Move
 # both to the newest nightly at every release.
-vyos: "2026.10.07-0712"
-vyos_sha256: "1417a2fd96183672f43e83d680e02ccfce5cd5ae3851978e9a37efd11edbd5a0"
+vyos: "2026.10.29-0020"
+vyos_sha256: "ef942258d93a5600544351b7b6277a80a08370276355f926070143aadd00576f"
 # crun for the e2e runner only (Ubuntu 24.04 ships 1.14, too old for podman 5); nodes get crun from CRI-O
 crun: "1.30.1"
 # podman built from source on the e2e runner (Ubuntu 24.04 ships 4.9); hosts need >= 5.4
 podman: "5.8.9"
 # uv for install.sh: fetches Python 3.14 and the locked dependencies; the release tarball is
 # checked against its published sha256
-uv: "0.13.1"
+uv: "0.13.6"
 # Images used by tkctl verify's test pods
 verify_busybox: "docker.io/library/busybox:1.38.0"
 verify_alpine: "docker.io/library/alpine:3.24"
