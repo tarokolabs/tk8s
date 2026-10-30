@@ -5,7 +5,6 @@ KUBECONFIG that names the clusters' own files; the context names are the cluster
 
 import json
 from collections.abc import Callable
-from pathlib import Path
 
 from .. import images, lifecycle
 from ..create.kubeadm import kubectl
@@ -89,8 +88,8 @@ def enable(ctx: Context, op: Context | None = None) -> None:
 
 
 def wait_status(ctx: Context, op: Context | None = None) -> None:
-    """cilium clustermesh status --wait, run on the operator; its output lands in
-    /tmp/<cluster>-clustermesh.out."""
+    """cilium clustermesh status --wait, run on the operator; its output lands in the
+    cluster's logs/clustermesh.out."""
     c = ctx.require_cluster()
     r = (op or ctx).host.run(
         ["cilium", "clustermesh", "status", "--wait", "--wait-duration", STATUS_WAIT],
@@ -98,7 +97,7 @@ def wait_status(ctx: Context, op: Context | None = None) -> None:
         capture=True,
         check=False,
     )
-    out = Path(f"/tmp/{c.name}-clustermesh.out")
+    out = ctx.log_path("clustermesh.out")
     (op or ctx).host.write(out, r.stdout + r.stderr)
     if r.returncode != 0:
         raise MeshError(f"cluster {c.name}: clustermesh not ready within 5 minutes (see {out})")

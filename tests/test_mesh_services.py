@@ -8,7 +8,7 @@ from tk8s.mesh import services
 from tk8s.phases import Context
 
 SVC_LIST = ("kubectl", "get", "svc", "-A", "-o")
-CILIUM_DBG = ("kubectl", "-n", "kube-system", "exec", "ds/cilium", "--", "cilium-dbg")
+CILIUM_DBG = ("kubectl", "-n", "kube-system", "exec", "ds/cilium")
 DBG_JSON = json.dumps(
     [
         {
@@ -73,3 +73,11 @@ def test_entrypoints_list_gateways_and_loadbalancers_but_not_the_mesh_apiserver(
         ("service", "default/db", "172.22.0.206"),
         ("service", "default/new", "pending"),
     ]
+
+
+def test_every_query_carries_a_request_timeout(ctx: Context, host: FakeHost) -> None:
+    services.global_services(ctx)
+    services.backends(ctx)
+    services.entrypoints(ctx)
+    kube = [c.argv for c in host.calls if c.argv[0] == "kubectl"]
+    assert len(kube) == 4 and all("--request-timeout=5s" in argv for argv in kube)

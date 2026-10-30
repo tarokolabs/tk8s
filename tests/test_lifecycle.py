@@ -61,9 +61,7 @@ def test_list_shows_every_cluster_and_its_state(ctx: Context, host: FakeHost) ->
     out = "\n".join(host.lines)
     header = ["NAME", "NODES", "K8S", "DATAPATH", "STATE", "HOSTS", "MESH", "SUBNET"]
     assert out.splitlines()[0].split() == header
-    assert (
-        "demo         1+2     1.37.2   auto      Creating  -      -            172.22.0.0/24" in out
-    )
+    assert "demo         1+2     1.37.2   auto      Creating  -      -    172.22.0.0/24" in out
     assert "broken       " in out and "cluster.yaml" in out  # an unreadable file hides nothing
 
 
@@ -551,18 +549,15 @@ def test_get_clusters_shows_the_host_count_and_managed_from(
     ctx, hosts = multi_ctx
     multi_on_disk(ctx, hosts)
     lifecycle.list_clusters(ctx)
-    out = "\n".join(hosts["a"].lines)
+    out = "\n".join(line for line in hosts["a"].lines if not line.startswith("  $"))
     header = out.splitlines()[0].split()
     assert header == ["NAME", "NODES", "K8S", "DATAPATH", "STATE", "HOSTS", "MESH", "SUBNET"]
-    assert (
-        "demo         3+2     1.37.2   auto      Creating  3      -            192.168.1.0/24"
-        in out
-    )
+    assert "demo         3+2     1.37.2   auto      Creating  3      -    192.168.1.0/24" in out
     hosts["a"].responses[("hostname",)] = Result(0, "pve-b\n", "")
     hosts["a"].lines.clear()
     lifecycle.list_clusters(ctx)
     out = "\n".join(hosts["a"].lines)
-    row = "demo         3+2     1.37.2   auto      managed   3      -            192.168.1.0/24"
+    row = "demo         3+2     1.37.2   auto      managed   3      -    192.168.1.0/24"
     assert f"{row} from op" in out
 
 
@@ -570,7 +565,7 @@ def test_single_host_list_prints_a_dash_for_hosts(ctx: Context, host: FakeHost) 
     on_disk(ctx, host)
     lifecycle.list_clusters(ctx)
     assert (
-        "demo         1+2     1.37.2   auto      Creating  -      -            172.22.0.0/24"
+        "demo         1+2     1.37.2   auto      Creating  -      -    172.22.0.0/24"
         in "\n".join(host.lines)
     )
 
@@ -672,7 +667,7 @@ def test_get_clusters_judges_a_multi_host_cluster_by_every_host(
     hosts["b"].active.add("demo.target")  # the operator's own target is down
     lifecycle.list_clusters(ctx)
     assert (
-        "demo         3+2     1.37.2   auto      Degraded  3      -            192.168.1.0/24"
+        "demo         3+2     1.37.2   auto      Degraded  3      -    192.168.1.0/24"
         in "\n".join(hosts["a"].lines)
     )
 
@@ -817,3 +812,34 @@ def test_get_clusters_lists_mesh_peers(ctx: Context, host: FakeHost) -> None:
     assert (
         "demo         1+2     1.37.2   auto      Stopped   -      other, third 172.22.0.0/24" in out
     )
+
+
+def test_get_clusters_mesh_column_widens_for_many_peers(ctx: Context, host: FakeHost) -> None:
+    mesh_on_disk(ctx, host, mesh=["other", "third", "fourth"])
+    lifecycle.list_clusters(ctx)
+    header, row = [line for line in host.lines if not line.startswith("  $")][:2]
+    assert header.index("SUBNET") == row.index("172.22.0.0/24")
+    assert "other, third, fourth" in row
+
+
+def test_describe_mesh_queries_a_degraded_multi_host_cluster(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    c = ctx.require_cluster()
+    assert c.status is not None
+    ctx.cluster = c.model_copy(
+        update={
+            "status": c.status.model_copy(
+                update={"phase": "Ready", "mesh": ["other"], "cluster_id": 1, "cilium": "1.20.4"}
+            )
+        }
+    )
+    c = multi_on_disk(ctx, hosts)
+    hosts["a"].active.add("demo.target")  # b and c down
+    lifecycle.describe(ctx, c, None)
+    assert "State:       Degraded" in hosts["a"].lines
+    i = hosts["a"].lines.index("Mesh:")
+    section = [line for line in hosts["a"].lines[i:] if not line.startswith("  $")][:8]
+    assert "    unavailable (cluster is not running)" not in section
+    assert "    none (no Service annotated service.cilium.io/global)" in section

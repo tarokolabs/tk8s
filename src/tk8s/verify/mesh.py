@@ -2,8 +2,6 @@
 status is connected, and a pod here reaches a pod of every peer. Nothing to say when the
 cluster is not connected."""
 
-from pathlib import Path
-
 from .. import lifecycle
 from ..mesh import ops, probe
 from .report import Report
@@ -38,7 +36,7 @@ def check_mesh(r: Report) -> None:
         capture=True,
         check=False,
     )
-    out = Path(f"/tmp/{c.name}-verify-clustermesh.out")
+    out = r.ctx.log_path("verify-clustermesh.out")
     r.ctx.host.write(out, st.stdout + st.stderr)
     if st.returncode == 0:
         r.ok(f"clustermesh status: {len(peers)} peer(s) connected")

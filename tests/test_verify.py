@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 from tests.fixtures import (
@@ -679,9 +677,17 @@ def test_mesh_check_fails_when_clustermesh_status_is_not_ready(
     host.responses[("cilium", "clustermesh", "status")] = Result(1, "", "waiting")
     host.responses[("kubectl", "run", "tk-mesh-probe-other")] = Result(1, "", "")
     assert verify.run(ctx, only="mesh") == 2
-    assert "FAIL  clustermesh status — see /tmp/demo-verify-clustermesh.out" in host.lines
-    assert host.files[Path("/tmp/demo-verify-clustermesh.out")] == "waiting"
+    out = ctx.state_dir / "logs" / "verify-clustermesh.out"
+    assert f"FAIL  clustermesh status — see {out}" in host.lines
+    assert host.files[out] == "waiting"
     assert (
         "FAIL  pods of other — demo -> other: pod 10.244.8.5 unreachable from a pod in demo"
         in host.lines
     )
+
+
+def test_cilium_status_output_lands_under_the_clusters_logs(ctx: Context, host: FakeHost) -> None:
+    healthy(ctx, host)
+    host.responses[("cilium", "status")] = Result(0, "KVStore: Ok", "")
+    verify.run(ctx, only="cilium")
+    assert host.files[ctx.state_dir / "logs" / "verify-cilium.out"] == "KVStore: Ok"

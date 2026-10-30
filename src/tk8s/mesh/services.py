@@ -11,6 +11,8 @@ from .. import model
 from ..create.kubeadm import kubectl
 from ..phases import Context
 
+TIMEOUT = "--request-timeout=5s"  # describe must not hang on an apiserver that is away
+
 MESH_APISERVER = "kube-system/clustermesh-apiserver"
 
 
@@ -30,6 +32,7 @@ def global_services(ctx: Context) -> list[GlobalService]:
         "-o",
         "jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name} {.spec.clusterIP} "
         '{.metadata.annotations.service\\.cilium\\.io/global}{"\\n"}{end}',
+        TIMEOUT,
     )
     if r.returncode != 0:
         return []
@@ -51,6 +54,7 @@ def backends(ctx: Context) -> dict[str, list[str]]:
         "kube-system",
         "exec",
         "ds/cilium",
+        TIMEOUT,
         "--",
         "cilium-dbg",
         "service",
@@ -100,6 +104,7 @@ def entrypoints(ctx: Context) -> list[tuple[str, str, str]]:
         "-o",
         "jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name} "
         '{.status.addresses[0].value}{"\\n"}{end}',
+        TIMEOUT,
     )
     svcs = kubectl(
         ctx,
@@ -111,6 +116,7 @@ def entrypoints(ctx: Context) -> list[tuple[str, str, str]]:
         "-o",
         "jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name} "
         '{.status.loadBalancer.ingress[0].ip}{"\\n"}{end}',
+        TIMEOUT,
     )
     for kind, r in (("gateway", gws), ("service", svcs)):
         if r.returncode != 0:

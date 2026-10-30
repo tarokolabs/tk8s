@@ -65,7 +65,8 @@ def pod_ping(src: Context, dst: Context) -> str | None:
         "3",
         f"http://{ip}:8181/ready",
     )
-    kubectl(src, "delete", "pod", pod, "--ignore-not-found", "--wait=false")
+    # synchronous: --rm deletes in the background and a retry would meet AlreadyExists
+    kubectl(src, "delete", "pod", pod, "--ignore-not-found", "--wait=true", "--timeout=30s")
     if r.returncode == 0:
         return None
     return f"{_name(src)} -> {_name(dst)}: pod {ip} unreachable from a pod in {_name(src)}"

@@ -29,8 +29,18 @@ def preflight(ctxs: list[Context]) -> None:
     first = ctxs[0].require_cluster()
     for ctx in ctxs:
         c = ctx.require_cluster()
-        if c.status is None or lifecycle.state_of(ctx, c) != "Running":
+        state = lifecycle.state_of(ctx, c)
+        if state == "Creating":
+            raise MeshError(
+                f"cluster {c.name} is not fully created (tkctl create cluster {c.name})"
+            )
+        if state == "Degraded":
+            raise MeshError(
+                f"cluster {c.name} is degraded, a host is down (tkctl verify cluster {c.name})"
+            )
+        if state != "Running":
             raise MeshError(f"cluster {c.name} is not running (tkctl start cluster {c.name})")
+        assert c.status is not None
         if not can_federate(c):
             raise MeshError(
                 f"cluster {c.name} was created before mesh support; recreate it to connect"

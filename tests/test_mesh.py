@@ -104,10 +104,10 @@ def test_connect_fails_by_name_when_clustermesh_status_never_settles(tmp_path: P
     with pytest.raises(
         MeshError,
         match=r"cluster demo: clustermesh not ready within 5 minutes "
-        r"\(see /tmp/demo-clustermesh.out\)",
+        r"\(see .*/clusters/demo/logs/clustermesh.out\)",
     ):
         ops.connect([a, b])
-    assert ha.files[Path("/tmp/demo-clustermesh.out")] == "waiting"
+    assert ha.files[a.state_dir / "logs" / "clustermesh.out"] == "waiting"
 
 
 def test_connect_records_the_mesh_even_when_a_probe_fails_and_exits_nonzero(

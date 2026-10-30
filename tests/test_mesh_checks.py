@@ -99,3 +99,30 @@ def test_preflight_refuses_a_cluster_without_a_mesh_address(tmp_path: Path) -> N
         checks.preflight([a, b])
     assert not checks.can_federate(b.require_cluster())
     assert checks.can_federate(a.require_cluster())
+
+
+def test_preflight_names_a_creating_or_degraded_cluster_for_what_it_is(
+    tmp_path: Path, host: FakeHost
+) -> None:
+    a, _, b, _ = pair(tmp_path)
+    with_status(b, phase="Creating")
+    with pytest.raises(
+        MeshError, match=r"cluster other is not fully created \(tkctl create cluster other\)"
+    ):
+        checks.preflight([a, b])
+    a2, _ = mesh_ctx(tmp_path, "demo", 0)
+    m, hosts = make_multi_ctx(host, tmp_path)
+    c = m.require_cluster()
+    m.cluster = c.model_copy(
+        update={
+            "metadata": model.Metadata(name="other"),
+            "status": model.Status(
+                phase="Ready", tk8s="test", cluster_id=1, cilium=m.versions.cilium, operator="op"
+            ),
+        }
+    )
+    hosts["a"].active.add("other.target")  # b and c down: Degraded
+    with pytest.raises(
+        MeshError, match=r"cluster other is degraded, a host is down \(tkctl verify cluster other\)"
+    ):
+        checks.preflight([a2, m])

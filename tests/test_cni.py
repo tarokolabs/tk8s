@@ -215,3 +215,11 @@ def test_auto_datapath_takes_the_lowest_kernel(
     assert cni.resolve_datapath(ctx) == "veth"
     hosts["b"].responses[("uname", "-r")] = Result(0, "6.8.0\n", "")
     assert cni.resolve_datapath(ctx) == "netkit"
+
+
+def test_cilium_outputs_land_under_the_clusters_logs(ctx: Context, host: FakeHost) -> None:
+    healthy(host, ctx)
+    cni.install_cilium(ctx)
+    logs = ctx.state_dir / "logs"
+    assert logs / "cilium.out" in host.files and logs / "cilium-status.out" in host.files
+    assert not any(str(p).startswith("/tmp/") for p in host.files)

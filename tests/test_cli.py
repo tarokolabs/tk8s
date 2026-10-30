@@ -934,5 +934,11 @@ def test_disconnect_cluster_verb(
     )
     rc, out = run(capsys, "disconnect", "cluster", "demo", "other")
     assert rc == 0 and called == [("demo", "other", "other")]
-    rc, out = run(capsys, "disconnect", "cluster", "demo", "nope")
+    rc, out = run(capsys, "disconnect", "cluster", "demo", "nope")  # never connected: refused
+    assert rc == 1 and "clusters demo and nope are not connected (tkctl get clusters)" in out
+    text = (data_dir / "clusters" / "demo" / "cluster.yaml").read_text()
+    (data_dir / "clusters" / "demo" / "cluster.yaml").write_text(
+        text.replace("mesh: [other]", "mesh: [nope, other]")
+    )
+    rc, out = run(capsys, "disconnect", "cluster", "demo", "nope")  # recorded, file gone
     assert rc == 0 and called[-1] == ("demo", None, "nope")

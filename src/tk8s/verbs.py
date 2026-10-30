@@ -192,7 +192,7 @@ def cmd_disconnect(a: argparse.Namespace) -> int:
     except lifecycle.ClusterNotFound:
         peer = None  # gone: its side cannot be told, ours forgets it
     c = ctx.require_cluster()
-    if peer is not None and (c.status is None or a.b not in c.status.mesh):
+    if c.status is None or a.b not in c.status.mesh:
         raise UsageError(f"clusters {a.a} and {a.b} are not connected (tkctl get clusters)")
     mesh.disconnect(ctx, peer, a.b)
     return 0

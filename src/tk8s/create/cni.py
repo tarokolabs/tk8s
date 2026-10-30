@@ -4,7 +4,6 @@ controller); then wait for every node to be Ready.
 The Gateway API CRDs, the cilium chart and the cilium CLI are pinned in versions.yaml; the CRDs
 and the chart are vendored under manifests/, so nothing here fetches from helm.cilium.io."""
 
-from pathlib import Path
 from typing import Any, Literal
 
 import yaml
@@ -162,21 +161,21 @@ def install_cilium(ctx: Context) -> None:
         capture=True,
         check=False,
     )
-    ctx.host.write(Path(f"/tmp/{c.name}-cilium.out"), r.stdout + r.stderr)
+    out = ctx.log_path("cilium.out")
+    ctx.host.write(out, r.stdout + r.stderr)
     if r.returncode != 0:
-        raise PhaseFailed(f"cilium {action} failed (see /tmp/{c.name}-cilium.out)")
+        raise PhaseFailed(f"cilium {action} failed (see {out})")
     st = ctx.host.run(
         ["cilium", "status", "--wait", "--wait-duration", "5m"],
         env=kubectl_env(ctx),
         capture=True,
         check=False,
     )
-    ctx.host.write(Path(f"/tmp/{c.name}-cilium-status.out"), st.stdout + st.stderr)
+    ctx.host.write(ctx.log_path("cilium-status.out"), st.stdout + st.stderr)
     if st.returncode != 0:
         tail = "\n".join((st.stdout + st.stderr).splitlines()[-20:])
         raise PhaseFailed(
-            f"cilium did not become ready within 5 minutes (see /tmp/{c.name}-cilium.out and "
-            f"cilium status)\n{tail}"
+            f"cilium did not become ready within 5 minutes (see {out} and cilium status)\n{tail}"
         )
     ctx.say(f"  cilium {v.cilium} ok ({action})")
     _kubectl(ctx, "apply", "-f", "-", input=lb_pool_manifest(ctx))

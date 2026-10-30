@@ -61,8 +61,9 @@ def test_pod_ping_runs_a_short_lived_busybox_pod_with_the_cluster_kubeconfig(
         "pod",
         "tk-mesh-probe-other",
         "--ignore-not-found",
-        "--wait=false",
-    ] in argvs(ha)
+        "--wait=true",
+        "--timeout=30s",
+    ] in argvs(ha)  # synchronous: the next round never meets AlreadyExists
 
 
 def test_pod_ping_failure_names_the_pod(tmp_path: Path) -> None:

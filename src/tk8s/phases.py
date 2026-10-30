@@ -111,6 +111,10 @@ class Context:
     def state_dir(self) -> Path:
         return self.paths.state_dir(self.cluster_name)
 
+    def log_path(self, name: str) -> Path:
+        """Where a command's captured output goes for a person to read: <state dir>/logs/."""
+        return self.state_dir / "logs" / name
+
 
 @dataclass(frozen=True)
 class Phase:

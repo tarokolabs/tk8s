@@ -216,7 +216,7 @@ jobs:
             sudo podman exec "$n" journalctl -u kubelet -u crio --no-pager > "logs/$n-node.log" 2>&1 || true
             sudo podman exec "$n" journalctl -u crio --no-pager | grep -E 'Pull|pull' > "logs/$n-pulls.log" 2>&1 || true
           done
-          cp /tmp/ci-cilium*.out /tmp/ci*-clustermesh.out /tmp/ci*-verify-clustermesh.out logs/ 2>/dev/null || true
+          for d in /opt/taroko/clusters/*/logs; do n=$(basename "$(dirname "$d")"); for f in "$d"/*.out; do [ -f "$f" ] && cp "$f" "logs/$n-$(basename "$f")"; done; done 2>/dev/null || true
           export KUBECONFIG=/opt/taroko/clusters/ci/kubeconfig
           kubectl get pods -A -o wide > logs/pods.txt 2>&1 || true
           # pod-level reachability of the API ClusterIP from each node, cilium service map, host firewall

@@ -87,25 +87,20 @@ def list_clusters(ctx: Context) -> None:
     if not dirs:
         ctx.say("no clusters")
         return
-    ctx.say(
-        f"{'NAME':<12} {'NODES':<7} {'K8S':<8} {'DATAPATH':<9} {'STATE':<9} {'HOSTS':<6} "
-        f"{'MESH':<12} SUBNET"
-    )
+    rows: list[tuple[str, ...] | str] = []  # a tuple is a row; a str is a line of its own
     for d in dirs:
         name = d.name
         path = d / "cluster.yaml"
         if not path.exists():
             # a create interrupted before plan: the directory is there, nothing else is, and a
             # second create of the name would fail on a clash the student cannot see
-            ctx.say(
-                f"{name:<12} {'-':<7} {'-':<8} {'-':<9} {'Incomplete':<9} {'-':<6} {'-':<12} "
-                f"no cluster.yaml (tkctl delete cluster {name})"
-            )
+            why = f"no cluster.yaml (tkctl delete cluster {name})"
+            rows.append((name, "-", "-", "-", "Incomplete", "-", "-", why))
             continue
         try:
             c = model.load(path)
         except model.ClusterFileError as err:
-            ctx.say(f"{name:<12} {err}")  # one bad file must not hide the other clusters
+            rows.append(f"{name:<12} {err}")  # one bad file must not hide the other clusters
             continue
         s = c.spec
         nodes = f"{len(c.control_planes)}+{len(c.workers)}"
@@ -124,9 +119,22 @@ def list_clusters(ctx: Context) -> None:
                 else {}
             )
             state, tail = state_of(row, c), ""
+        rows.append(
+            (name, nodes, s.kubernetes, datapath, state, count, peers, f"{s.network.nodes}{tail}")
+        )
+    # the MESH column is as wide as its longest entry (several peers, long names)
+    width = max([4, *(len(r[6]) for r in rows if isinstance(r, tuple))])
+    ctx.say(
+        f"{'NAME':<12} {'NODES':<7} {'K8S':<8} {'DATAPATH':<9} {'STATE':<9} {'HOSTS':<6} "
+        f"{'MESH':<{width}} SUBNET"
+    )
+    for r in rows:
+        if isinstance(r, str):
+            ctx.say(r)
+            continue
+        name, nodes, k8s, dp, state, count, peers, last = r
         ctx.say(
-            f"{name:<12} {nodes:<7} {s.kubernetes:<8} {datapath:<9} {state:<9} {count:<6} "
-            f"{peers:<12} {s.network.nodes}{tail}"
+            f"{name:<12} {nodes:<7} {k8s:<8} {dp:<9} {state:<9} {count:<6} {peers:<{width}} {last}"
         )
 
 

@@ -16,8 +16,9 @@ def describe_mesh(ctx: Context, c: model.Cluster, state: str) -> None:
     peers = c.status.mesh if c.status is not None else []
     ctx.say(f"  peers:      {', '.join(peers) if peers else 'none'}")
     ctx.say(f"  endpoint:   {net.mesh} (clustermesh-apiserver)")
+    up = state in ("Running", "Degraded")  # degraded: the apiserver usually still answers
     ctx.say("  global services:")
-    if state != "Running":
+    if not up:
         ctx.say("    unavailable (cluster is not running)")
     elif not peers:
         ctx.say("    none (not connected)")
@@ -30,7 +31,7 @@ def describe_mesh(ctx: Context, c: model.Cluster, state: str) -> None:
         if not found:
             ctx.say("    none (no Service annotated service.cilium.io/global)")
     ctx.say("  entrypoints:")
-    if state != "Running":
+    if not up:
         ctx.say("    unavailable (cluster is not running)")
         return
     points = services.entrypoints(ctx)
