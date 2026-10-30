@@ -99,9 +99,7 @@ def test_lb_pool_manifest_has_a_pool_for_the_mesh_and_keeps_it_out_of_the_defaul
 
 def test_lb_pool_manifest_without_a_mesh_address_is_the_old_single_pool(ctx: Context) -> None:
     c = ctx.require_cluster()
-    net = c.spec.network.model_copy(
-        update={"mesh": None, "lb_range": "172.22.0.200-172.22.0.219"}
-    )
+    net = c.spec.network.model_copy(update={"mesh": None, "lb_range": "172.22.0.200-172.22.0.219"})
     ctx.cluster = c.model_copy(update={"spec": c.spec.model_copy(update={"network": net})})
     docs = list(yaml.safe_load_all(cni.lb_pool_manifest(ctx)))
     pools = [d for d in docs if d["kind"] == "CiliumLoadBalancerIPPool"]

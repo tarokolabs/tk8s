@@ -468,3 +468,34 @@ def running_multi_answers(hosts: dict[str, FakeHost], ctx: Context) -> None:
         for r in c.routers:
             if r.host == name:
                 bgp_router_answers(h, router=r.name, ips=cps)
+
+
+def mesh_ctx(
+    data_dir: Path,
+    name: str,
+    index: int,
+    *,
+    cluster_id: bool = True,
+    cilium: str | None = None,
+    user: model.UserCluster | None = None,
+) -> tuple[Context, FakeHost]:
+    """A Ready, Running single-host cluster of the given name and subnet index on its own fake
+    host, with what Cluster Mesh looks at: status.cluster_id (index + 1, or None for a cluster
+    from before mesh support), status.cilium (the pinned version unless given), its
+    cluster.yaml and kubeconfig on disk, the target active."""
+    host = FakeHost()
+    u = (user or DEMO_USER).model_copy(update={"metadata": model.Metadata(name=name)})
+    ctx = make_ctx(host, data_dir, user=None)
+    c = resolved(u, used_indices=set(range(index)))
+    status = model.Status(
+        phase="Ready",
+        tk8s="test",
+        node_capacity=True,
+        cluster_id=index + 1 if cluster_id else None,
+        cilium=cilium or ctx.versions.cilium,
+    )
+    ctx.cluster = c.model_copy(update={"status": status})
+    host.active.add(f"{name}.target")
+    host.files[ctx.state_dir / "cluster.yaml"] = model.dumps(ctx.cluster)
+    host.files[ctx.state_dir / "kubeconfig"] = "kind: Config\n"
+    return ctx, host

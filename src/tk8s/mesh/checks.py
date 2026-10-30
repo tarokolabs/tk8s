@@ -1,0 +1,49 @@
+"""What connect refuses, in order, before it touches any cluster: a cluster that is not
+running, one created before mesh support, mixed single- and multi-host clusters, two clusters
+with one cluster id, Cilium versions more than a minor apart."""
+
+from .. import lifecycle
+from ..phases import Context
+from . import MeshError
+
+
+def minor(version: str) -> tuple[int, int]:
+    """(major, minor) of a Cilium version such as 1.20.4."""
+    parts = version.split(".")
+    return int(parts[0]), int(parts[1])
+
+
+def preflight(ctxs: list[Context]) -> None:
+    first = ctxs[0].require_cluster()
+    for ctx in ctxs:
+        c = ctx.require_cluster()
+        if c.status is None or lifecycle.state_of(ctx, c) != "Running":
+            raise MeshError(f"cluster {c.name} is not running (tkctl start cluster {c.name})")
+        if c.status.cluster_id is None or c.status.cilium is None:
+            raise MeshError(
+                f"cluster {c.name} was created before mesh support (no cluster id); "
+                "recreate it to connect"
+            )
+        if c.multi_host != first.multi_host:
+            single, multi = (first, c) if c.multi_host else (c, first)
+            raise MeshError(
+                f"cluster {single.name} is single-host and {multi.name} is multi-host; "
+                "only clusters of one kind can be connected"
+            )
+    for i, ctx in enumerate(ctxs):
+        a = ctx.require_cluster()
+        assert a.status is not None
+        for other in ctxs[i + 1 :]:
+            b = other.require_cluster()
+            assert b.status is not None
+            if a.status.cluster_id == b.status.cluster_id:
+                raise MeshError(
+                    f"clusters {a.name} and {b.name} share cluster id {a.status.cluster_id} "
+                    f"(subnet index {a.spec.network.index}); recreate one of them"
+                )
+            x, y = str(a.status.cilium), str(b.status.cilium)
+            if minor(x)[0] != minor(y)[0] or abs(minor(x)[1] - minor(y)[1]) > 1:
+                raise MeshError(
+                    f"cluster {a.name} runs Cilium {x} and {b.name} {y}; "
+                    "Cluster Mesh allows one minor version apart"
+                )
