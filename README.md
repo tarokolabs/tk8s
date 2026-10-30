@@ -48,9 +48,9 @@ tkctl create cluster demo --workers 3                  # 名稱 demo，三台 wo
 tkctl create cluster ha --control-planes 3              # 三台 control plane，HA
 tkctl create cluster ha --control-planes 3 --defer-join # 額外的 control plane 建好但不加入，供 HA 練習
 tkctl create cluster ha --control-planes 3 --ha bgp     # 同樣三台，apiserver 入口改走 BGP + ECMP 的 anycast VIP
-tkctl create cluster ha --preset ha                      # 3 control plane + 3 worker、bgp、兩台 router；[plan] 會印出展開的旗標
+tkctl create cluster ha --mode ha                        # 3 control plane + 3 worker、bgp、兩台 router；[plan] 會印出展開的旗標
 tkctl create cluster demo --routers 2                    # 兩台 VyOS router 跑 VRRP，.253 在兩台之間漂移；停一台叢集照常
-tkctl create cluster ha --preset ha --hosts a=local,b=tux@192.168.1.231,c=192.168.1.232 --ip-range 192.168.1.64-79,192.168.1.208-223
+tkctl create cluster ha --mode ha --hosts a=local,b=tux@192.168.1.231,c=192.168.1.232 --ip-range 192.168.1.64-79,192.168.1.208-223
                                                          # 節點、router 分散到三台主機（macvlan，節點拿 LAN 的位址），任一台主機掛掉叢集照常
 tkctl create cluster sandbox --gvisor                   # 多一個 gvisor 的 RuntimeClass
 tkctl create cluster old --k8s 1.36.6                   # 次新版
@@ -271,7 +271,7 @@ kubectl 風格，動詞在前。全部如下：
 ```
 tkctl create cluster [名稱] [--control-planes N] [--workers N] [--cpu N] [--memory SIZE]
                      [--k8s 版本] [--datapath auto|netkit|veth] [--gvisor] [--ha proxy|bgp] [--defer-join]
-                     [--routers 1|2] [--hosts 清單] [--ip-range A-B] [--preset lab|ha] [-f cluster.yaml]
+                     [--routers 1|2] [--hosts 清單] [--ip-range A-B] [--mode lab|ha] [-f cluster.yaml]
                      [--allow-overlap] [--dry-run] [--phase P] [--skip-phases P,...] [--list-phases] [--quiet]
 tkctl delete cluster <名稱> [--yes] [--phase P] [--list-phases]
 tkctl get clusters
@@ -298,7 +298,7 @@ tkctl version
 - `--routers 2`：兩台 router `<名稱>-router-1`（.251）與 `-2`（.252）跑 VRRP，節點的閘道與 apiserver 入口仍是 `.253`，在兩台之間漂移（切換約 3 秒）。停一台用 `sudo systemctl stop <名稱>-router-1.service`（`podman stop` 幾秒後會被 systemd 拉回來）；一台停著時 `add node`／`delete node` 只重載跑著的那台，停著的回來時自己拿到新設定。`describe` 的 `Router:` 段列出兩台與 VRRP 狀態，`verify` 的 `[router]` 多一行檢查剛好一台 MASTER、一台 BACKUP。
 - `--hosts` 與 `--ip-range` 要一起給，把叢集分散到多台主機（見「多主機」）；`-f` 的對應寫法是 `spec.hosts` 與 `spec.network.range`。
 - `connect cluster` 把兩個以上的叢集接成 Cilium Cluster Mesh，`disconnect cluster` 斷開一對（見「聯邦」）；兩邊要同一種形態、Cilium 差不超過一個 minor，這版之前建的叢集要重建才能接。
-- `--preset lab|ha` 是拓樸縮寫，`[plan]` 會印出展開的旗標；不能跟 `--control-planes`、`--workers`、`--ha`、`--routers`、`--defer-join`、`-f` 混用。`ha` = `--control-planes 3 --workers 3 --ha bgp --routers 2`，`lab` = 預設的 `--control-planes 1 --workers 2 --ha proxy --routers 1`。
+- `--mode lab|ha` 是拓樸縮寫，`[plan]` 會印出展開的旗標；不能跟 `--control-planes`、`--workers`、`--ha`、`--routers`、`--defer-join`、`-f` 混用。`ha` = `--control-planes 3 --workers 3 --ha bgp --routers 2`，`lab` = 預設的 `--control-planes 1 --workers 2 --ha proxy --routers 1`。
 - `--gvisor` 需要 veth datapath，會自動選；明確指定 `--datapath netkit` 加 `--gvisor` 會被拒絕。
 - `--memory` 接受 `4G`、`4096M`，`4Gi` 不行。
 - 節點的 capacity 就是它的 `cpu`／`memory`，allocatable 是再扣掉 kubeReserved（cpu 500m、memory 512Mi）與 evictionHard（memory 500Mi）：2 核 4G 的節點是 1500m／3084Mi，和一台同規格的 VM 跑 kubeadm 一樣。記憶體至少 2G，任一節點不能超過主機的核數或記憶體（preflight 會拒絕）。`verify` 的 `node sizes` 檢查這些數字。這版之前建的叢集仍回報整台主機，`verify` 對它們印 SKIP；要改過來就重建。

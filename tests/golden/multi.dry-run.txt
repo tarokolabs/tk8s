@@ -1,5 +1,5 @@
 [plan] resolve cluster.yaml: defaults, subnet, node names
-  preset ha: --control-planes 3 --workers 3 --ha bgp --routers 2
+  mode ha: --control-planes 3 --workers 3 --ha bgp --routers 2
   cluster multi: 3 control planes + 3 workers, K8s 1.37.2, subnet 192.168.1.0/24
   host a: eth0 (this host, shim 192.168.1.67)
   host b: eth0

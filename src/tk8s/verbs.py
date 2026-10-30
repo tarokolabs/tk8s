@@ -8,7 +8,7 @@ from pathlib import Path
 from . import delete, hosts, images, lifecycle, model, verify, versions
 from .args import (
     UsageError,
-    apply_preset,
+    apply_mode,
     normalize_memory,
     user_cluster_from_file,
     user_cluster_from_flags,
@@ -51,9 +51,9 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
         "--ip-range",
     )
     topo = any(a == f or a.startswith(f + "=") for a in raw for f in flags)  # --ha bgp, --ha=bgp
-    preset = apply_preset(a, raw)
+    mode = apply_mode(a, raw)
     user = user_cluster_from_file(a, topo) if a.file else user_cluster_from_flags(a)
-    ctx = make_context(dry_run=a.dry_run, quiet=a.quiet, preset=preset)
+    ctx = make_context(dry_run=a.dry_run, quiet=a.quiet, mode=mode)
     name = user.metadata.name
     existing = load_existing(ctx.paths, name)
     if existing is not None and existing.status is None:
@@ -332,12 +332,12 @@ def make_context(
     quiet: bool = False,
     assume_yes: bool = False,
     refresh: bool = False,
-    preset: str | None = None,
+    mode: str | None = None,
 ) -> Context:
     paths = Paths.from_env(HOME)
     opts = Options(
         dry_run=dry_run,
-        preset=preset,
+        mode=mode,
         offline=os.environ.get("TK_OFFLINE") == "1",
         assume_yes=assume_yes or os.environ.get("TK_ASSUME_YES") == "1",
         refresh=refresh,

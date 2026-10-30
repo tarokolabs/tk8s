@@ -711,21 +711,21 @@ def test_ctrl_c_is_one_line_and_130(
     assert capsys.readouterr().err == "tkctl: interrupted\n"
 
 
-# ---- --routers and --preset
+# ---- --routers and --mode
 
 
-def test_preset_ha_expands_and_prints_the_flags(capsys: pytest.CaptureFixture[str]) -> None:
-    rc, out = run(capsys, "create", "cluster", "demo", "--preset", "ha", "--dry-run")
+def test_mode_ha_expands_and_prints_the_flags(capsys: pytest.CaptureFixture[str]) -> None:
+    rc, out = run(capsys, "create", "cluster", "demo", "--mode", "ha", "--dry-run")
     assert rc == 0
-    assert "  preset ha: --control-planes 3 --workers 3 --ha bgp --routers 2\n" in out
+    assert "  mode ha: --control-planes 3 --workers 3 --ha bgp --routers 2\n" in out
     assert "  cluster demo: 3 control planes + 3 workers," in out
     assert "    ha: bgp\n    routers: 2\n" in out
 
 
-def test_preset_lab_is_todays_default(capsys: pytest.CaptureFixture[str]) -> None:
+def test_mode_lab_is_todays_default(capsys: pytest.CaptureFixture[str]) -> None:
     _, plain = run(capsys, "create", "cluster", "--dry-run")
-    _, lab = run(capsys, "create", "cluster", "--preset", "lab", "--dry-run")
-    line = "  preset lab: --control-planes 1 --workers 2 --ha proxy --routers 1\n"
+    _, lab = run(capsys, "create", "cluster", "--mode", "lab", "--dry-run")
+    line = "  mode lab: --control-planes 1 --workers 2 --ha proxy --routers 1\n"
     assert line in lab and lab.replace(line, "") == plain
 
 
@@ -740,12 +740,12 @@ def test_preset_lab_is_todays_default(capsys: pytest.CaptureFixture[str]) -> Non
         (["-f", "x.yaml"], "-f"),
     ],
 )
-def test_preset_refuses_a_topology_flag_even_with_the_same_value(
+def test_mode_refuses_a_topology_flag_even_with_the_same_value(
     capsys: pytest.CaptureFixture[str], extra: list[str], flag: str
 ) -> None:
-    rc, out = run(capsys, "create", "cluster", "demo", "--preset", "ha", *extra, "--dry-run")
+    rc, out = run(capsys, "create", "cluster", "demo", "--mode", "ha", *extra, "--dry-run")
     assert rc == 1
-    assert f"--preset ha cannot be combined with {flag}; use the expanded flags instead" in out
+    assert f"--mode ha cannot be combined with {flag}; use the expanded flags instead" in out
 
 
 def test_routers_flag_reaches_cluster_yaml(capsys: pytest.CaptureFixture[str]) -> None:
@@ -753,15 +753,15 @@ def test_routers_flag_reaches_cluster_yaml(capsys: pytest.CaptureFixture[str]) -
     assert rc == 0 and "    ha: proxy\n    routers: 2\n" in out
 
 
-def test_preset_cannot_be_bypassed_by_an_abbreviated_or_glued_flag(
+def test_mode_cannot_be_bypassed_by_an_abbreviated_or_glued_flag(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """argparse would accept --work for --workers and -fx.yaml for -f x.yaml; neither may slip
     past the no-mixing rule (the first is refused outright, the second is seen as -f)."""
-    rc, out = run(capsys, "create", "cluster", "demo", "--preset", "ha", "--work", "5", "--dry-run")
+    rc, out = run(capsys, "create", "cluster", "demo", "--mode", "ha", "--work", "5", "--dry-run")
     assert rc == 2 and "unrecognized arguments: --work 5" in out
-    rc, out = run(capsys, "create", "cluster", "demo", "--preset", "ha", "-fx.yaml", "--dry-run")
-    assert rc == 1 and "--preset ha cannot be combined with -f" in out
+    rc, out = run(capsys, "create", "cluster", "demo", "--mode", "ha", "-fx.yaml", "--dry-run")
+    assert rc == 1 and "--mode ha cannot be combined with -f" in out
 
 
 # ---- --hosts and --ip-range

@@ -433,7 +433,7 @@ def resolve(
         # to the new ones, two claimants of the floating address
         raise PlanError(
             f"cluster {u.metadata.name} is being created with routers: "
-            f"{existing.spec.network.routers}; rerun with the same --routers (or --preset), "
+            f"{existing.spec.network.routers}; rerun with the same --routers (or --mode), "
             f"or delete it first: tkctl delete cluster {u.metadata.name}"
         )
     if s.hosts is None:
@@ -585,8 +585,8 @@ def done(ctx: Context) -> bool:
 
 def run(ctx: Context) -> None:
     c = ctx.require_cluster()
-    if ctx.options.preset:
-        ctx.say(f"  {ctx.options.preset}")
+    if ctx.options.mode:
+        ctx.say(f"  {ctx.options.mode}")
     n = len(c.control_planes)
     ctx.say(
         f"  cluster {c.name}: {n} control plane{'s' if n > 1 else ''} + "

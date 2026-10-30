@@ -15,41 +15,40 @@ class UsageError(Exception):
     pass
 
 
-# --preset: a named topology, expanded into the flags below before anything else sees them
-PRESETS: dict[str, dict[str, object]] = {
+# --mode: a named topology, expanded into the flags below before anything else sees them
+MODES: dict[str, dict[str, object]] = {
     "lab": {"control_planes": 1, "workers": 2, "ha": "proxy", "routers": 1},
     "ha": {"control_planes": 3, "workers": 3, "ha": "bgp", "routers": 2},
 }
-PRESET_FLAGS = ("--control-planes", "--workers", "--ha", "--routers", "--defer-join", "-f")
+MODE_FLAGS = ("--control-planes", "--workers", "--ha", "--routers", "--defer-join", "-f")
 
 
-def preset_line(name: str) -> str:
-    """The expansion [plan] prints, so a preset is visibly a shorthand for flags."""
-    p = PRESETS[name]
+def mode_line(name: str) -> str:
+    """The expansion [plan] prints, so a mode is visibly a shorthand for flags."""
+    p = MODES[name]
     return (
-        f"preset {name}: --control-planes {p['control_planes']} --workers {p['workers']} "
+        f"mode {name}: --control-planes {p['control_planes']} --workers {p['workers']} "
         f"--ha {p['ha']} --routers {p['routers']}"
     )
 
 
-def apply_preset(a: argparse.Namespace, raw: list[str]) -> str | None:
-    """Without --preset: None. With it: the topology flags take the preset's values and the
+def apply_mode(a: argparse.Namespace, raw: list[str]) -> str | None:
+    """Without --mode: None. With it: the topology flags take the mode's values and the
     expansion line comes back; a topology flag on the command line, whatever its value, is
     refused (the rule is no mixing, not no contradiction)."""
-    if a.preset is None:
+    if a.mode is None:
         return None
-    for flag in PRESET_FLAGS:
+    for flag in MODE_FLAGS:
         glued = flag == "-f"  # -fFILE is how argparse also spells -f FILE
         if any(
             x == flag or x.startswith(flag + "=") or (glued and x.startswith("-f")) for x in raw
         ):
             raise UsageError(
-                f"--preset {a.preset} cannot be combined with {flag}; "
-                "use the expanded flags instead"
+                f"--mode {a.mode} cannot be combined with {flag}; use the expanded flags instead"
             )
-    for k, v in PRESETS[a.preset].items():
+    for k, v in MODES[a.mode].items():
         setattr(a, k, v)
-    return preset_line(a.preset)
+    return mode_line(a.mode)
 
 
 def parse_hosts_flag(text: str) -> list[model.UserHost]:
@@ -122,7 +121,7 @@ def add_create_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--routers", type=int, choices=[1, 2], default=1)
     p.add_argument("--hosts")
     p.add_argument("--ip-range", dest="ip_range")
-    p.add_argument("--preset", choices=sorted(PRESETS))
+    p.add_argument("--mode", choices=sorted(MODES))
     p.add_argument("--defer-join", action="store_true")
     p.add_argument("-f", dest="file")
     p.add_argument("--allow-overlap", action="store_true")

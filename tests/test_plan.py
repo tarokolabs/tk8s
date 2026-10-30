@@ -334,7 +334,7 @@ def test_resume_refuses_a_different_router_count() -> None:
     with pytest.raises(
         PlanError,
         match=r"cluster demo is being created with routers: 1; rerun with the same --routers "
-        r"\(or --preset\), or delete it first: tkctl delete cluster demo",
+        r"\(or --mode\), or delete it first: tkctl delete cluster demo",
     ):
         resolved(two_router_user(), existing=recorded)
 

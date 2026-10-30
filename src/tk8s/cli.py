@@ -77,7 +77,7 @@ Create flags:
                          comma-separated, the end may be a last octet (192.168.1.64-70,
                          192.168.1.80-89); router, nodes, the operator's shim, the 6th from
                          the end for Cluster Mesh, the last 5 as the LoadBalancer pool
-  --preset NAME          a named topology, printed expanded under [plan]; cannot be combined
+  --mode NAME            a named topology, printed expanded under [plan]; cannot be combined
                          with --control-planes/--workers/--ha/--routers/--defer-join/-f:
                            lab   --control-planes 1 --workers 2 --ha proxy --routers 1
                            ha    --control-planes 3 --workers 3 --ha bgp --routers 2
@@ -167,7 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="tkctl", add_help=False)
     sub = ap.add_subparsers(dest="verb")
     create = sub.add_parser("create", add_help=False).add_subparsers(dest="noun")
-    # no abbreviations: --work for --workers would slip past the --preset and -f no-mixing rules
+    # no abbreviations: --work for --workers would slip past the --mode and -f no-mixing rules
     add_create_flags(create.add_parser("cluster", add_help=False, allow_abbrev=False))
     v = sub.add_parser("verify", add_help=False).add_subparsers(dest="noun")
     vc = v.add_parser("cluster", add_help=False)
