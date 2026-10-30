@@ -186,7 +186,7 @@ tkctl disconnect cluster a b        # 斷開一對；delete cluster 會自己先
 - `connect` 做完會從兩邊各 ping 對面的節點與 pod；探測失敗會印 `FAIL` 並以結束碼 1 收場，但 mesh 已經接上（問題在網路，`disconnect` 可以還原）。
 - global service 是 Cilium 原生的，tkctl 不包也不代標：兩邊同 namespace 同 name 的 Service 都加 `service.cilium.io/global: "true"`（一邊沒有 pod 也可以，流量就全去另一邊）；`service.cilium.io/shared: "false"` 讓這邊的 backend 不分享出去；`service.cilium.io/affinity: local|remote|none` 調偏好。`externalTrafficPolicy: Local` 的 Service 從 LoadBalancer 位址或 NodePort 進來只打本節點的 backend，對面永遠不算；叢集內用 ClusterIP 不受影響。
 - DNS：每個叢集的 cluster domain 是 `<名稱>.k8s`，pod 用短名（`echo`、`echo.default`、`echo.default.svc`）兩邊都通；寫死完整 FQDN 的 workload 搬叢集要改最後一段。
-- 對外入口：HTTP/HTTPS/gRPC 走 Gateway API（一個叢集一個入口位址，換叢集時外面只改一個位址，HTTPRoute 的權重就是灰度）；非 HTTP 走 LoadBalancer Service；前面已有外部負載平衡器時讓它只做 L4，L7 交給叢集裡的 Gateway。Cilium 的 Gateway controller 在 cilium-operator 重啟後可能不回來（上游 cilium/cilium#48083，`verify` 的 `cilium-operator` 檢查會指出），復原是 `kubectl -n kube-system rollout restart deploy/cilium-operator`。
+- 對外入口：HTTP/HTTPS/gRPC 走 Gateway API（一個叢集一個入口位址，換叢集時外面只改一個位址，HTTPRoute 的權重就是逐步切流量的工具）；非 HTTP 走 LoadBalancer Service；前面已有外部負載平衡器時讓它只做 L4，L7 交給叢集裡的 Gateway。Cilium 的 Gateway controller 在 cilium-operator 重啟後可能不回來（上游 cilium/cilium#48083，`verify` 的 `cilium-operator` 檢查會指出），復原是 `kubectl -n kube-system rollout restart deploy/cilium-operator`。
 - 單主機之間（同一台主機的兩個叢集）也能接，e2e 就是這樣測的。主機若裝了 Docker，它把 `FORWARD` 預設 DROP，兩個 bridge 之間的 pod 流量會被擋，`connect` 的探測會指出，`sudo iptables -I DOCKER-USER -j ACCEPT` 放行。
 - tk8s 不提供外部 LB 或 DNS；lab 裡退掉舊叢集時客戶端要自己改用新叢集的位址。
 
@@ -196,7 +196,7 @@ tkctl disconnect cluster a b        # 斷開一對；delete cluster 會自己先
 2. `tkctl connect cluster a b`；`describe cluster a` 的 `Mesh:` 列出 `b`。
 3. 同一套 manifest 部署到 `b`（`kubectl --context b apply`、Helm 的另一個 release、Argo CD 多一個 destination），要跨叢集互找的 Service 兩邊都加 global annotation。
 4. `describe cluster a` 看每個 global service 兩邊的 backend 數；此時 `a` 的 pod 已經會打到 `b` 的 pod，反之亦然。
-5. 外部入口：在外部 LB 把 `b` 的 Gateway（或 LoadBalancer）位址加進 backend（位址抄 `describe cluster b` 的 `entrypoints:`），要灰度就先給一部分權重，確認後把 `a` 的拿掉；用 DNS 同理，先降 TTL。
+5. 外部入口：在外部 LB 把 `b` 的 Gateway（或 LoadBalancer）位址加進 backend（位址抄 `describe cluster b` 的 `entrypoints:`），要逐步切就先給一部分權重，確認後把 `a` 的拿掉；用 DNS 同理，先降 TTL。
 6. `a` 的 Deployment 縮到 0 或刪掉；global service 讓 `a` 裡還沒搬的東西繼續找得到 `b` 的服務。
 7. `tkctl disconnect cluster a b`、`tkctl delete cluster a`（delete 會自己先 disconnect）。
 
