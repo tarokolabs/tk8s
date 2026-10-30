@@ -48,9 +48,9 @@ tkctl create cluster demo --workers 3                  # 名稱 demo，三台 wo
 tkctl create cluster ha --control-planes 3              # 三台 control plane，HA
 tkctl create cluster ha --control-planes 3 --defer-join # 額外的 control plane 建好但不加入，供 HA 練習
 tkctl create cluster ha --control-planes 3 --ha bgp     # 同樣三台，apiserver 入口改走 BGP + ECMP 的 anycast VIP
-tkctl create cluster ha --preset ha                      # 3 control plane + 3 worker、bgp、兩台 router；[plan] 會印出展開的旗標
+tkctl create cluster ha --mode ha                        # 3 control plane + 3 worker、bgp、兩台 router；[plan] 會印出展開的旗標
 tkctl create cluster demo --routers 2                    # 兩台 VyOS router 跑 VRRP，.253 在兩台之間漂移；停一台叢集照常
-tkctl create cluster ha --preset ha --hosts a=local,b=tux@192.168.1.231,c=192.168.1.232 --ip-range 192.168.1.64-79,192.168.1.208-223
+tkctl create cluster ha --mode ha --hosts a=local,b=tux@192.168.1.231,c=192.168.1.232 --ip-range 192.168.1.64-79,192.168.1.208-223
                                                          # 節點、router 分散到三台主機（macvlan，節點拿 LAN 的位址），任一台主機掛掉叢集照常
 tkctl create cluster sandbox --gvisor                   # 多一個 gvisor 的 RuntimeClass
 tkctl create cluster old --k8s 1.36.6                   # 次新版
@@ -76,7 +76,7 @@ tkctl create cluster bare --skip-phases cni,addons    # 只做到 kubeadm，CNI 
 cluster demo is ready
 ```
 
-每個 `[phase]` 一行，其下每道指令一行 `$ …`（寫入檔案的內容用 `--dry-run` 看）；`already done` 表示這一步先前已完成。中斷後再執行同一個指令，已完成的跳過、未完成的接著做；`tkctl describe cluster demo` 的 `Status:` 列出哪些 phase 何時完成、下一步是什麼。
+每個 `[phase]` 一行，其下是結果行；加 `-v`（放哪裡都行，`tkctl -v create …`）會多印每道指令一行 `$ …`，貼回去就能重跑（上面的範例是 `-v` 的輸出；寫入檔案的內容用 `--dry-run` 看）；`already done` 表示這一步先前已完成。中斷後再執行同一個指令，已完成的跳過、未完成的接著做；`tkctl describe cluster demo` 的 `Status:` 列出哪些 phase 何時完成、下一步是什麼。
 
 步驟的切法仿照 kubeadm 的 phase，`--phase`、`--skip-phases`、`--list-phases` 的用法也一樣：
 
@@ -155,11 +155,11 @@ sudo route -n add 172.22.0.0/24 <主機 IP>          # macOS
 route add 172.22.0.0 mask 255.255.255.0 <主機 IP>  # Windows
 ```
 
-多主機叢集的節點與 LoadBalancer IP 本來就在 LAN 上，區網內任何機器直接連得到，不用加路由；ClusterIP 只有叢集的主機（經 `tk8s-<名稱>` 這個 shim 介面）連得到。
+多主機叢集的節點與 LoadBalancer IP 本來就在 LAN 上，區網內任何機器直接連得到，不用加路由；ClusterIP 只有操作台連得到（它的 routes unit 經 `tk8s-<名稱>` 這個 shim 介面把路由指進叢集）。
 
 ### 多主機
 
-`--hosts` 把節點容器與 router 分散到同一個 L2 的多台主機上，目的是沒有任何一台主機是單點。跑 `tkctl` 的機器是操作台，`cluster.yaml` 與 kubeconfig 在它上面；對其他主機的每一道指令都走 ssh，印出來的是 `$ ssh tux@192.168.1.231 'sudo -n podman …'`，一樣可以手動重現。叢集跑起來後不依賴操作台：每台主機的 unit 重開機自己起來。
+`--hosts` 把節點容器與 router 分散到同一個 L2 的多台主機上，目的是沒有任何一台主機是單點。跑 `tkctl` 的機器是操作台，`cluster.yaml` 與 kubeconfig 在它上面；對其他主機的每一道指令都走 ssh，`-v` 印出來的是 `$ ssh tux@192.168.1.231 'sudo -n podman …'`，一樣可以手動重現。叢集跑起來後不依賴操作台：每台主機的 unit 重開機自己起來。
 
 - 主機清單 `[名稱=][使用者@]主機[:port]` 以逗號分隔；寫 `local`（或 `名稱=local`）的那項是操作台自己，最多一項。ssh 的金鑰、ProxyJump 等由 `~/.ssh/config` 管，host key 要先手動 ssh 一次信任。
 - `--ip-range` 是 LAN 上保留給這個叢集的位址池：一段或多段 `A-B` 以逗號分隔，結尾可以只寫最後一組（`192.168.1.64-70,192.168.1.80-89`）。池依固定順序切：第一個是 router 的浮動位址（節點的閘道），`--routers 2` 時接著兩台 router 各一個，操作台若是節點主機再一個 shim，然後每個節點一個，池的最後 6 個：倒數第 6 個保留給 Cluster Mesh（clustermesh-apiserver 的位址），最後 5 個是 LoadBalancer 池，中間剩下的留給 `add node`。preflight 會對整個池 ARP 探測，有人在用就拒絕；池要在主機的網段內（網段、閘道、每台主機的介面由各自的預設路由查出）。
@@ -184,7 +184,7 @@ tkctl disconnect cluster a b        # 斷開一對；delete cluster 會自己先
 
 - 條件（`connect` 會核對，不過就拒絕並說明）：兩個叢集都 Running；都是這版之後建的（Cilium 的 `cluster.name`／`cluster.id` 裝的時候就要設好，之前建的要重建）；同一種形態（都單主機或都多主機，混接不支援：單主機的節點躲在主機的 NAT 後面，LAN 上的節點連不到它們）；Cilium 版本差不超過一個 minor（藍綠升版時舊叢集的 Cilium 本來就可能舊一版）。
 - 每個叢集的 LB 池留了一個位址給 clustermesh-apiserver（單主機 `.200`，多主機池尾端倒數第 6 個），`connect` 時才會真的裝上去。
-- `connect` 做完會從兩邊各 ping 對面的節點與 pod；探測失敗會印 `FAIL` 並以結束碼 1 收場，但 mesh 已經接上（問題在網路，`disconnect` 可以還原）。
+- `connect` 做完會從兩邊探測對面：節點之間 ping，pod 之間以 HTTP 打對面 coredns 的 readiness（pod 沒有 NET_RAW，不能 ping）；探測失敗會印 `FAIL` 並以結束碼 1 收場，但 mesh 已經接上（問題在網路，`disconnect` 可以還原）。
 - global service 是 Cilium 原生的，tkctl 不包也不代標：兩邊同 namespace 同 name 的 Service 都加 `service.cilium.io/global: "true"`（一邊沒有 pod 也可以，流量就全去另一邊）；`service.cilium.io/shared: "false"` 讓這邊的 backend 不分享出去；`service.cilium.io/affinity: local|remote|none` 調偏好。`externalTrafficPolicy: Local` 的 Service 從 LoadBalancer 位址或 NodePort 進來只打本節點的 backend，對面永遠不算；叢集內用 ClusterIP 不受影響。
 - DNS：每個叢集的 cluster domain 是 `<名稱>.k8s`，pod 用短名（`echo`、`echo.default`、`echo.default.svc`）兩邊都通；寫死完整 FQDN 的 workload 搬叢集要改最後一段。
 - 對外入口：HTTP/HTTPS/gRPC 走 Gateway API（一個叢集一個入口位址，換叢集時外面只改一個位址，HTTPRoute 的權重就是逐步切流量的工具）；非 HTTP 走 LoadBalancer Service；前面已有外部負載平衡器時讓它只做 L4，L7 交給叢集裡的 Gateway。Cilium 的 Gateway controller 在 cilium-operator 重啟後可能不回來（上游 cilium/cilium#48083，`verify` 的 `cilium-operator` 檢查會指出），復原是 `kubectl -n kube-system rollout restart deploy/cilium-operator`。
@@ -266,13 +266,13 @@ tkctl create cluster -f tkdt.yaml
 
 ## 指令
 
-kubectl 風格，動詞在前。全部如下：
+kubectl 風格，動詞在前，`-v`／`--verbose` 可以加在任何位置（多印每道 `$` 指令）。全部如下：
 
 ```
 tkctl create cluster [名稱] [--control-planes N] [--workers N] [--cpu N] [--memory SIZE]
                      [--k8s 版本] [--datapath auto|netkit|veth] [--gvisor] [--ha proxy|bgp] [--defer-join]
-                     [--routers 1|2] [--hosts 清單] [--ip-range A-B] [--preset lab|ha] [-f cluster.yaml]
-                     [--allow-overlap] [--dry-run] [--phase P] [--skip-phases P,...] [--list-phases] [--quiet]
+                     [--routers 1|2] [--hosts 清單] [--ip-range A-B] [--mode lab|ha] [-f cluster.yaml]
+                     [--allow-overlap] [--dry-run] [--phase P] [--skip-phases P,...] [--list-phases]
 tkctl delete cluster <名稱> [--yes] [--phase P] [--list-phases]
 tkctl get clusters
 tkctl describe cluster <名稱> [-o yaml]
@@ -298,7 +298,7 @@ tkctl version
 - `--routers 2`：兩台 router `<名稱>-router-1`（.251）與 `-2`（.252）跑 VRRP，節點的閘道與 apiserver 入口仍是 `.253`，在兩台之間漂移（切換約 3 秒）。停一台用 `sudo systemctl stop <名稱>-router-1.service`（`podman stop` 幾秒後會被 systemd 拉回來）；一台停著時 `add node`／`delete node` 只重載跑著的那台，停著的回來時自己拿到新設定。`describe` 的 `Router:` 段列出兩台與 VRRP 狀態，`verify` 的 `[router]` 多一行檢查剛好一台 MASTER、一台 BACKUP。
 - `--hosts` 與 `--ip-range` 要一起給，把叢集分散到多台主機（見「多主機」）；`-f` 的對應寫法是 `spec.hosts` 與 `spec.network.range`。
 - `connect cluster` 把兩個以上的叢集接成 Cilium Cluster Mesh，`disconnect cluster` 斷開一對（見「聯邦」）；兩邊要同一種形態、Cilium 差不超過一個 minor，這版之前建的叢集要重建才能接。
-- `--preset lab|ha` 是拓樸縮寫，`[plan]` 會印出展開的旗標；不能跟 `--control-planes`、`--workers`、`--ha`、`--routers`、`--defer-join`、`-f` 混用。`ha` = `--control-planes 3 --workers 3 --ha bgp --routers 2`，`lab` = 預設的 `--control-planes 1 --workers 2 --ha proxy --routers 1`。
+- `--mode lab|ha` 是拓樸縮寫，`[plan]` 會印出展開的旗標；不能跟 `--control-planes`、`--workers`、`--ha`、`--routers`、`--defer-join`、`-f` 混用。`ha` = `--control-planes 3 --workers 3 --ha bgp --routers 2`，`lab` = 預設的 `--control-planes 1 --workers 2 --ha proxy --routers 1`。
 - `--gvisor` 需要 veth datapath，會自動選；明確指定 `--datapath netkit` 加 `--gvisor` 會被拒絕。
 - `--memory` 接受 `4G`、`4096M`，`4Gi` 不行。
 - 節點的 capacity 就是它的 `cpu`／`memory`，allocatable 是再扣掉 kubeReserved（cpu 500m、memory 512Mi）與 evictionHard（memory 500Mi）：2 核 4G 的節點是 1500m／3084Mi，和一台同規格的 VM 跑 kubeadm 一樣。記憶體至少 2G，任一節點不能超過主機的核數或記憶體（preflight 會拒絕）。`verify` 的 `node sizes` 檢查這些數字。這版之前建的叢集仍回報整台主機，`verify` 對它們印 SKIP；要改過來就重建。

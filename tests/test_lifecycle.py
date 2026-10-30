@@ -46,7 +46,7 @@ def test_a_cluster_without_status_is_creating_not_ready(ctx: Context, host: Fake
 def test_save_cluster_writes_the_file_and_keeps_ctx_in_step(ctx: Context, host: FakeHost) -> None:
     on_disk(ctx, host)
     c = lifecycle.load_cluster(ctx, "demo")
-    lifecycle.save_cluster(ctx, c.model_copy(update={"status": None}))
+    ctx.save_cluster(c.model_copy(update={"status": None}))
     state = ctx.paths.state_dir("demo")
     assert "status:" not in host.files[state / "cluster.yaml"] and ctx.cluster is not c
     assert not any(k.argv[:2] == ["rm", "-f"] for k in host.calls)

@@ -156,18 +156,11 @@ def ranges_text(addrs: Sequence[IPv4Address]) -> str:
     return ",".join(out)
 
 
-def normalize_range(text: str) -> str:
-    """The pool written out in full, the form cluster.yaml keeps."""
-    return ranges_text(parse_range(text))
-
-
 @dataclass(frozen=True)
 class Allocation:
     router: IPv4Address  # the floating address: the nodes' gateway, proxy mode's entry
-    routers: list[IPv4Address]  # router-1 and -2 (two routers), empty with one
     shim: IPv4Address | None  # the operator's, when it is one of the hosts
     nodes: list[IPv4Address]
-    free: list[IPv4Address]  # left for add node
     mesh: IPv4Address  # the clustermesh-apiserver's, MESH_POOL before the tail
     lb_range: str  # the pool's last LB_POOL addresses
 
@@ -189,19 +182,15 @@ def allocate(
             f"{shims} operator shim, {nodes} nodes, {MESH_POOL} Cluster Mesh address, "
             f"{LB_POOL} LoadBalancer addresses)"
         )
-    cursor = 1
-    routers_ = pool[cursor : cursor + physical]
-    cursor += physical
+    cursor = 1 + physical  # router-1 and -2 (two routers) are derived by Cluster.routers
     shim_ip = pool[cursor] if shim else None
     cursor += shims
     node_ips = pool[cursor : cursor + nodes]
     cursor += nodes
     return Allocation(
         router=pool[0],
-        routers=routers_,
         shim=shim_ip,
         nodes=node_ips,
-        free=pool[cursor : len(pool) - tail],
         mesh=pool[len(pool) - tail],
         lb_range=ranges_text(pool[len(pool) - LB_POOL :]),
     )
@@ -433,7 +422,7 @@ def resolve(
         # to the new ones, two claimants of the floating address
         raise PlanError(
             f"cluster {u.metadata.name} is being created with routers: "
-            f"{existing.spec.network.routers}; rerun with the same --routers (or --preset), "
+            f"{existing.spec.network.routers}; rerun with the same --routers (or --mode), "
             f"or delete it first: tkctl delete cluster {u.metadata.name}"
         )
     if s.hosts is None:
@@ -585,8 +574,8 @@ def done(ctx: Context) -> bool:
 
 def run(ctx: Context) -> None:
     c = ctx.require_cluster()
-    if ctx.options.preset:
-        ctx.say(f"  {ctx.options.preset}")
+    if ctx.options.mode:
+        ctx.say(f"  {ctx.options.mode}")
     n = len(c.control_planes)
     ctx.say(
         f"  cluster {c.name}: {n} control plane{'s' if n > 1 else ''} + "

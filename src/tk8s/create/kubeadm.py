@@ -1,7 +1,5 @@
-"""kubeadm: the init configuration, then init on the first control plane and join for the rest.
-
-Plan 1 ships the render sub-phase; init, join and kubeconfig follow with the same shape.
-"""
+"""kubeadm: the init configuration, then init on the first control plane, the host's kubeconfig,
+and join for the rest."""
 
 import re
 from pathlib import Path
@@ -104,7 +102,6 @@ def wait_router_ready(ctx: Context) -> None:
         return r.stdout.strip() == "ok"
 
     wait_for(
-        ctx,
         ready,
         rounds=30,
         delay=ctx.options.poll,
@@ -261,7 +258,6 @@ def join_node(ctx: Context, node: model.Node, join: str, key: str) -> None:
     # kubeadm join returns before the kubelet has registered the Node object; the join phases'
     # done() checks ask for it right away, so wait here (a worker takes a second or two).
     wait_for(
-        ctx,
         lambda: joined(ctx, node.name),
         rounds=30,
         delay=ctx.options.poll,

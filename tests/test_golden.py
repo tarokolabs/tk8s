@@ -50,7 +50,7 @@ def normalise(out: str, tmp: Path) -> str:
                 "create",
                 "cluster",
                 "multi",
-                "--preset",
+                "--mode",
                 "ha",
                 "--hosts",
                 "a=local,b=tux@192.168.1.231,c=192.168.1.232",

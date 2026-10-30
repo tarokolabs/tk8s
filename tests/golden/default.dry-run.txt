@@ -450,12 +450,6 @@ ExecStart=ip route replace 10.98.0.0/24 via 172.22.0.1
 ExecStop=-ip route del 10.244.0.0/21 via 172.22.0.1
 ExecStop=-ip route del 10.98.0.0/24 via 172.22.0.1
 
-  $ ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/tk8s/nodes/tk8s-control-plane-1/sys-node/node0/cpu0
-  $ ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/tk8s/nodes/tk8s-control-plane-1/sys-node/node0/cpu1
-  $ ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/tk8s/nodes/tk8s-worker-1/sys-node/node0/cpu0
-  $ ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/tk8s/nodes/tk8s-worker-1/sys-node/node0/cpu1
-  $ ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/tk8s/nodes/tk8s-worker-2/sys-node/node0/cpu0
-  $ ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/tk8s/nodes/tk8s-worker-2/sys-node/node0/cpu1
 
 [kubeadm/render] write the kubeadm init configuration into the state dir
 # ---- <TMP>/clusters/tk8s/init-config.yaml

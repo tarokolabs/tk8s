@@ -54,10 +54,6 @@ def managed_from(ctx: Context, c: model.Cluster) -> str | None:
     return op
 
 
-def save_cluster(ctx: Context, cluster: model.Cluster) -> None:
-    ctx.save_cluster(cluster)
-
-
 def state_of(ctx: Context, c: model.Cluster) -> str:
     """Running, Stopped, or (several hosts) Degraded when only some hosts run their target."""
     if c.status is None or c.status.phase != "Ready":
@@ -172,7 +168,7 @@ def describe(ctx: Context, c: model.Cluster, output: str | None) -> None:
         tail = f" {join:<11} {n.host}" if c.multi_host else f" {join}"
         ctx.say(f"  {n.name:<24} {n.role:<14} {n.ip!s:<14} {size:<14}{tail}")
     describe_status(ctx, c)
-    describe_addons(ctx, c, state)
+    describe_addons(ctx, state)
     describe_router(ctx, c, state)
     describe_mesh(ctx, c, state)
     ctx.say("Access:")
@@ -243,7 +239,7 @@ def describe_status(ctx: Context, c: model.Cluster) -> None:
             ctx.say(f"  next:       {following[0]}   (rerun tkctl create cluster {c.name})")
 
 
-def describe_addons(ctx: Context, c: model.Cluster, state: str) -> None:
+def describe_addons(ctx: Context, state: str) -> None:
     ctx.say("Addons:")
     if state != "Running":
         ctx.say("  unavailable (cluster is not running)")

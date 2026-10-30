@@ -34,6 +34,7 @@ USAGE = """\
 tkctl: create and manage tk8s Kubernetes clusters on one podman host or several (--hosts).
 
 Usage:
+  tkctl [-v] <verb> <noun> ...   (-v, --verbose: also print each `$ command`; goes anywhere)
   tkctl create cluster [NAME] [flags]
   tkctl create cluster --list-phases
   tkctl delete cluster NAME [--yes] [--phase P] [--list-phases]
@@ -77,7 +78,7 @@ Create flags:
                          comma-separated, the end may be a last octet (192.168.1.64-70,
                          192.168.1.80-89); router, nodes, the operator's shim, the 6th from
                          the end for Cluster Mesh, the last 5 as the LoadBalancer pool
-  --preset NAME          a named topology, printed expanded under [plan]; cannot be combined
+  --mode NAME            a named topology, printed expanded under [plan]; cannot be combined
                          with --control-planes/--workers/--ha/--routers/--defer-join/-f:
                            lab   --control-planes 1 --workers 2 --ha proxy --routers 1
                            ha    --control-planes 3 --workers 3 --ha bgp --routers 2
@@ -87,7 +88,6 @@ Create flags:
                          the host
   --phase P              run one phase (or one subtree, e.g. kubeadm) instead of all of them
   --skip-phases P,...    phases to skip
-  --quiet                hide the `$ command` lines (the [phase] lines always show)
 
 NAME must match ^[a-z][a-z0-9-]{0,15}$ (it becomes the DNS domain NAME.k8s).
 
@@ -167,7 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="tkctl", add_help=False)
     sub = ap.add_subparsers(dest="verb")
     create = sub.add_parser("create", add_help=False).add_subparsers(dest="noun")
-    # no abbreviations: --work for --workers would slip past the --preset and -f no-mixing rules
+    # no abbreviations: --work for --workers would slip past the --mode and -f no-mixing rules
     add_create_flags(create.add_parser("cluster", add_help=False, allow_abbrev=False))
     v = sub.add_parser("verify", add_help=False).add_subparsers(dest="noun")
     vc = v.add_parser("cluster", add_help=False)
@@ -298,6 +298,13 @@ def _main(args: list[str]) -> int:
         if plugins:
             print(f"Plugins found on PATH: {' '.join(plugins)}   (tkctl <plugin> ...)")
         return 0 if args else 1
+    # -v anywhere on the line (before or after the verb); a plugin's own -v is its business
+    verbose = any(x in ("-v", "--verbose") for x in args)
+    stripped = [x for x in args if x not in ("-v", "--verbose")]
+    if stripped and stripped[0] in KNOWN_VERBS:
+        args = stripped
+    else:
+        verbose = False
     verb = args[0]
     if verb == "version":
         print(f"tkctl {tk8s_version(HOME)}")
@@ -315,6 +322,7 @@ def _main(args: list[str]) -> int:
         a = build_parser().parse_args(args)
     except SystemExit as err:  # argparse already printed "unrecognized arguments: ..."
         return int(err.code or 1)
+    a.verbose = verbose
     if a.verb == "create" and a.noun == "cluster":
         return cmd_create(a, args)
     if a.verb == "verify" and a.noun == "cluster":
