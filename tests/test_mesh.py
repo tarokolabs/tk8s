@@ -188,7 +188,7 @@ def test_disconnect_warns_about_global_services_left_behind(tmp_path: Path) -> N
     a, ha, b, _ = pair(tmp_path)
     connected(a, b)
     ha.responses[("kubectl", "get", "svc", "-A", "-o")] = Result(
-        0, "default/echo true\nkube-system/kube-dns \n", ""
+        0, "default/echo 10.98.0.20 true\nkube-system/kube-dns 10.98.0.10 \n", ""
     )
     ops.disconnect(a, b, "other")
     assert (

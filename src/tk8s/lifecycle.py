@@ -7,6 +7,7 @@ from pathlib import Path
 from . import hosts, kubeconfig, model
 from .create import PHASES, units
 from .create.kubeadm import kubectl
+from .describe_mesh import describe_mesh
 from .describe_router import describe_router
 from .host import Host, HostError
 from .phases import Context, poll_until
@@ -87,7 +88,8 @@ def list_clusters(ctx: Context) -> None:
         ctx.say("no clusters")
         return
     ctx.say(
-        f"{'NAME':<12} {'NODES':<7} {'K8S':<8} {'DATAPATH':<9} {'STATE':<9} {'HOSTS':<6} SUBNET"
+        f"{'NAME':<12} {'NODES':<7} {'K8S':<8} {'DATAPATH':<9} {'STATE':<9} {'HOSTS':<6} "
+        f"{'MESH':<12} SUBNET"
     )
     for d in dirs:
         name = d.name
@@ -96,7 +98,7 @@ def list_clusters(ctx: Context) -> None:
             # a create interrupted before plan: the directory is there, nothing else is, and a
             # second create of the name would fail on a clash the student cannot see
             ctx.say(
-                f"{name:<12} {'-':<7} {'-':<8} {'-':<9} {'Incomplete':<9} {'-':<6} "
+                f"{name:<12} {'-':<7} {'-':<8} {'-':<9} {'Incomplete':<9} {'-':<6} {'-':<12} "
                 f"no cluster.yaml (tkctl delete cluster {name})"
             )
             continue
@@ -109,6 +111,7 @@ def list_clusters(ctx: Context) -> None:
         nodes = f"{len(c.control_planes)}+{len(c.workers)}"
         datapath = s.datapath_resolved or s.datapath
         count = str(len(c.host_names)) if c.multi_host else "-"
+        peers = ", ".join(c.status.mesh) if c.status is not None and c.status.mesh else "-"
         op = managed_from(ctx, c) if c.multi_host else None
         if op is not None:  # a copy: the operator's hosts are not ours to ask
             state, tail = "managed", f" from {op}"
@@ -123,7 +126,7 @@ def list_clusters(ctx: Context) -> None:
             state, tail = state_of(row, c), ""
         ctx.say(
             f"{name:<12} {nodes:<7} {s.kubernetes:<8} {datapath:<9} {state:<9} {count:<6} "
-            f"{s.network.nodes}{tail}"
+            f"{peers:<12} {s.network.nodes}{tail}"
         )
 
 
@@ -163,6 +166,7 @@ def describe(ctx: Context, c: model.Cluster, output: str | None) -> None:
     describe_status(ctx, c)
     describe_addons(ctx, c, state)
     describe_router(ctx, c, state)
+    describe_mesh(ctx, c, state)
     ctx.say("Access:")
     routers = " and ".join(r.name for r in c.routers)
     spread = "spreads" if len(c.routers) == 1 else "spread"

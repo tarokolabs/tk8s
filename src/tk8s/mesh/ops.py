@@ -10,7 +10,7 @@ from pathlib import Path
 from .. import images, lifecycle
 from ..create.kubeadm import kubectl
 from ..phases import Context, poll_until
-from . import MeshError, checks, probe
+from . import MeshError, checks, probe, services
 
 STATUS_WAIT = "5m"
 
@@ -184,24 +184,8 @@ def peer_context(ctx: Context, name: str) -> Context | None:
 
 
 def global_service_names(ctx: Context) -> list[str]:
-    """ns/name of every Service annotated service.cilium.io/global: "true"."""
-    r = kubectl(
-        ctx,
-        "get",
-        "svc",
-        "-A",
-        "-o",
-        "jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name} "
-        '{.metadata.annotations.service\\.cilium\\.io/global}{"\\n"}{end}',
-    )
-    if r.returncode != 0:
-        return []
-    out: list[str] = []
-    for line in r.stdout.splitlines():
-        fields = line.split()
-        if len(fields) == 2 and fields[1] == "true":
-            out.append(fields[0])
-    return out
+    """ns/name of every global service (what a disconnect leaves behind)."""
+    return [f"{g.ns}/{g.name}" for g in services.global_services(ctx)]
 
 
 def forget_peer(ctx: Context, peer: str) -> None:
