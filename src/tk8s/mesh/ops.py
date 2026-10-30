@@ -3,6 +3,7 @@ cluster, connect them all at once (mesh mode, each cluster keeps its own CA), wa
 record the peers in every cluster.yaml. Every cilium command runs on the operator with a
 KUBECONFIG that names the clusters' own files; the context names are the cluster names."""
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -164,3 +165,117 @@ def connect(ctxs: list[Context]) -> None:
             f"(undo with {undo})"
         )
     op.say(f"clusters {', '.join(names)} connected")
+
+
+# ---- disconnect
+
+
+def peer_context(ctx: Context, name: str) -> Context | None:
+    """The context of another cluster on this operator (its hosts built), or None when it has
+    no cluster.yaml here."""
+    sub = ctx.on(ctx.host)
+    sub.hosts = {}
+    sub.cluster = None
+    try:
+        lifecycle.load_cluster(sub, name)
+    except lifecycle.ClusterNotFound:
+        return None
+    return sub
+
+
+def global_service_names(ctx: Context) -> list[str]:
+    """ns/name of every Service annotated service.cilium.io/global: "true"."""
+    r = kubectl(
+        ctx,
+        "get",
+        "svc",
+        "-A",
+        "-o",
+        "jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name} "
+        '{.metadata.annotations.service\\.cilium\\.io/global}{"\\n"}{end}',
+    )
+    if r.returncode != 0:
+        return []
+    out: list[str] = []
+    for line in r.stdout.splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[1] == "true":
+            out.append(fields[0])
+    return out
+
+
+def forget_peer(ctx: Context, peer: str) -> None:
+    """Drop a peer from this cluster alone: its keys in the cilium-clustermesh secret (what
+    cilium clustermesh connect wrote), then the record. For a peer that is gone."""
+    c = ctx.require_cluster()
+    r = kubectl(
+        ctx, "-n", "kube-system", "get", "secret", "cilium-clustermesh", "-o", "jsonpath={.data}"
+    )
+    if r.returncode == 0 and r.stdout.strip():
+        keys = [k for k in json.loads(r.stdout) if k == peer or k.startswith(peer + ".")]
+        if keys:
+            ops = [
+                {"op": "remove", "path": "/data/" + k.replace("~", "~0").replace("/", "~1")}
+                for k in keys
+            ]
+            r = kubectl(
+                ctx,
+                "-n",
+                "kube-system",
+                "patch",
+                "secret",
+                "cilium-clustermesh",
+                "--type",
+                "json",
+                "-p",
+                json.dumps(ops),
+            )
+            if r.returncode != 0:
+                raise MeshError(
+                    f"cluster {c.name}: could not remove {peer} from secret cilium-clustermesh: "
+                    f"{r.stderr.strip()}"
+                )
+    assert c.status is not None
+    record_peers(ctx, [p for p in c.status.mesh if p != peer])
+
+
+def disconnect(ctx: Context, peer: Context | None, peer_name: str) -> None:
+    """cilium clustermesh disconnect between ctx and peer (both records updated), or, with the
+    peer's cluster.yaml gone, forget_peer on ctx alone; then a warning for every global service
+    ctx still has."""
+    c = ctx.require_cluster()
+    if peer is None:
+        forget_peer(ctx, peer_name)
+        ctx.say(
+            f"  warning: cluster {peer_name} not found; removed its connection from {c.name} only"
+        )
+    else:
+        r = ctx.host.run(
+            [
+                "cilium",
+                "clustermesh",
+                "disconnect",
+                "--context",
+                c.name,
+                "--destination-context",
+                peer_name,
+            ],
+            env=kubeconfig_env([ctx, peer]),
+            capture=True,
+            check=False,
+        )
+        if r.returncode != 0:
+            tail = (r.stderr.strip() or r.stdout.strip()).splitlines()[-1:]
+            raise MeshError(f"cilium clustermesh disconnect failed: {' '.join(tail)}")
+        assert c.status is not None
+        record_peers(ctx, [p for p in c.status.mesh if p != peer_name])
+        pc = peer.require_cluster()
+        assert pc.status is not None
+        record_peers(peer, [p for p in pc.status.mesh if p != c.name])
+    left = global_service_names(ctx)
+    if left:
+        ctx.say(
+            f"  warning: {len(left)} global service(s) still annotated on {c.name}: "
+            f"{', '.join(left)}; their remote backends are gone"
+        )
+    ctx.say(f"clusters {c.name} and {peer_name} disconnected")

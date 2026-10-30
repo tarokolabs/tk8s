@@ -180,7 +180,22 @@ def cmd_connect(a: argparse.Namespace) -> int:
 
 
 def cmd_disconnect(a: argparse.Namespace) -> int:
-    raise UsageError("usage: tkctl disconnect cluster A B")  # filled in with disconnect
+    if not a.a or not a.b:
+        raise UsageError("usage: tkctl disconnect cluster A B")
+    validate_name(a.a)
+    validate_name(a.b)
+    if a.a == a.b:
+        raise UsageError(f"cluster {a.a} is listed twice")
+    ctx = cluster_context(a.a, "disconnect")
+    try:
+        peer: Context | None = cluster_context(a.b, "disconnect")
+    except lifecycle.ClusterNotFound:
+        peer = None  # gone: its side cannot be told, ours forgets it
+    c = ctx.require_cluster()
+    if peer is not None and (c.status is None or a.b not in c.status.mesh):
+        raise UsageError(f"clusters {a.a} and {a.b} are not connected (tkctl get clusters)")
+    mesh.disconnect(ctx, peer, a.b)
+    return 0
 
 
 # ---- delete cluster

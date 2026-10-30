@@ -1,6 +1,7 @@
 """connect and disconnect: what cilium-cli is asked, in which kubeconfig environment, what is
 recorded in every cluster.yaml, what is printed."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -161,3 +162,83 @@ def test_members_closes_over_recorded_peers_and_refuses_a_missing_one(tmp_path: 
         r"tkctl disconnect cluster other third",
     ):
         ops.members(ctx_of, ["demo", "other"])
+
+
+def connected(a: Context, b: Context) -> None:
+    for ctx, peer in ((a, "other"), (b, "demo")):
+        cl = ctx.require_cluster()
+        assert cl.status is not None
+        ctx.cluster = cl.model_copy(
+            update={"status": cl.status.model_copy(update={"mesh": [peer]})}
+        )
+
+
+def test_disconnect_runs_cilium_and_drops_both_records(tmp_path: Path) -> None:
+    a, ha, b, hb = pair(tmp_path)
+    connected(a, b)
+    ops.disconnect(a, b, "other")
+    d = next(c for c in ha.calls if c.argv[:3] == ["cilium", "clustermesh", "disconnect"])
+    assert d.argv[3:] == ["--context", "demo", "--destination-context", "other"]
+    assert d.env == {"KUBECONFIG": f"{a.state_dir}/kubeconfig:{b.state_dir}/kubeconfig"}
+    assert peers(ha, a) == [] and peers(hb, b) == []
+    assert ha.lines[-1] == "clusters demo and other disconnected"
+
+
+def test_disconnect_warns_about_global_services_left_behind(tmp_path: Path) -> None:
+    a, ha, b, _ = pair(tmp_path)
+    connected(a, b)
+    ha.responses[("kubectl", "get", "svc", "-A", "-o")] = Result(
+        0, "default/echo true\nkube-system/kube-dns \n", ""
+    )
+    ops.disconnect(a, b, "other")
+    assert (
+        "  warning: 1 global service(s) still annotated on demo: default/echo; "
+        "their remote backends are gone"
+    ) in ha.lines
+
+
+def test_forget_peer_removes_its_keys_from_the_clustermesh_secret(tmp_path: Path) -> None:
+    a, ha, b, _ = pair(tmp_path)
+    connected(a, b)
+    ha.responses[("kubectl", "-n", "kube-system", "get", "secret", "cilium-clustermesh")] = Result(
+        0, '{"other":"...","other.etcd-client-ca.crt":"...","third":"...","third.other":"x"}', ""
+    )
+    ops.forget_peer(a, "other")
+    patch = next(c for c in ha.calls if c.argv[:4] == ["kubectl", "-n", "kube-system", "patch"])
+    assert patch.argv[4:8] == ["secret", "cilium-clustermesh", "--type", "json"]
+    assert json.loads(patch.argv[-1]) == [
+        {"op": "remove", "path": "/data/other"},
+        {"op": "remove", "path": "/data/other.etcd-client-ca.crt"},
+    ]
+    assert peers(ha, a) == []
+
+
+def test_forget_peer_without_the_secret_only_updates_the_record(tmp_path: Path) -> None:
+    a, ha, b, _ = pair(tmp_path)
+    connected(a, b)
+    ha.responses[("kubectl", "-n", "kube-system", "get", "secret", "cilium-clustermesh")] = Result(
+        1, "", "not found"
+    )
+    ops.forget_peer(a, "other")
+    assert not any(c.argv[:4] == ["kubectl", "-n", "kube-system", "patch"] for c in ha.calls)
+    assert peers(ha, a) == []
+
+
+def test_disconnect_without_the_peer_falls_back_to_forgetting_it(tmp_path: Path) -> None:
+    a, ha, b, _ = pair(tmp_path)
+    connected(a, b)
+    ops.disconnect(a, None, "other")
+    assert "  warning: cluster other not found; removed its connection from demo only" in ha.lines
+    assert not any(c.argv[:3] == ["cilium", "clustermesh", "disconnect"] for c in ha.calls)
+    assert peers(ha, a) == []
+    assert ha.lines[-1] == "clusters demo and other disconnected"
+
+
+def test_peer_context_loads_a_cluster_or_returns_none(tmp_path: Path) -> None:
+    a, _, b, _ = pair(tmp_path)
+    b.state_dir.mkdir(parents=True)  # load_cluster reads the operator's real file system
+    (b.state_dir / "cluster.yaml").write_text(model.dumps(b.require_cluster()))
+    peer = ops.peer_context(a, "other")
+    assert peer is not None and peer.require_cluster().name == "other"
+    assert peer.host is a.host and a.require_cluster().name == "demo"
+    assert ops.peer_context(a, "nope") is None

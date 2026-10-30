@@ -10,10 +10,11 @@ cluster.yaml only this host is known, and only this host is cleaned."""
 from collections.abc import Callable
 from pathlib import Path
 
-from . import kubeconfig, podman
+from . import kubeconfig, lifecycle, podman
 from .create.units import shim_name
 from .host import Host
 from .lifecycle import ClusterError
+from .mesh import ops as mesh
 from .phases import Context, Phase, confirm
 from .podman import node_volumes
 
@@ -54,6 +55,34 @@ def found(ctx: Context) -> bool:
         or podman.exists(ctx.on(h), "network", name)
         for _, h in targets(ctx)
     )
+
+
+# ---- mesh: leave the Cluster Mesh before anything is stopped
+
+
+def mesh_done(ctx: Context) -> bool:
+    c = ctx.cluster
+    return c is None or c.status is None or c.status.mesh == []
+
+
+def mesh_run(ctx: Context) -> None:
+    """Disconnect from every peer that can be reached; a peer that is gone or stopped is
+    forgotten on this side only, with a warning (its record goes with its own disconnect)."""
+    c = ctx.require_cluster()
+    assert c.status is not None
+    for peer in list(c.status.mesh):
+        pc = mesh.peer_context(ctx, peer)
+        if pc is not None and lifecycle.state_of(pc, pc.require_cluster()) == "Running":
+            mesh.disconnect(ctx, pc, peer)
+            continue
+        mesh.forget_peer(ctx, peer)
+        ctx.say(
+            f"  warning: peer {peer} is not reachable; {peer} still lists {c.name} "
+            f"(tkctl disconnect cluster {peer} {c.name} there)"
+        )
+
+
+MESH = Phase("mesh", "disconnect from every peer of the mesh", mesh_done, mesh_run)
 
 
 def confirm_delete(ctx: Context) -> None:
@@ -347,5 +376,5 @@ PHASE = Phase(
     "delete the cluster",
     None,
     lambda ctx: None,
-    children=(STOP, CONTAINERS, VOLUMES, UNITS, NETWORK, ROUTES, STATE, KUBECONFIG),
+    children=(MESH, STOP, CONTAINERS, VOLUMES, UNITS, NETWORK, ROUTES, STATE, KUBECONFIG),
 )
