@@ -2,7 +2,7 @@
 image store, the units, the per-node addons), so a node added later looks exactly like one created
 with the cluster. join node runs the same tail to finish a node that an add left unjoined."""
 
-from ..create import addons, frr, kubeadm, nodes, preflight, router, units
+from ..create import addons, cni, frr, kubeadm, nodes, preflight, router, units
 from ..create import images as create_images
 from ..create.plan import PlanError, check_memory_minimum
 from ..datatree import PreflightError
@@ -152,7 +152,7 @@ PROVISION: tuple[Phase, ...] = (
 def add_phase(join: bool) -> Phase:
     children: tuple[Phase, ...] = (PLAN, *PROVISION)
     if join:
-        children += (JOIN, READY, RECORD)
+        children += (JOIN, READY, cni.HOST_ROUTES, RECORD)
     return Phase("add", "add a node to the cluster", None, lambda ctx: None, children=children)
 
 

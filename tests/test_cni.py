@@ -223,3 +223,41 @@ def test_cilium_outputs_land_under_the_clusters_logs(ctx: Context, host: FakeHos
     logs = ctx.state_dir / "logs"
     assert logs / "cilium.out" in host.files and logs / "cilium-status.out" in host.files
     assert not any(str(p).startswith("/tmp/") for p in host.files)
+
+
+POD_CIDRS = (
+    "demo-control-plane-1 10.244.0.0/24\ndemo-worker-1 10.244.1.0/24\ndemo-worker-2 10.244.2.0/24\n"
+)
+
+
+def test_host_routes_phase_records_pod_cidrs_and_rewrites_the_routes_unit(
+    ctx: Context, host: FakeHost
+) -> None:
+    host.responses[("kubectl", "get", "nodes", "-o", f"jsonpath={cni.POD_CIDRS}")] = Result(
+        0, POD_CIDRS, ""
+    )
+    assert not cni.host_routes_done(ctx)
+    Runner([cni.PHASE], only="cni/host-routes").run(ctx)
+    saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
+    assert [str(n.pod_cidr) for n in saved.spec.nodes] == [
+        "10.244.0.0/24",
+        "10.244.1.0/24",
+        "10.244.2.0/24",
+    ]
+    unit = host.files[ctx.paths.systemd_dir / "demo-routes.service"]
+    assert "ExecStart=ip route replace 10.244.2.0/24 via 172.22.0.3\n" in unit
+    a = [c.argv for c in host.calls]
+    reload_ = a.index(["systemctl", "daemon-reload"])
+    assert reload_ < a.index(["systemctl", "restart", "demo-routes.service"])
+    assert "  host routes: demo-worker-1 10.244.1.0/24, demo-worker-2 10.244.2.0/24" in host.lines
+    assert cni.host_routes_done(ctx)
+
+
+def test_host_routes_phase_is_not_done_while_a_node_has_no_cidr_yet(
+    ctx: Context, host: FakeHost
+) -> None:
+    host.responses[("kubectl", "get", "nodes", "-o", f"jsonpath={cni.POD_CIDRS}")] = Result(
+        0, "demo-control-plane-1 10.244.0.0/24\ndemo-worker-1 \n", ""
+    )
+    with pytest.raises(PhaseFailed, match=r"demo-worker-1 has no pod CIDR yet"):
+        Runner([cni.PHASE], only="cni/host-routes").run(ctx)

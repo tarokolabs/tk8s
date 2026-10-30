@@ -4,12 +4,14 @@ controller); then wait for every node to be Ready.
 The Gateway API CRDs, the cilium chart and the cilium CLI are pinned in versions.yaml; the CRDs
 and the chart are vendored under manifests/, so nothing here fetches from helm.cilium.io."""
 
+from ipaddress import IPv4Network
 from typing import Any, Literal
 
 import yaml
 
-from .. import hosts, images
+from .. import hosts, images, model
 from ..phases import Context, Phase, PhaseFailed, wait_for
+from . import units
 from .kubeadm import kubectl, kubectl_env
 
 Datapath = Literal["netkit", "veth"]
@@ -253,10 +255,69 @@ NODES_READY = Phase(
     "nodes-ready", "wait for every node to be Ready", nodes_ready_done, nodes_ready_run
 )
 
+# ---- host-routes
+
+POD_CIDRS = '{range .items[*]}{.metadata.name} {.spec.podCIDR}{"\\n"}{end}'
+
+
+def node_pod_cidrs(ctx: Context) -> dict[str, str]:
+    """node name -> the pod CIDR Kubernetes gave it ("" while it has none)."""
+    r = kubectl(ctx, "get", "nodes", "-o", f"jsonpath={POD_CIDRS}")
+    if r.returncode != 0:
+        raise PhaseFailed(f"kubectl get nodes failed: {r.stderr.strip()}")
+    out: dict[str, str] = {}
+    for line in r.stdout.splitlines():
+        fields = line.split()
+        if fields:
+            out[fields[0]] = fields[1] if len(fields) > 1 else ""
+    return out
+
+
+def with_pod_cidrs(c: model.Cluster, cidrs: dict[str, str]) -> model.Cluster:
+    """cluster.yaml's nodes with the pod CIDRs Kubernetes reports; a node Kubernetes has not
+    registered keeps what it had."""
+    nodes = [
+        n.model_copy(update={"pod_cidr": IPv4Network(cidrs[n.name])}) if cidrs.get(n.name) else n
+        for n in c.spec.nodes
+    ]
+    return c.model_copy(update={"spec": c.spec.model_copy(update={"nodes": nodes})})
+
+
+def host_routes_done(ctx: Context) -> bool:
+    """Every registered node's CIDR is recorded and the routes unit on disk says so."""
+    c = ctx.require_cluster()
+    cidrs = node_pod_cidrs(ctx)
+    for n in c.spec.nodes:
+        if n.name in cidrs and str(n.pod_cidr or "") != cidrs[n.name]:
+            return False
+    return units.routes_current(ctx, c)
+
+
+def host_routes_run(ctx: Context) -> None:
+    c = ctx.require_cluster()
+    cidrs = node_pod_cidrs(ctx)
+    for n in c.spec.nodes:
+        if n.join and n.name in cidrs and not cidrs[n.name]:
+            raise PhaseFailed(f"{n.name} has no pod CIDR yet (kubectl get node {n.name} -o yaml)")
+    c = with_pod_cidrs(c, cidrs)
+    ctx.save_cluster(c)
+    units.write_routes(ctx, c)
+    first = c.first_control_plane.name
+    routed = [f"{n.name} {n.pod_cidr}" for n in c.spec.nodes if n.pod_cidr and n.name != first]
+    ctx.say(f"  host routes: {', '.join(routed) if routed else 'none (one node)'}")
+
+
+HOST_ROUTES = Phase(
+    "host-routes",
+    "route each node's pod CIDR from the host straight to that node",
+    host_routes_done,
+    host_routes_run,
+)
+
 PHASE = Phase(
     "cni",
     "install the CNI and wait for the nodes",
     None,
     lambda ctx: None,
-    children=(INSTALL, NODES_READY),
+    children=(INSTALL, NODES_READY, HOST_ROUTES),
 )

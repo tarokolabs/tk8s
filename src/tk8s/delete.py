@@ -290,7 +290,13 @@ def subnets(ctx: Context) -> list[str]:
     if ctx.cluster is None:
         return []
     net = ctx.cluster.spec.network
-    return [str(net.pods), str(net.services)]
+    first = ctx.cluster.first_control_plane.name  # its /24 has no route of its own
+    nodes = [
+        str(n.pod_cidr)
+        for n in ctx.cluster.spec.nodes
+        if n.pod_cidr is not None and n.name != first
+    ]
+    return [str(net.pods), str(net.services), *nodes]
 
 
 def route_present(ctx: Context, subnet: str) -> bool:

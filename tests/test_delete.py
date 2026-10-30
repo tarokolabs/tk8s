@@ -404,3 +404,16 @@ def test_delete_of_a_stopped_cluster_forgets_itself_on_the_running_peer(
     other = model.load_text(host.files[ctx.paths.state_dir("other") / "cluster.yaml"])
     assert other.status is not None and other.status.mesh == []
     assert not host.exists(ctx.state_dir)
+
+
+def test_delete_removes_every_nodes_host_route(ctx: Context, host: FakeHost) -> None:
+    from tests.test_units import with_pod_cidrs
+
+    ctx.cluster = with_pod_cidrs(ctx.require_cluster())
+    everything_there(ctx, host)
+    assert delete.subnets(ctx) == [
+        "10.244.0.0/21",
+        "10.98.0.0/24",
+        "10.244.1.0/24",
+        "10.244.2.0/24",
+    ]

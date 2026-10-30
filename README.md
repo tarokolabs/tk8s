@@ -98,6 +98,7 @@ kubeadm            initialise the first control plane and join the others
 cni                install the CNI and wait for the nodes
   install            install the CNI (cilium: kube-proxy replacement, LB-IPAM, Gateway API)
   nodes-ready        wait for every node to be Ready
+  host-routes        route each node's pod CIDR from the host straight to that node
 addons             RuntimeClass, gVisor, metrics-server, local-path
   runtimeclass       RuntimeClass crun (CRI-O's default runtime)
   gvisor             gVisor into every node and RuntimeClass gvisor (only with --gvisor)
@@ -146,7 +147,7 @@ TK_OFFLINE=1 tkctl create cluster               # 離線環境：缺任何 image
 
 ### 從主機與其他機器連進叢集
 
-主機上 LoadBalancer IP（節點網段的 `.201`–`.219`）與 ClusterIP 直接可達，不需要 port-forward。同一個區網的其他機器加一條到節點網段的路由即可，由主機轉送：
+主機上 LoadBalancer IP（節點網段的 `.201`–`.219`）、ClusterIP 與 pod IP 直接可達，不需要 port-forward。同一個區網的其他機器加一條到節點網段的路由即可，由主機轉送：
 
 ```bash
 sudo ip route add 172.22.0.0/24 via <主機 IP>      # Linux；tkctl describe cluster 會印出填好位址的指令

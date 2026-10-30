@@ -238,6 +238,15 @@ def test_peek_text_reads_index_and_version_from_any_text() -> None:
     assert model.peek_text("garbage: [") == (None, None)
 
 
+def test_node_pod_cidr_is_optional_and_round_trips() -> None:
+    c = model.load_text(GOOD)
+    assert all(n.pod_cidr is None for n in c.spec.nodes)
+    nodes = [c.spec.nodes[0].model_copy(update={"pod_cidr": IPv4Network("10.244.24.0/24")})]
+    text = model.dumps(c.model_copy(update={"spec": c.spec.model_copy(update={"nodes": nodes})}))
+    assert "pod_cidr: 10.244.24.0/24" in text
+    assert model.load_text(text).spec.nodes[0].pod_cidr == IPv4Network("10.244.24.0/24")
+
+
 def test_mesh_fields_default_empty_and_old_files_still_load() -> None:
     c = model.load_text(GOOD).model_copy(update={"status": model.Status(phase="Ready", tk8s="v1")})
     assert c.spec.network.mesh is None

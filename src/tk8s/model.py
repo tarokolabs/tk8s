@@ -113,6 +113,9 @@ class Node(Strict):
     memory: str = Field(pattern=MEMORY)
     join: bool = True
     host: str | None = None  # multi-host: the host this node's container runs on
+    # the /24 Kubernetes gave the node for its pods, once it registered: what the host routes
+    # straight to the node (control-plane-1 does not forward TCP to another node's pods)
+    pod_cidr: IPv4Network | None = None
 
 
 class Network(Strict):

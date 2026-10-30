@@ -364,6 +364,7 @@ def test_create_runs_every_phase_and_marks_the_cluster_ready(
         "kubeadm/join",
         "cni/install",
         "cni/nodes-ready",
+        "cni/host-routes",
         "addons/runtimeclass",
         "addons/gvisor",
         "addons/metrics-server",

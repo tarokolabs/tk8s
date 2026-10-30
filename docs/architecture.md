@@ -56,6 +56,8 @@ templates/                  # 寫到主機上的檔，與實際內容只差 $變
 
 要自行指定就寫在 `spec.network`；與既有叢集重疊會被拒絕，`--allow-overlap` 允許。
 
+主機到叢集的路由（`<名稱>-routes.service`）：service 網段與整個 pod /21 經 control-plane-1，另外每個其他節點的 pod /24 直接指到那個節點（`cni/host-routes` 在節點 Ready 後讀 `spec.podCIDR` 記進 cluster.yaml 的 `pod_cidr`，`add node`／`delete node` 跟著更新）。後者是因為 control-plane-1 的 Cilium 走 BPF host routing（netkit 必須），不會把 TCP 轉送給別的節點上的 pod：主機直接打 worker 上的 pod、以及兩個單主機叢集之間的 pod 流量（Cluster Mesh 的回程經主機）都靠這些 /24。
+
 節點的預設路由指向 router，不是主機的 bridge：`.network` 設 `no_default_route=1` 並以 `--route 0.0.0.0/0,<router>` 發給每個容器。router 自己也會拿到那條指向自己的路由，而且 zebra 把它當 kernel route 壓過 VyOS 的 static default，所以 `router/scripts/vyos-postconfig-bootup.script` 開機時把它刪掉，之後 zebra 才裝上指向 `.254` 的那條；容器停止時 netavark 會再刪一次同一條路由，找不到就讓 unit 以失敗收場，所以同一個腳本登記一個 transient unit 在關機時把它放回去；同一個腳本也關掉 router 的 ICMP redirect（主機 bridge 和節點在同一條 link 上，否則 router 轉送每個封包都會叫節點直接走 `.254`）。
 
 ## 狀態目錄與 unit
