@@ -18,7 +18,8 @@ from ..paths import Paths
 from ..phases import Context, Phase
 from . import nodefs
 
-LB_POOL = 5  # LoadBalancer addresses: the tail of the pool (the single-host pool is 20)
+LB_POOL = 5  # LoadBalancer addresses: the tail of the pool (the single-host pool is 19)
+MESH_POOL = 1  # one address for the clustermesh-apiserver, just before the LoadBalancer tail
 
 
 class PlanError(Exception):
@@ -167,6 +168,7 @@ class Allocation:
     shim: IPv4Address | None  # the operator's, when it is one of the hosts
     nodes: list[IPv4Address]
     free: list[IPv4Address]  # left for add node
+    mesh: IPv4Address  # the clustermesh-apiserver's, MESH_POOL before the tail
     lb_range: str  # the pool's last LB_POOL addresses
 
 
@@ -175,15 +177,17 @@ def allocate(
 ) -> Allocation:
     """The pool cut in a fixed order: the router's floating address, the router containers'
     own (two routers), the operator's shim (when it runs nodes), the nodes, free addresses for
-    add node, and the LoadBalancer pool at the tail."""
+    add node, the Cluster Mesh address, and the LoadBalancer pool at the tail."""
     physical = 2 if routers == 2 else 0
     shims = 1 if shim else 0
-    need = 1 + physical + shims + nodes + LB_POOL
+    tail = MESH_POOL + LB_POOL
+    need = 1 + physical + shims + nodes + tail
     if len(pool) < need:
         raise PlanError(
             f"spec.network.range {ranges_text(pool)} has {len(pool)} addresses; this cluster "
             f"needs {need} (1 router address, {physical} router container addresses, "
-            f"{shims} operator shim, {nodes} nodes, {LB_POOL} LoadBalancer addresses)"
+            f"{shims} operator shim, {nodes} nodes, {MESH_POOL} Cluster Mesh address, "
+            f"{LB_POOL} LoadBalancer addresses)"
         )
     cursor = 1
     routers_ = pool[cursor : cursor + physical]
@@ -197,7 +201,8 @@ def allocate(
         routers=routers_,
         shim=shim_ip,
         nodes=node_ips,
-        free=pool[cursor : len(pool) - LB_POOL],
+        free=pool[cursor : len(pool) - tail],
+        mesh=pool[len(pool) - tail],
         lb_range=ranges_text(pool[len(pool) - LB_POOL :]),
     )
 
@@ -208,7 +213,7 @@ def node_region(c: model.Cluster) -> list[IPv4Address]:
     pool = parse_range(net.range or "")
     physical = 2 if net.routers == 2 else 0
     head = 1 + physical + (1 if net.shim is not None else 0)
-    return pool[head : len(pool) - LB_POOL]
+    return pool[head : len(pool) - MESH_POOL - LB_POOL]
 
 
 def place(groups: list[model.NodeGroup], hosts: list[str]) -> list[str]:
@@ -296,7 +301,8 @@ def network(
     want_vip: IPv4Address | None = None,
     routers: Literal[1, 2] | None = None,
 ) -> model.Network:
-    """Subnet by index: nodes 172.22.N.0/24 (the router at .253, LB-IPAM .200-.219), pods a /21,
+    """Subnet by index: nodes 172.22.N.0/24 (the router at .253, the Cluster Mesh apiserver at
+    .200, LB-IPAM .201-.219), pods a /21,
     services a /24; the gateway .254 is the host bridge, the router's upstream. bgp mode adds the
     anycast VIP 172.23.N.1, deliberately outside the node subnet (same subnet would mean ARP,
     not a route through the router)."""
@@ -332,7 +338,8 @@ def network(
         ha=mode,
         routers=routers or 1,
         vip=vip,
-        lb_range=f"172.22.{index}.200-172.22.{index}.219",
+        lb_range=f"172.22.{index}.201-172.22.{index}.219",
+        mesh=IPv4Address(f"172.22.{index}.200"),
         pods=IPv4Network(f"10.244.{index * 8}.0/21"),
         services=IPv4Network(f"10.98.{index}.0/24"),
     )
@@ -396,6 +403,7 @@ def network_multi(
             "range": rng,
             "router_hosts": router_hosts,
             "shim": alloc.shim,
+            "mesh": alloc.mesh,
         }
     )
 

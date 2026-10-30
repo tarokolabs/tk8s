@@ -17,9 +17,10 @@ spec:
     router: 172.22.0.253
     ha: proxy
     routers: 1
-    lb_range: 172.22.0.200-172.22.0.219
+    lb_range: 172.22.0.201-172.22.0.219
     pods: 10.244.0.0/21
     services: 10.98.0.0/24
+    mesh: 172.22.0.200
   nodes:
     - role: control-plane
       name: ha-control-plane-1

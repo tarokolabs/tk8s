@@ -146,7 +146,7 @@ TK_OFFLINE=1 tkctl create cluster               # 離線環境：缺任何 image
 
 ### 從主機與其他機器連進叢集
 
-主機上 LoadBalancer IP（節點網段的 `.200`–`.219`）與 ClusterIP 直接可達，不需要 port-forward。同一個區網的其他機器加一條到節點網段的路由即可，由主機轉送：
+主機上 LoadBalancer IP（節點網段的 `.201`–`.219`）與 ClusterIP 直接可達，不需要 port-forward。同一個區網的其他機器加一條到節點網段的路由即可，由主機轉送：
 
 ```bash
 sudo ip route add 172.22.0.0/24 via <主機 IP>      # Linux；tkctl describe cluster 會印出填好位址的指令
@@ -161,7 +161,7 @@ route add 172.22.0.0 mask 255.255.255.0 <主機 IP>  # Windows
 `--hosts` 把節點容器與 router 分散到同一個 L2 的多台主機上，目的是沒有任何一台主機是單點。跑 `tkctl` 的機器是操作台，`cluster.yaml` 與 kubeconfig 在它上面；對其他主機的每一道指令都走 ssh，印出來的是 `$ ssh tux@192.168.1.231 'sudo -n podman …'`，一樣可以手動重現。叢集跑起來後不依賴操作台：每台主機的 unit 重開機自己起來。
 
 - 主機清單 `[名稱=][使用者@]主機[:port]` 以逗號分隔；寫 `local`（或 `名稱=local`）的那項是操作台自己，最多一項。ssh 的金鑰、ProxyJump 等由 `~/.ssh/config` 管，host key 要先手動 ssh 一次信任。
-- `--ip-range` 是 LAN 上保留給這個叢集的位址池：一段或多段 `A-B` 以逗號分隔，結尾可以只寫最後一組（`192.168.1.64-70,192.168.1.80-89`）。池依固定順序切：第一個是 router 的浮動位址（節點的閘道），`--routers 2` 時接著兩台 router 各一個，操作台若是節點主機再一個 shim，然後每個節點一個，池的最後 5 個是 LoadBalancer 池，中間剩下的留給 `add node`。preflight 會對整個池 ARP 探測，有人在用就拒絕；池要在主機的網段內（網段、閘道、每台主機的介面由各自的預設路由查出）。
+- `--ip-range` 是 LAN 上保留給這個叢集的位址池：一段或多段 `A-B` 以逗號分隔，結尾可以只寫最後一組（`192.168.1.64-70,192.168.1.80-89`）。池依固定順序切：第一個是 router 的浮動位址（節點的閘道），`--routers 2` 時接著兩台 router 各一個，操作台若是節點主機再一個 shim，然後每個節點一個，池的最後 6 個：倒數第 6 個保留給 Cluster Mesh（clustermesh-apiserver 的位址），最後 5 個是 LoadBalancer 池，中間剩下的留給 `add node`。preflight 會對整個池 ARP 探測，有人在用就拒絕；池要在主機的網段內（網段、閘道、每台主機的介面由各自的預設路由查出）。
 - 放置：control plane 從第一台主機輪流、worker 接著輪、router 從第一台輪；`-f` 裡每個節點群組可寫 `host:` 固定在某台（省略或 `auto` 就輪流），router 用 `network.router_hosts`。三台 control plane 放兩台主機時總有一台持有多數，那台掉了 apiserver 就停，`plan` 與 preflight 會印警告（不拒絕）。
 - 節點網路是 Quadlet 的 macvlan network，節點與 router 拿 LAN 的位址、固定的 MAC；router 仍是節點的預設閘道（它扮演 ToR），再轉給 LAN 的閘道。macvlan 讓主機自己連不到它上面的容器，所以操作台若同時是節點主機，會多一個 `tk8s-<名稱>` shim 介面；其他主機不需要。
 - `--ha bgp` 跨主機時流量是非對稱的（去程經 router、回程由 control plane 直接回），主機之間的路徑不能有做狀態追蹤的東西：hypervisor 的防火牆（Proxmox 開著 firewall 時要在每台 node 設 `nf_conntrack_allow_invalid: 1`）、stateful switch 都會把回程之後的封包當成不合法丟掉，症狀是 ping 與握手都通、第一個資料封包就卡住。`--ha proxy` 是 haproxy 終結連線，流量對稱，沒有這個前提。

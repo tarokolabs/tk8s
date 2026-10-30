@@ -74,7 +74,7 @@ def ha_user() -> model.UserCluster:
 # resolved from the pool 192.168.1.64-70,192.168.1.80-89 (17 addresses) on the hosts' LAN
 # 192.168.1.0/24 (c reaches it by eth0, the others by ens18): router .64 floating, router-1 .65
 # (a), router-2 .66 (b), the operator's shim .67, control planes .68/.69/.70 on a/b/c, workers
-# .80/.81 on a/b, .82-.84 free for add node, LoadBalancer pool .85-.89, VIP 172.23.0.1.
+# .80/.81 on a/b, .82-.83 free for add node, mesh .84, LoadBalancer pool .85-.89, VIP 172.23.0.1.
 MULTI_YAML = """\
 apiVersion: taroko.io/v1alpha1
 kind: Cluster
@@ -101,6 +101,7 @@ spec:
       - a
       - b
     shim: 192.168.1.67
+    mesh: 192.168.1.84
   nodes:
     - role: control-plane
       name: demo-control-plane-1

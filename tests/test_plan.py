@@ -62,7 +62,8 @@ def test_resolve_fills_defaults_and_skips_a_used_index() -> None:
     assert n.pods == IPv4Network("10.244.8.0/21") and n.services == IPv4Network("10.98.1.0/24")
     assert n.gateway == IPv4Address("172.22.1.254") and n.router == IPv4Address("172.22.1.253")
     assert n.ha == "proxy"
-    assert n.lb_range == "172.22.1.200-172.22.1.219"
+    assert n.lb_range == "172.22.1.201-172.22.1.219"
+    assert n.mesh == IPv4Address("172.22.1.200")
     assert [x.name for x in c.spec.nodes] == [
         "demo-control-plane-1",
         "demo-worker-1",
@@ -386,19 +387,21 @@ def test_allocate_cuts_the_pool_in_the_fixed_order() -> None:
     assert a.router == ip(64) and a.routers == [ip(65), ip(66)] and a.shim == ip(67)
     assert a.nodes == [ip(68), ip(69), ip(70), ip(80), ip(81)]
     assert a.lb_range == "192.168.1.85-192.168.1.89"
-    assert a.free == [ip(82), ip(83), ip(84)]
+    assert a.mesh == ip(84)  # just before the LoadBalancer tail
+    assert a.free == [ip(82), ip(83)]
     one = allocate(pool, shim=False, routers=1, nodes=1)
     assert one.routers == [] and one.shim is None and one.nodes == [ip(65)]
-    tail = allocate(parse_range("192.168.1.64-70,192.168.1.80-82"), shim=False, routers=1, nodes=4)
+    tail = allocate(parse_range("192.168.1.64-70,192.168.1.80-82"), shim=False, routers=1, nodes=3)
+    assert tail.mesh == ip(68) and tail.free == []
     assert tail.lb_range == "192.168.1.69-192.168.1.70,192.168.1.80-192.168.1.82"  # the last 5
 
 
 def test_allocate_refuses_a_pool_too_small_with_the_count_it_needs() -> None:
     with pytest.raises(
         PlanError,
-        match=r"range 192.168.1.64-192.168.1.71 has 8 addresses; this cluster needs 14 "
+        match=r"range 192.168.1.64-192.168.1.71 has 8 addresses; this cluster needs 15 "
         r"\(1 router address, 2 router container addresses, 1 operator shim, 5 nodes, "
-        r"5 LoadBalancer addresses\)",
+        r"1 Cluster Mesh address, 5 LoadBalancer addresses\)",
     ):
         allocate(parse_range("192.168.1.64-71"), shim=True, routers=2, nodes=5)
 
@@ -577,3 +580,4 @@ def test_a_segment_may_be_a_single_address() -> None:
     full = "192.168.1.64-192.168.1.70,192.168.1.80-192.168.1.88,192.168.1.90"
     assert c.spec.network.range == full
     assert c.spec.network.lb_range == "192.168.1.85-192.168.1.88,192.168.1.90"
+    assert c.spec.network.mesh == ip(84)

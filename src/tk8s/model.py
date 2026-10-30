@@ -129,6 +129,9 @@ class Network(Strict):
     range: str | None = Field(default=None, pattern=RANGE)  # multi-host: the reserved pool
     router_hosts: list[str] | None = None  # multi-host: one host per router container
     shim: IPv4Address | None = None  # multi-host: the operator's shim, when it runs nodes too
+    # the LoadBalancer address reserved for the clustermesh-apiserver (its own LB-IPAM pool);
+    # None on a cluster created before Cluster Mesh support
+    mesh: IPv4Address | None = None
 
     @model_validator(mode="after")
     def _vip_follows_ha(self) -> Network:
@@ -200,6 +203,12 @@ class Status(Strict):
     # created before it keeps today's units and reports the host, and verify skips the check.
     node_capacity: bool = False
     operator: str | None = None  # multi-host: the hostname of the machine that manages it
+    # Cluster Mesh: cni records the cluster id (index + 1) and the Cilium version it installed;
+    # a cluster without them was created before mesh support and cannot connect. mesh lists
+    # the clusters this one is connected to.
+    cluster_id: int | None = None
+    cilium: str | None = None
+    mesh: list[str] = []
 
 
 class Cluster(Strict):
@@ -384,6 +393,8 @@ _Dumper.add_representer(
 def dumps(cluster: Cluster) -> str:
     data = cluster.model_dump(mode="json", exclude_none=True)
     data["spec"]["kubernetes"] = _Quoted(data["spec"]["kubernetes"])
+    if data.get("status", {}).get("mesh") == []:  # not connected: say nothing
+        del data["status"]["mesh"]
     return yaml.dump(data, Dumper=_Dumper, sort_keys=False, default_flow_style=False)
 
 

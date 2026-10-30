@@ -67,7 +67,7 @@ def test_cilium_install_argv_carries_every_setting(ctx: Context) -> None:
 
 def test_lb_pool_manifest_uses_the_cluster_range(ctx: Context) -> None:
     text = cni.lb_pool_manifest(ctx)
-    assert "start: 172.22.0.200\n    stop: 172.22.0.219" in text and "${LBNET}" not in text
+    assert "start: 172.22.0.201\n    stop: 172.22.0.219" in text and "${LBNET}" not in text
 
 
 def test_healthy_cilium_path(ctx: Context, host: FakeHost) -> None:
@@ -81,7 +81,7 @@ def test_healthy_cilium_path(ctx: Context, host: FakeHost) -> None:
     assert installs(host)[0][1] == "install"
     assert ["cilium", "status", "--wait", "--wait-duration", "5m"] in a
     pool = next(c for c in host.calls if c.argv == ["kubectl", "apply", "-f", "-"])
-    assert pool.input is not None and "start: 172.22.0.200" in pool.input
+    assert pool.input is not None and "start: 172.22.0.201" in pool.input
     assert [
         "kubectl",
         "wait",
@@ -91,7 +91,7 @@ def test_healthy_cilium_path(ctx: Context, host: FakeHost) -> None:
         "--timeout=120s",
     ] in a
     assert f"  cilium {ctx.versions.cilium} ok (install)" in host.lines
-    assert "  LB-IPAM pool 172.22.0.200-172.22.0.219" in host.lines
+    assert "  LB-IPAM pool 172.22.0.201-172.22.0.219" in host.lines
     saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
     assert saved.spec.datapath_resolved == "netkit"
     kube = [

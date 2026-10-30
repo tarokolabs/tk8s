@@ -32,6 +32,7 @@ spec:
       - a
       - b
     shim: 192.168.1.67
+    mesh: 192.168.1.84
   nodes:
     - role: control-plane
       name: multi-control-plane-1
@@ -117,6 +118,7 @@ spec:
       - a
       - b
     shim: 192.168.1.67
+    mesh: 192.168.1.84
   nodes:
     - role: control-plane
       name: multi-control-plane-1
@@ -202,6 +204,7 @@ spec:
       - a
       - b
     shim: 192.168.1.67
+    mesh: 192.168.1.84
   nodes:
     - role: control-plane
       name: multi-control-plane-1

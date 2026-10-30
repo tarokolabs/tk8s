@@ -319,7 +319,7 @@ def test_describe_bgp_cluster_router_section(bgp_ctx: Context, host: FakeHost) -
     bgp_router_answers(host, established=2, hops=2)
     lifecycle.describe(bgp_ctx, c, None)
     out = "\n".join(host.lines)
-    assert "lb-ipam 172.22.0.200-172.22.0.219  router 172.22.0.253  vip 172.23.0.1" in out
+    assert "lb-ipam 172.22.0.201-172.22.0.219  router 172.22.0.253  vip 172.23.0.1" in out
     i = host.lines.index("Router:")
     section = [line for line in host.lines[i + 1 :] if not line.startswith("  $ ")]  # no echoes
     assert section[:5] == [
