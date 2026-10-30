@@ -3,14 +3,14 @@ service with its local and remote backend counts (what a blue/green move is watc
 the entrypoints an external load balancer or DNS points at."""
 
 from . import model
-from .mesh import services
+from .mesh import checks, services
 from .phases import Context
 
 
 def describe_mesh(ctx: Context, c: model.Cluster, state: str) -> None:
     ctx.say("Mesh:")
     net = c.spec.network
-    if net.mesh is None:
+    if not checks.can_federate(c):
         ctx.say("  unavailable (created before mesh support; recreate to connect)")
         return
     peers = c.status.mesh if c.status is not None else []

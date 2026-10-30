@@ -2,7 +2,7 @@
 running, one created before mesh support, mixed single- and multi-host clusters, two clusters
 with one cluster id, Cilium versions more than a minor apart."""
 
-from .. import lifecycle
+from .. import lifecycle, model
 from ..phases import Context
 from . import MeshError
 
@@ -13,16 +13,27 @@ def minor(version: str) -> tuple[int, int]:
     return int(parts[0]), int(parts[1])
 
 
+def can_federate(c: model.Cluster) -> bool:
+    """Created with mesh support: cilium installed with a cluster id (recorded with its
+    version) and an address reserved for the clustermesh-apiserver. The one definition
+    preflight, describe and enable go by."""
+    return (
+        c.status is not None
+        and c.status.cluster_id is not None
+        and c.status.cilium is not None
+        and c.spec.network.mesh is not None
+    )
+
+
 def preflight(ctxs: list[Context]) -> None:
     first = ctxs[0].require_cluster()
     for ctx in ctxs:
         c = ctx.require_cluster()
         if c.status is None or lifecycle.state_of(ctx, c) != "Running":
             raise MeshError(f"cluster {c.name} is not running (tkctl start cluster {c.name})")
-        if c.status.cluster_id is None or c.status.cilium is None:
+        if not can_federate(c):
             raise MeshError(
-                f"cluster {c.name} was created before mesh support (no cluster id); "
-                "recreate it to connect"
+                f"cluster {c.name} was created before mesh support; recreate it to connect"
             )
         if c.multi_host != first.multi_host:
             single, multi = (first, c) if c.multi_host else (c, first)

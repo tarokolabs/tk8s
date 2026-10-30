@@ -66,19 +66,29 @@ def mesh_done(ctx: Context) -> bool:
 
 
 def mesh_run(ctx: Context) -> None:
-    """Disconnect from every peer that can be reached; a peer that is gone or stopped is
-    forgotten on this side only, with a warning (its record goes with its own disconnect)."""
+    """Disconnect from every peer that can be reached. The cluster being deleted is disposable:
+    when it is not running (often why it goes) the running peer forgets it on its own, and a
+    peer that is gone or stopped is forgotten on this side only, with a warning (its record
+    goes with its own disconnect)."""
     c = ctx.require_cluster()
     assert c.status is not None
+    running = lifecycle.state_of(ctx, c) == "Running"
     for peer in list(c.status.mesh):
         pc = mesh.peer_context(ctx, peer)
-        if pc is not None and lifecycle.state_of(pc, pc.require_cluster()) == "Running":
+        if pc is None or lifecycle.state_of(pc, pc.require_cluster()) != "Running":
+            mesh.forget_peer(ctx, peer)
+            ctx.say(
+                f"  warning: peer {peer} is not reachable; {peer} still lists {c.name} "
+                f"(tkctl disconnect cluster {peer} {c.name} there)"
+            )
+            continue
+        if running:
             mesh.disconnect(ctx, pc, peer)
             continue
+        mesh.forget_peer(pc, c.name)
         mesh.forget_peer(ctx, peer)
         ctx.say(
-            f"  warning: peer {peer} is not reachable; {peer} still lists {c.name} "
-            f"(tkctl disconnect cluster {peer} {c.name} there)"
+            f"  warning: {c.name} is not running; {peer} forgets it without a cilium disconnect"
         )
 
 

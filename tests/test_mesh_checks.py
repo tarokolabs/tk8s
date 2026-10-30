@@ -42,7 +42,7 @@ def test_preflight_refuses_a_cluster_from_before_mesh_support(tmp_path: Path) ->
     with_status(b, cluster_id=None)
     with pytest.raises(
         MeshError,
-        match=r"cluster other was created before mesh support \(no cluster id\); recreate it",
+        match=r"cluster other was created before mesh support; recreate it to connect",
     ):
         checks.preflight([a, b])
 
@@ -84,3 +84,18 @@ def test_preflight_allows_one_minor_of_cilium_skew_and_refuses_two(tmp_path: Pat
 
 def test_minor_parses_a_version() -> None:
     assert checks.minor("1.20.4") == (1, 20)
+
+
+def test_preflight_refuses_a_cluster_without_a_mesh_address(tmp_path: Path) -> None:
+    """A pre-feature cluster.yaml resumed through cni after the upgrade has a cluster id but no
+    reserved address and no mesh pool: one predicate decides, everywhere."""
+    a, _, b, _ = pair(tmp_path)
+    c = b.require_cluster()
+    net = c.spec.network.model_copy(update={"mesh": None})
+    b.cluster = c.model_copy(update={"spec": c.spec.model_copy(update={"network": net})})
+    with pytest.raises(
+        MeshError, match=r"cluster other was created before mesh support; recreate it to connect"
+    ):
+        checks.preflight([a, b])
+    assert not checks.can_federate(b.require_cluster())
+    assert checks.can_federate(a.require_cluster())

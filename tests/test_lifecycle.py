@@ -751,7 +751,7 @@ def mesh_on_disk(ctx: Context, host: FakeHost, **status: object) -> model.Cluste
 
 
 def test_describe_mesh_section_on_a_stopped_cluster(ctx: Context, host: FakeHost) -> None:
-    c = mesh_on_disk(ctx, host)
+    c = mesh_on_disk(ctx, host, cluster_id=1, cilium="1.20.4")
     lifecycle.describe(ctx, c, None)
     i = host.lines.index("Mesh:")
     assert host.lines[i + 1 : i + 7] == [
@@ -788,7 +788,7 @@ def test_describe_mesh_section_lists_global_services_and_entrypoints_when_runnin
 
 
 def test_describe_mesh_running_but_not_connected_says_so(ctx: Context, host: FakeHost) -> None:
-    c = mesh_on_disk(ctx, host)
+    c = mesh_on_disk(ctx, host, cluster_id=1, cilium="1.20.4")
     host.active.add("demo.target")
     host.responses[("kubectl", "get", "gateway", "-A", "-o")] = Result(0, "", "")
     host.responses[("kubectl", "get", "svc", "-A", "--field-selector")] = Result(0, "", "")

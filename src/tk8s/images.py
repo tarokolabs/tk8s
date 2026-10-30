@@ -226,8 +226,19 @@ def wanted(ctx: Context, k8s: str) -> list[str]:
     if kube.returncode != 0 or not kube.stdout.strip():
         raise ImagesError(f"kubeadm in {node_image(k8s)} listed no images: {kube.stderr.strip()}")
     chart = home / "manifests" / f"cilium-{v.cilium}"
+    # the chart renders the clustermesh-apiserver only when asked; connect needs its image
     cil = ctx.host.run(
-        ["cilium", "install", "--version", v.cilium, "--chart-directory", str(chart), "--dry-run"],
+        [
+            "cilium",
+            "install",
+            "--version",
+            v.cilium,
+            "--chart-directory",
+            str(chart),
+            "--set",
+            "clustermesh.useAPIServer=true",
+            "--dry-run",
+        ],
         env={"KUBECONFIG": "/nonexistent", "HOME": "/tmp"},
         capture=True,
         check=False,

@@ -53,14 +53,8 @@ def test_pod_ping_runs_a_short_lived_busybox_pod_with_the_cluster_kubeconfig(
     assert run.env == {"KUBECONFIG": str(a.state_dir / "kubeconfig")}
     assert run.argv[2] == "tk-mesh-probe-other"
     assert f"--image={a.versions.verify_busybox}" in run.argv
-    assert run.argv[-6:] == ["ping", "-c", "1", "-W", "3", "10.244.8.5"][-6:] or run.argv[-5:] == [
-        "ping",
-        "-c",
-        "1",
-        "-W",
-        "3",
-        "10.244.8.5",
-    ]
+    # busybox wget against coredns' ready plugin: no NET_RAW needed, unlike ping
+    assert run.argv[-5:] == ["wget", "-qO-", "-T", "3", "http://10.244.8.5:8181/ready"]
     assert [
         "kubectl",
         "delete",

@@ -1,7 +1,8 @@
 """Whether two clusters reach each other: a node of one pings a node of the other (the
-control-plane-1 containers), then a short-lived pod of one pings a pod of the other (coredns,
-which every cluster has). Both directions; the pod probe is retried, the routes Cilium installs
-for a new peer take a few seconds."""
+control-plane-1 containers), then a short-lived pod of one fetches the readiness endpoint of a
+pod of the other (coredns, which every cluster has, answers on 8181/ready). HTTP rather than
+ping: a pod has no NET_RAW. Both directions; the pod probe is retried, the routes Cilium
+installs for a new peer take a few seconds."""
 
 from .. import podman
 from ..create.kubeadm import kubectl
@@ -41,7 +42,7 @@ def peer_pod_ip(dst: Context) -> str:
 
 
 def pod_ping(src: Context, dst: Context) -> str | None:
-    """None when a busybox pod run in src pings a coredns pod of dst, else what failed."""
+    """None when a busybox pod run in src reaches a coredns pod of dst, else what failed."""
     ip = peer_pod_ip(dst)
     if not ip:
         return f"{_name(dst)}: no coredns pod with an IP to probe"
@@ -58,12 +59,11 @@ def pod_ping(src: Context, dst: Context) -> str | None:
         "--quiet",
         "--command",
         "--",
-        "ping",
-        "-c",
-        "1",
-        "-W",
+        "wget",
+        "-qO-",
+        "-T",
         "3",
-        ip,
+        f"http://{ip}:8181/ready",
     )
     kubectl(src, "delete", "pod", pod, "--ignore-not-found", "--wait=false")
     if r.returncode == 0:

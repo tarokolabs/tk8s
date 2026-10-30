@@ -381,3 +381,26 @@ def test_delete_with_a_missing_peer_warns_and_goes_on(ctx: Context, host: FakeHo
     ) in host.lines
     assert not any(x[:3] == ["cilium", "clustermesh", "disconnect"] for x in argvs(host))
     assert not host.exists(ctx.state_dir)
+
+
+def test_delete_of_a_stopped_cluster_forgets_itself_on_the_running_peer(
+    ctx: Context, host: FakeHost
+) -> None:
+    """The cluster being deleted may not answer (that is often why it goes): its own apiserver
+    never blocks the delete; the peer's secret is what gets cleaned."""
+    everything_there(ctx, host)
+    with_peer(ctx, host, present=True)
+    host.active.discard("demo.target")
+    host.responses[("kubectl", "-n", "kube-system", "get", "secret", "cilium-clustermesh")] = (
+        Result(0, '{"demo":"x","demo.etcd-client-ca.crt":"y","other":"z"}', "")
+    )
+    Runner([delete.PHASE], record=False).run(ctx)
+    assert not any(x[:3] == ["cilium", "clustermesh", "disconnect"] for x in argvs(host))
+    patches = [x for x in argvs(host) if x[:4] == ["kubectl", "-n", "kube-system", "patch"]]
+    assert any("/data/demo.etcd-client-ca.crt" in p[-1] for p in patches)  # other forgets demo
+    assert "  warning: demo is not running; other forgets it without a cilium disconnect" in (
+        host.lines
+    )
+    other = model.load_text(host.files[ctx.paths.state_dir("other") / "cluster.yaml"])
+    assert other.status is not None and other.status.mesh == []
+    assert not host.exists(ctx.state_dir)
