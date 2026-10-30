@@ -64,12 +64,18 @@ def test_connect_enables_connects_waits_probes_and_records(tmp_path: Path) -> No
         "--allow-mismatching-ca",
     ]
     assert con.env == {"KUBECONFIG": f"{a.state_dir}/kubeconfig:{b.state_dir}/kubeconfig"}
+    # status --wait after each enable (certgen has to issue the certificates connect reads)
+    # and again after connect, for the connections themselves
     status = [c for c in ha.calls if c.argv[:3] == ["cilium", "clustermesh", "status"]]
-    assert [c.argv[3:] for c in status] == [["--wait", "--wait-duration", "5m"]] * 2
+    assert [c.argv[3:] for c in status] == [["--wait", "--wait-duration", "5m"]] * 4
     assert [c.env["KUBECONFIG"] for c in status] == [
         f"{a.state_dir}/kubeconfig",
         f"{b.state_dir}/kubeconfig",
+        f"{a.state_dir}/kubeconfig",
+        f"{b.state_dir}/kubeconfig",
     ]
+    order = [c.argv[2] for c in ha.calls if c.argv[:2] == ["cilium", "clustermesh"]]
+    assert order == ["enable", "status", "enable", "status", "connect", "status", "status"]
     assert peers(ha, a) == ["other"] and peers(hb, b) == ["demo"]
     assert "  demo: peers other" in ha.lines and "  other: peers demo" in ha.lines
     assert ha.lines[-1] == "clusters demo, other connected"

@@ -124,6 +124,8 @@ def connect(ctxs: list[Context]) -> None:
             enable(ctx, op)
             at = ctx.require_cluster().spec.network.mesh
             op.say(f"  {_name(ctx)}: clustermesh-apiserver at {at}")
+        # the apiserver and the certificates connect reads (certgen's Job) have to be there
+        wait_status(ctx, op)
     first, rest = ctxs[0], ctxs[1:]
     r = op.host.run(
         [
