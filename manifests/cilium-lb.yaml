@@ -1,15 +1,6 @@
-# cilium 的 LoadBalancer IP 池與 L2 對外公告
-# LBNET 由 kto 以 envsubst 帶入（節點網段前三組，例如 172.22.0）
-# 池範圍 .200-.219 避開節點 IP（LCTN 慣例用低位）與閘道（.254）
-apiVersion: cilium.io/v2
-kind: CiliumLoadBalancerIPPool
-metadata:
-  name: default-pool
-spec:
-  blocks:
-  - start: ${LBNET}.200
-    stop: ${LBNET}.219
----
+# cilium 的 L2 對外公告：LoadBalancer IP 由節點在 LAN／bridge 上以 ARP 宣告。
+# 兩個 LB-IPAM 池（default-pool 給使用者的 Service、mesh-pool 只給 kube-system/clustermesh-apiserver）
+# 由 tkctl 依 cluster.yaml 的 lb_range 與 mesh 產生，接在這份檔案前面一起 apply。
 apiVersion: cilium.io/v2alpha1
 kind: CiliumL2AnnouncementPolicy
 metadata:

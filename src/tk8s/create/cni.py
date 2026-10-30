@@ -5,7 +5,9 @@ The Gateway API CRDs, the cilium chart and the cilium CLI are pinned in versions
 and the chart are vendored under manifests/, so nothing here fetches from helm.cilium.io."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
+
+import yaml
 
 from .. import hosts, images
 from ..phases import Context, Phase, PhaseFailed, wait_for
@@ -41,7 +43,11 @@ def cilium_install_argv(ctx: Context, action: str, datapath: Datapath) -> list[s
         "l2announcements.enabled=true",
         "routingMode=native",
         "autoDirectNodeRoutes=true",
-        f"ipv4NativeRoutingCIDR={c.spec.network.pods}",
+        # every index's pod /21: Cluster Mesh with native routing wants one CIDR over all clusters
+        "ipv4NativeRoutingCIDR=10.244.0.0/16",
+        # Cluster Mesh identity, fixed at install (changing it later restarts every workload)
+        f"cluster.name={c.name}",
+        f"cluster.id={c.spec.network.index + 1}",
         "bpf.masquerade=true",
         "bpf.lbExternalClusterIP=true",
         "gatewayAPI.enabled=true",
@@ -53,21 +59,66 @@ def cilium_install_argv(ctx: Context, action: str, datapath: Datapath) -> list[s
     return argv
 
 
+MESH_SERVICE = {
+    "io.kubernetes.service.namespace": "kube-system",
+    "io.kubernetes.service.name": "clustermesh-apiserver",
+}
+
+
+def _pool(
+    name: str, blocks: list[dict[str, str]], selector: dict[str, Any] | None
+) -> dict[str, Any]:
+    spec: dict[str, Any] = {"blocks": blocks}
+    if selector is not None:
+        spec["serviceSelector"] = selector
+    return {
+        "apiVersion": "cilium.io/v2",
+        "kind": "CiliumLoadBalancerIPPool",
+        "metadata": {"name": name},
+        "spec": spec,
+    }
+
+
 def lb_pool_manifest(ctx: Context) -> str:
-    """The pool's blocks: one A-B per segment of lb_range (a lone address is its own block)."""
-    text = (ctx.paths.home / "manifests" / "cilium-lb.yaml").read_text()
-    blocks = ""
-    for seg in ctx.require_cluster().spec.network.lb_range.split(","):
+    """The LB-IPAM pools, then the L2 policy from manifests/cilium-lb.yaml: default-pool holds
+    lb_range (one block per segment, a lone address its own block) for every Service but the
+    clustermesh-apiserver, mesh-pool holds that one address for it alone. A cluster from before
+    mesh support (no mesh address) keeps its single, unselective pool."""
+    net = ctx.require_cluster().spec.network
+    blocks = []
+    for seg in net.lb_range.split(","):
         start, _, stop = seg.partition("-")
-        blocks += f"  - start: {start}\n    stop: {stop or start}\n"
-    return text.replace("  - start: ${LBNET}.200\n    stop: ${LBNET}.219\n", blocks)
+        blocks.append({"start": start, "stop": stop or start})
+    pools: list[dict[str, Any]]
+    if net.mesh is None:
+        pools = [_pool("default-pool", blocks, None)]
+    else:
+        name = MESH_SERVICE["io.kubernetes.service.name"]
+        keep_out = {
+            "matchExpressions": [
+                {"key": "io.kubernetes.service.name", "operator": "NotIn", "values": [name]}
+            ]
+        }
+        only_mesh = {"matchLabels": dict(MESH_SERVICE)}
+        pools = [
+            _pool("default-pool", blocks, keep_out),
+            _pool("mesh-pool", [{"start": str(net.mesh), "stop": str(net.mesh)}], only_mesh),
+        ]
+    l2 = (ctx.paths.home / "manifests" / "cilium-lb.yaml").read_text()
+    return yaml.safe_dump_all(pools, sort_keys=False, explicit_start=True) + "---\n" + l2
 
 
-def record_datapath(ctx: Context, datapath: Datapath) -> None:
-    """cni records the datapath it resolved; a resume must not lose it when rewriting the file."""
+def record_cni(ctx: Context, datapath: Datapath) -> None:
+    """cni records the datapath it resolved and, for Cluster Mesh, the cluster id and the Cilium
+    version it installed; a resume must not lose them when rewriting the file."""
     c = ctx.require_cluster()
     spec = c.spec.model_copy(update={"datapath_resolved": datapath})
-    ctx.save_cluster(c.model_copy(update={"spec": spec}))
+    status = c.status
+    if status is not None:
+        status = status.model_copy(
+            update={"cluster_id": c.spec.network.index + 1, "cilium": ctx.versions.cilium}
+        )
+    ctx.save_cluster(c.model_copy(update={"spec": spec, "status": status}))
 
 
 def _kubectl(ctx: Context, *args: str, input: str | None = None, check: bool = True) -> int:
@@ -145,7 +196,7 @@ def install_cilium(ctx: Context) -> None:
             "(kubectl describe gatewayclass cilium)"
         )
     ctx.say("  GatewayClass cilium accepted")
-    record_datapath(ctx, datapath)
+    record_cni(ctx, datapath)
 
 
 INSTALL = Phase(

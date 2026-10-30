@@ -1,4 +1,5 @@
 import pytest
+import yaml
 
 from tk8s import model
 from tk8s.create import cni
@@ -57,7 +58,8 @@ def test_cilium_install_argv_carries_every_setting(ctx: Context) -> None:
         "--set k8sServicePort=6443",
         "--set l2announcements.enabled=true",
         "--set routingMode=native --set autoDirectNodeRoutes=true "
-        "--set ipv4NativeRoutingCIDR=10.244.0.0/21",
+        "--set ipv4NativeRoutingCIDR=10.244.0.0/16",
+        "--set cluster.name=demo --set cluster.id=1",
         "--set bpf.masquerade=true",
         "--set bpf.lbExternalClusterIP=true",
         "--set gatewayAPI.enabled=true --set gatewayAPI.externalTrafficPolicy=Local",
@@ -65,9 +67,54 @@ def test_cilium_install_argv_carries_every_setting(ctx: Context) -> None:
         assert s in joined, s
 
 
-def test_lb_pool_manifest_uses_the_cluster_range(ctx: Context) -> None:
-    text = cni.lb_pool_manifest(ctx)
-    assert "start: 172.22.0.201\n    stop: 172.22.0.219" in text and "${LBNET}" not in text
+def test_lb_pool_manifest_has_a_pool_for_the_mesh_and_keeps_it_out_of_the_default_pool(
+    ctx: Context,
+) -> None:
+    docs = list(yaml.safe_load_all(cni.lb_pool_manifest(ctx)))
+    pools = {d["metadata"]["name"]: d for d in docs if d["kind"] == "CiliumLoadBalancerIPPool"}
+    assert pools["default-pool"]["spec"]["blocks"] == [
+        {"start": "172.22.0.201", "stop": "172.22.0.219"}
+    ]
+    expr = pools["default-pool"]["spec"]["serviceSelector"]["matchExpressions"]
+    assert expr == [
+        {
+            "key": "io.kubernetes.service.name",
+            "operator": "NotIn",
+            "values": ["clustermesh-apiserver"],
+        }
+    ]
+    assert pools["mesh-pool"]["spec"]["blocks"] == [
+        {"start": "172.22.0.200", "stop": "172.22.0.200"}
+    ]
+    assert pools["mesh-pool"]["spec"]["serviceSelector"]["matchLabels"] == {
+        "io.kubernetes.service.namespace": "kube-system",
+        "io.kubernetes.service.name": "clustermesh-apiserver",
+    }
+    assert [d["kind"] for d in docs] == [
+        "CiliumLoadBalancerIPPool",
+        "CiliumLoadBalancerIPPool",
+        "CiliumL2AnnouncementPolicy",
+    ]
+
+
+def test_lb_pool_manifest_without_a_mesh_address_is_the_old_single_pool(ctx: Context) -> None:
+    c = ctx.require_cluster()
+    net = c.spec.network.model_copy(
+        update={"mesh": None, "lb_range": "172.22.0.200-172.22.0.219"}
+    )
+    ctx.cluster = c.model_copy(update={"spec": c.spec.model_copy(update={"network": net})})
+    docs = list(yaml.safe_load_all(cni.lb_pool_manifest(ctx)))
+    pools = [d for d in docs if d["kind"] == "CiliumLoadBalancerIPPool"]
+    assert len(pools) == 1 and "serviceSelector" not in pools[0]["spec"]
+    assert pools[0]["spec"]["blocks"] == [{"start": "172.22.0.200", "stop": "172.22.0.219"}]
+
+
+def test_record_cni_writes_cluster_id_and_cilium_version(ctx: Context, host: FakeHost) -> None:
+    cni.record_cni(ctx, "veth")
+    c = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
+    assert c.spec.datapath_resolved == "veth"
+    assert c.status is not None and c.status.cluster_id == 1
+    assert c.status.cilium == ctx.versions.cilium
 
 
 def test_healthy_cilium_path(ctx: Context, host: FakeHost) -> None:
