@@ -400,7 +400,7 @@ def test_verify_cluster_verb(
     rc, out = run(capsys, "verify", "cluster", "--list-phases")
     first, second = out.splitlines()[:2]
     assert rc == 0 and first.startswith("hosts") and second.startswith("nodes")
-    assert "tcproute" in out
+    assert "tcproute" in out and "mesh" in out
 
 
 def test_stdout_is_line_buffered_so_redirected_logs_show_each_step(

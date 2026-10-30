@@ -10,6 +10,7 @@ from ..phases import Context, Phase, PhaseFailed
 from .gateway import check_gateway, check_gatewayclass, check_httproute, check_tcproute, check_xff
 from .ha import check_router
 from .hosts import check_hosts
+from .mesh import check_mesh
 from .platform import (
     check_cilium,
     check_kube_system,
@@ -33,6 +34,7 @@ CHECKS = [
     ("kube-system", "every kube-system pod Running", check_kube_system),
     ("cilium", "cilium status", check_cilium),
     ("cilium-operator", "cilium-operator without restarts and with Gateway API on", check_operator),
+    ("mesh", "every mesh peer connected and its pods reachable", check_mesh),
     ("metrics", "kubectl top nodes", check_metrics),
     ("storage", "a PVC bound and written, data under the state dir", check_storage),
     ("runtimeclass-crun", "a pod under RuntimeClass crun", check_runtimeclass_crun),
@@ -59,6 +61,7 @@ SECTIONS = {
     "nodes": "nodes",
     "kubelet": "kubelet",
     "kube-system": "system",
+    "mesh": "mesh",
     "metrics": "metrics-server",
     "storage": "local-path",
     "runtimeclass-crun": "runtimeclass",
