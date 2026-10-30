@@ -46,7 +46,7 @@ def test_default_dry_run(capsys: pytest.CaptureFixture[str], data_dir: Path) -> 
     assert "cpu: 2\n" in out and "memory: 4g" in out
     assert "# ---- /etc/containers/systemd/tk8s/tk8s.network" in out
     assert "# ---- /etc/containers/systemd/tk8s/tk8s-worker-2.container" in out
-    assert "kubernetesVersion: 1.37.1" in out
+    assert "kubernetesVersion: 1.37.2" in out
     assert "[plan] " in out and "[units] " in out and "[kubeadm/render] " in out
     assert "[images]" not in out and "[preflight]" not in out  # dry-run never touches the host
     assert not (data_dir / "clusters" / "tk8s").exists()
@@ -67,11 +67,11 @@ def test_flags(capsys: pytest.CaptureFixture[str]) -> None:
         "--memory",
         "8G",
         "--k8s",
-        "1.36.5",
+        "1.36.6",
         "--dry-run",
     )
     assert rc == 0 and "name: demo-control-plane-3" in out and "name: demo-worker-4" in out
-    assert 'kubernetes: "1.36.5"' in out and "router: 172.22." in out
+    assert 'kubernetes: "1.36.6"' in out and "router: 172.22." in out
     rc, out = run(
         capsys, "create", "cluster", "demo", "--control-planes", "3", "--defer-join", "--dry-run"
     )
@@ -157,7 +157,7 @@ def test_bad_invocations_fail_with_the_old_messages(
 
 TAKEN = (
     "apiVersion: taroko.io/v1alpha1\nkind: Cluster\nmetadata: {name: taken}\n"
-    'spec:\n  kubernetes: "1.37.1"\n  cni: cilium\n  datapath: auto\n  gvisor: false\n'
+    'spec:\n  kubernetes: "1.37.2"\n  cni: cilium\n  datapath: auto\n  gvisor: false\n'
     "  network: {index: 0, nodes: 172.22.0.0/24, gateway: 172.22.0.254, router: 172.22.0.253, "
     "lb_range: 172.22.0.200-172.22.0.219, pods: 10.244.0.0/21, services: 10.98.0.0/24}\n"
     "  nodes: [{role: control-plane, name: taken-control-plane-1, ip: 172.22.0.1, cpu: 2, "
@@ -217,9 +217,9 @@ def test_file_input(capsys: pytest.CaptureFixture[str], data_dir: Path) -> None:
     rc, out = run(capsys, "create", "cluster", "-f", str(data_dir / "missing.yaml"), "--dry-run")
     assert rc == 1 and "file not found" in out
     rc, out = run(
-        capsys, "create", "cluster", "-f", str(f), "--k8s", "1.36.5", "--gvisor", "--dry-run"
+        capsys, "create", "cluster", "-f", str(f), "--k8s", "1.36.6", "--gvisor", "--dry-run"
     )
-    assert 'kubernetes: "1.36.5"' in out and "gvisor: true" in out and "datapath: veth" in out
+    assert 'kubernetes: "1.36.6"' in out and "gvisor: true" in out and "datapath: veth" in out
 
 
 def test_phase_flags(capsys: pytest.CaptureFixture[str]) -> None:
@@ -248,7 +248,7 @@ def test_help_and_version(capsys: pytest.CaptureFixture[str]) -> None:
         assert s in out, s
     assert "kube-vip" not in out
     rc, out = run(capsys, "version")
-    assert rc == 0 and "kubernetes default 1.37.1" in out
+    assert rc == 0 and "kubernetes default 1.37.2" in out
 
 
 def test_plugins_follow_kubectl_rules(

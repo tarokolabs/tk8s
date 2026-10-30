@@ -10,7 +10,7 @@ from tk8s.create import images as images_phase
 from tk8s.host import FakeHost, Result
 from tk8s.phases import Context, Runner
 
-K8S = "1.37.1"
+K8S = "1.37.2"
 NODE = f"ghcr.io/tarokolabs/tk8s/node:v{K8S}"
 KUBEADM_LIST = (
     f"registry.k8s.io/kube-apiserver:v{K8S}\nregistry.k8s.io/kube-controller-manager:v{K8S}\n"
@@ -19,8 +19,8 @@ KUBEADM_LIST = (
     "registry.k8s.io/etcd:3.7.0-0\n"
 )
 CILIUM_DRY = (
-    '      image: "quay.io/cilium/cilium:v1.20.2@sha256:aaaa"\n'
-    '      image: "quay.io/cilium/operator-generic:v1.20.2@sha256:bbbb"\n'
+    '      image: "quay.io/cilium/cilium:v1.20.4@sha256:aaaa"\n'
+    '      image: "quay.io/cilium/operator-generic:v1.20.4@sha256:bbbb"\n'
     '      image: "quay.io/cilium/cilium-envoy:v1.37.6-1@sha256:cccc"\n'
 )
 MISSING = Result(1, "", "")
@@ -51,8 +51,8 @@ def test_wanted_is_derived_sorted_and_unique(ctx: Context, host: FakeHost) -> No
     w = images.wanted(ctx, K8S)
     assert w == sorted(set(w)) and len(w) == 15
     assert f"registry.k8s.io/kube-apiserver:v{K8S}" in w
-    assert "quay.io/cilium/cilium:v1.20.2@sha256:aaaa" in w
-    assert "registry.k8s.io/metrics-server/metrics-server:v0.9.0" in w
+    assert "quay.io/cilium/cilium:v1.20.4@sha256:aaaa" in w
+    assert "registry.k8s.io/metrics-server/metrics-server:v0.9.1" in w
     assert "docker.io/rancher/local-path-provisioner:v0.0.37" in w
     assert "haproxy" not in " ".join(w) and ctx.versions.verify_alpine in w
     kube = next(c for c in host.calls if c.argv[:2] == ["podman", "run"])

@@ -81,7 +81,7 @@ kind: Cluster
 metadata:
   name: demo
 spec:
-  kubernetes: "1.37.1"
+  kubernetes: "1.37.2"
   cni: cilium
   datapath: auto
   gvisor: false
@@ -426,7 +426,7 @@ def ready_host(
     r[("curl", "-sk", "--max-time", "3")] = Result(0, "ok", "")  # the LB answers /readyz
     r[("kubectl", "get", "node")] = Result(0, "x Ready", "")
     r[("kubectl", "get", "nodes", "--no-headers")] = Result(
-        0, "".join(f"{n.name} Ready <none> 1m v1.37.1\n" for n in c.spec.nodes), ""
+        0, "".join(f"{n.name} Ready <none> 1m v1.37.2\n" for n in c.spec.nodes), ""
     )
     r[("kubectl", "-n", "kube-system", "get", "ds", "cilium")] = Result(0, "cilium", "")
     r[("kubectl", "get", "ciliumloadbalancerippool")] = Result(0, "default-pool", "")

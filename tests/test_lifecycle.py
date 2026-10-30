@@ -61,7 +61,7 @@ def test_list_shows_every_cluster_and_its_state(ctx: Context, host: FakeHost) ->
     out = "\n".join(host.lines)
     header = ["NAME", "NODES", "K8S", "DATAPATH", "STATE", "HOSTS", "SUBNET"]
     assert out.splitlines()[0].split() == header
-    assert "demo         1+2     1.37.1   auto      Creating  -      172.22.0.0/24" in out
+    assert "demo         1+2     1.37.2   auto      Creating  -      172.22.0.0/24" in out
     assert "broken       " in out and "cluster.yaml" in out  # an unreadable file hides nothing
 
 
@@ -88,7 +88,7 @@ def test_describe_sections(ctx: Context, host: FakeHost) -> None:
     for s in (
         "Name:        demo",
         "State:       Creating",
-        "Kubernetes:  1.37.1   cni: cilium   datapath: auto   gvisor: false",
+        "Kubernetes:  1.37.2   cni: cilium   datapath: auto   gvisor: false",
         "router 172.22.0.253",
         "Nodes:",
         "  demo-worker-1 ",
@@ -128,7 +128,7 @@ def test_describe_running_cluster_asks_kubectl_with_the_cluster_kubeconfig(
     host.active.add("demo.target")
     r = host.responses
     r[("kubectl", "--request-timeout=5s", "-n", "kube-system", "get", "deploy")] = Result(
-        0, "registry.k8s.io/metrics-server/metrics-server:v0.9.0", ""
+        0, "registry.k8s.io/metrics-server/metrics-server:v0.9.1", ""
     )
     r[("kubectl", "--request-timeout=5s", "-n", "local-path-storage")] = Result(1, "", "nope")
     r[("kubectl", "--request-timeout=5s", "get", "runtimeclass")] = Result(1, "", "nope")
@@ -138,7 +138,7 @@ def test_describe_running_cluster_asks_kubectl_with_the_cluster_kubeconfig(
     lifecycle.describe(ctx, c, None)
     out = "\n".join(host.lines)
     assert "State:       Running" in out
-    assert "  metrics-server  v0.9.0" in out and "  local-path      not installed" in out
+    assert "  metrics-server  v0.9.1" in out and "  local-path      not installed" in out
     assert "  runtimeclass    none" in out and "Paths:" in out  # a failing kubectl never aborts
     assert "ip route add 172.22.0.0/24 via 192.168.1.230" in out
     kube = [k for k in host.calls if k.argv[0] == "kubectl"]
@@ -191,8 +191,8 @@ def test_start_waits_for_fresh_ready_heartbeats(ctx: Context, host: FakeHost) ->
     host.responses[("kubectl", "get", "nodes", "-o")] = [Result(0, stale, ""), Result(0, fresh, "")]
     host.responses[("kubectl", "get", "nodes", "--no-headers")] = Result(
         0,
-        "demo-control-plane-1 Ready control-plane 1d v1.37.1\n"
-        "demo-worker-1 Ready <none> 1d v1.37.1\n",
+        "demo-control-plane-1 Ready control-plane 1d v1.37.2\n"
+        "demo-worker-1 Ready <none> 1d v1.37.2\n",
         "",
     )
     units.run(ctx)  # a created cluster has its node files on the host
@@ -552,18 +552,18 @@ def test_get_clusters_shows_the_host_count_and_managed_from(
     out = "\n".join(hosts["a"].lines)
     header = out.splitlines()[0].split()
     assert header == ["NAME", "NODES", "K8S", "DATAPATH", "STATE", "HOSTS", "SUBNET"]
-    assert "demo         3+2     1.37.1   auto      Creating  3      192.168.1.0/24" in out
+    assert "demo         3+2     1.37.2   auto      Creating  3      192.168.1.0/24" in out
     hosts["a"].responses[("hostname",)] = Result(0, "pve-b\n", "")
     hosts["a"].lines.clear()
     lifecycle.list_clusters(ctx)
     out = "\n".join(hosts["a"].lines)
-    assert "demo         3+2     1.37.1   auto      managed   3      192.168.1.0/24 from op" in out
+    assert "demo         3+2     1.37.2   auto      managed   3      192.168.1.0/24 from op" in out
 
 
 def test_single_host_list_prints_a_dash_for_hosts(ctx: Context, host: FakeHost) -> None:
     on_disk(ctx, host)
     lifecycle.list_clusters(ctx)
-    assert "demo         1+2     1.37.1   auto      Creating  -      172.22.0.0/24" in "\n".join(
+    assert "demo         1+2     1.37.2   auto      Creating  -      172.22.0.0/24" in "\n".join(
         host.lines
     )
 
@@ -664,7 +664,7 @@ def test_get_clusters_judges_a_multi_host_cluster_by_every_host(
     ctx.cluster = None  # get clusters starts from nothing: every row is its own cluster
     hosts["b"].active.add("demo.target")  # the operator's own target is down
     lifecycle.list_clusters(ctx)
-    assert "demo         3+2     1.37.1   auto      Degraded  3      192.168.1.0/24" in "\n".join(
+    assert "demo         3+2     1.37.2   auto      Degraded  3      192.168.1.0/24" in "\n".join(
         hosts["a"].lines
     )
 

@@ -127,7 +127,7 @@ def test_configure_names_the_refresh_when_the_node_image_has_no_frr(
     with pytest.raises(
         PhaseFailed,
         match=r"demo-control-plane-1 has no FRR: its node image predates bgp mode; "
-        r"run tkctl pull images --refresh --k8s 1\.37\.1 and create the cluster again",
+        r"run tkctl pull images --refresh --k8s 1\.37\.2 and create the cluster again",
     ):
         frr.configure(bgp_ctx, n)
     assert not any(c.argv[3:4] == ["sed"] for c in host.calls)

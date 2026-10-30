@@ -12,7 +12,7 @@ kind: Cluster
 metadata:
   name: demo
 spec:
-  kubernetes: "1.37.1"
+  kubernetes: "1.37.2"
   cni: cilium
   datapath: auto
   gvisor: false
@@ -49,7 +49,7 @@ def test_round_trip_keeps_the_exact_text(tmp_path: Path) -> None:
     assert c.name == "demo" and c.domain == "demo.k8s"
     assert c.first_control_plane.name == "demo-control-plane-1" and len(c.workers) == 1
     assert c.spec.network.pods == IPv4Network("10.244.24.0/21")
-    assert c.node_image == "ghcr.io/tarokolabs/tk8s/node:v1.37.1"
+    assert c.node_image == "ghcr.io/tarokolabs/tk8s/node:v1.37.2"
     assert model.dumps(c) == GOOD  # quoted version, indented lists, key order
 
 
@@ -234,5 +234,5 @@ def test_a_node_host_on_a_single_host_cluster_is_refused() -> None:
 
 
 def test_peek_text_reads_index_and_version_from_any_text() -> None:
-    assert model.peek_text("spec: {network: {index: 3}, kubernetes: '1.37.1'}") == (3, "1.37.1")
+    assert model.peek_text("spec: {network: {index: 3}, kubernetes: '1.37.2'}") == (3, "1.37.2")
     assert model.peek_text("garbage: [") == (None, None)

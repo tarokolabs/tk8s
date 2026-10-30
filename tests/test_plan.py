@@ -31,7 +31,7 @@ from tk8s.create.plan import (
 from tk8s.hosts import LanFacts
 from tk8s.paths import Paths
 
-K8S = "1.37.1"
+K8S = "1.37.2"
 HOME = Path(__file__).resolve().parents[1]
 
 
@@ -548,7 +548,7 @@ def test_used_indices_on_a_remote_host_read_its_copies(tmp_path: Path) -> None:
     h.dirs.update({paths.clusters_dir / "demo", paths.clusters_dir / "other"})
     h.files[paths.clusters_dir / "demo" / "cluster.yaml"] = MULTI_YAML
     h.files[paths.clusters_dir / "other" / "cluster.yaml"] = (
-        "spec:\n  network:\n    index: 4\n  kubernetes: '1.37.1'\n"
+        "spec:\n  network:\n    index: 4\n  kubernetes: '1.37.2'\n"
     )
     assert used_indices_on(h, paths) == {0, 4}
     assert used_indices_on(FakeHost(), paths) == set()
