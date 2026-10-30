@@ -226,8 +226,22 @@ def wanted(ctx: Context, k8s: str) -> list[str]:
     if kube.returncode != 0 or not kube.stdout.strip():
         raise ImagesError(f"kubeadm in {node_image(k8s)} listed no images: {kube.stderr.strip()}")
     chart = home / "manifests" / f"cilium-{v.cilium}"
+    # the chart renders the clustermesh-apiserver only when asked, and cilium clustermesh
+    # enable has certgen (a Job) issue its certificates: connect needs both images
     cil = ctx.host.run(
-        ["cilium", "install", "--version", v.cilium, "--chart-directory", str(chart), "--dry-run"],
+        [
+            "cilium",
+            "install",
+            "--version",
+            v.cilium,
+            "--chart-directory",
+            str(chart),
+            "--set",
+            "clustermesh.useAPIServer=true",
+            "--set",
+            "clustermesh.apiserver.tls.auto.method=cronJob",
+            "--dry-run",
+        ],
         env={"KUBECONFIG": "/nonexistent", "HOME": "/tmp"},
         capture=True,
         check=False,

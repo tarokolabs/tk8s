@@ -10,10 +10,11 @@ cluster.yaml only this host is known, and only this host is cleaned."""
 from collections.abc import Callable
 from pathlib import Path
 
-from . import kubeconfig, podman
+from . import kubeconfig, lifecycle, podman
 from .create.units import shim_name
 from .host import Host
 from .lifecycle import ClusterError
+from .mesh import ops as mesh
 from .phases import Context, Phase, confirm
 from .podman import node_volumes
 
@@ -54,6 +55,44 @@ def found(ctx: Context) -> bool:
         or podman.exists(ctx.on(h), "network", name)
         for _, h in targets(ctx)
     )
+
+
+# ---- mesh: leave the Cluster Mesh before anything is stopped
+
+
+def mesh_done(ctx: Context) -> bool:
+    c = ctx.cluster
+    return c is None or c.status is None or c.status.mesh == []
+
+
+def mesh_run(ctx: Context) -> None:
+    """Disconnect from every peer that can be reached. The cluster being deleted is disposable:
+    when it is not running (often why it goes) the running peer forgets it on its own, and a
+    peer that is gone or stopped is forgotten on this side only, with a warning (its record
+    goes with its own disconnect)."""
+    c = ctx.require_cluster()
+    assert c.status is not None
+    running = lifecycle.state_of(ctx, c) == "Running"
+    for peer in list(c.status.mesh):
+        pc = mesh.peer_context(ctx, peer)
+        if pc is None or lifecycle.state_of(pc, pc.require_cluster()) != "Running":
+            mesh.forget_peer(ctx, peer)
+            ctx.say(
+                f"  warning: peer {peer} is not reachable; {peer} still lists {c.name} "
+                f"(tkctl disconnect cluster {peer} {c.name} there)"
+            )
+            continue
+        if running:
+            mesh.disconnect(ctx, pc, peer)
+            continue
+        mesh.forget_peer(pc, c.name)
+        mesh.forget_peer(ctx, peer)
+        ctx.say(
+            f"  warning: {c.name} is not running; {peer} forgets it without a cilium disconnect"
+        )
+
+
+MESH = Phase("mesh", "disconnect from every peer of the mesh", mesh_done, mesh_run)
 
 
 def confirm_delete(ctx: Context) -> None:
@@ -251,7 +290,13 @@ def subnets(ctx: Context) -> list[str]:
     if ctx.cluster is None:
         return []
     net = ctx.cluster.spec.network
-    return [str(net.pods), str(net.services)]
+    first = ctx.cluster.first_control_plane.name  # its /24 has no route of its own
+    nodes = [
+        str(n.pod_cidr)
+        for n in ctx.cluster.spec.nodes
+        if n.pod_cidr is not None and n.name != first
+    ]
+    return [str(net.pods), str(net.services), *nodes]
 
 
 def route_present(ctx: Context, subnet: str) -> bool:
@@ -347,5 +392,5 @@ PHASE = Phase(
     "delete the cluster",
     None,
     lambda ctx: None,
-    children=(STOP, CONTAINERS, VOLUMES, UNITS, NETWORK, ROUTES, STATE, KUBECONFIG),
+    children=(MESH, STOP, CONTAINERS, VOLUMES, UNITS, NETWORK, ROUTES, STATE, KUBECONFIG),
 )

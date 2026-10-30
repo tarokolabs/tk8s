@@ -198,6 +198,8 @@ def render(
             cp_ip=cp.ip,
             pods=net.pods,
             services=net.services,
+            node_routes=node_routes(c, "ExecStart=ip route replace", ""),
+            node_routes_stop=node_routes(c, "ExecStop=-ip route del", ""),
             vip_start=""
             if net.vip is None
             else f"\nExecStart=ip route replace {net.vip}/32 via {net.router}",
@@ -206,6 +208,41 @@ def render(
             else f"\nExecStop=-ip route del {net.vip}/32 via {net.router}",
         )
     return files
+
+
+def node_routes(c: model.Cluster, verb: str, dev: str) -> str:
+    """One route per node that has its pod /24 and is not the first control plane (the /21
+    through it covers its own pods): the host reaches a worker's pods straight, not through
+    control-plane-1, whose BPF host routing does not forward TCP to another node."""
+    first = c.first_control_plane.name
+    return "".join(
+        f"\n{verb} {n.pod_cidr} via {n.ip}{dev}"
+        for n in c.spec.nodes
+        if n.pod_cidr is not None and n.name != first
+    )
+
+
+def routes_current(ctx: Context, cluster: model.Cluster | None = None) -> bool:
+    """The routes unit on the host that has one holds exactly what cluster.yaml renders."""
+    c = cluster or ctx.require_cluster()
+    path = ctx.paths.systemd_dir / f"{c.name}-routes.service"
+    for hf in per_host(ctx, c):
+        if path in hf.files and hf.host.read(path, sudo=needs_sudo(ctx, path)) != hf.files[path]:
+            return False
+    return True
+
+
+def write_routes(ctx: Context, cluster: model.Cluster | None = None) -> None:
+    """The routes unit rendered again (the pod CIDRs changed) on the host that has one, then
+    reloaded and restarted so the routes follow."""
+    c = cluster or ctx.require_cluster()
+    path = ctx.paths.systemd_dir / f"{c.name}-routes.service"
+    for hf in per_host(ctx, c):
+        if path not in hf.files:
+            continue
+        hf.host.write(path, hf.files[path], sudo=needs_sudo(ctx, path))
+        hf.host.run(["systemctl", "daemon-reload"], sudo=True)
+        hf.host.run(["systemctl", "restart", path.name], sudo=True)
 
 
 def render_routes_macvlan(ctx: Context, c: model.Cluster, me: model.Host) -> str:
@@ -228,6 +265,8 @@ def render_routes_macvlan(ctx: Context, c: model.Cluster, me: model.Host) -> str
         cp_ip=cp.ip,
         pods=net.pods,
         services=net.services,
+        node_routes=node_routes(c, "ExecStart=ip route replace", f" dev {shim}"),
+        node_routes_stop=node_routes(c, "ExecStop=-ip route del", f" dev {shim}"),
         vip_start=""
         if net.vip is None
         else f"\nExecStart=ip route replace {net.vip}/32 via {net.router} dev {shim}",

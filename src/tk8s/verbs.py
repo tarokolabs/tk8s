@@ -19,6 +19,7 @@ from .args import (
 from .create import DRY_RUN_PHASES, PHASES
 from .create.plan import load_existing, parse_range, resolve, used_indices, used_indices_on
 from .host import DryRunHost, Host
+from .mesh import ops as mesh
 from .node import add as node_add
 from .node import common as node_common
 from .node import delete as node_delete
@@ -160,6 +161,40 @@ def cmd_cluster(verb: str, a: argparse.Namespace) -> int:
         lifecycle.start(ctx, c)
     else:
         lifecycle.use(ctx, c)
+    return 0
+
+
+# ---- connect / disconnect cluster
+
+
+def cmd_connect(a: argparse.Namespace) -> int:
+    names = list(a.names)
+    if len(names) < 2:
+        raise UsageError("usage: tkctl connect cluster A B [C...]")
+    for n in names:
+        validate_name(n)
+        if names.count(n) > 1:
+            raise UsageError(f"cluster {n} is listed twice")
+    mesh.connect(mesh.members(lambda n: cluster_context(n, "connect"), names))
+    return 0
+
+
+def cmd_disconnect(a: argparse.Namespace) -> int:
+    if not a.a or not a.b:
+        raise UsageError("usage: tkctl disconnect cluster A B")
+    validate_name(a.a)
+    validate_name(a.b)
+    if a.a == a.b:
+        raise UsageError(f"cluster {a.a} is listed twice")
+    ctx = cluster_context(a.a, "disconnect")
+    try:
+        peer: Context | None = cluster_context(a.b, "disconnect")
+    except lifecycle.ClusterNotFound:
+        peer = None  # gone: its side cannot be told, ours forgets it
+    c = ctx.require_cluster()
+    if c.status is None or a.b not in c.status.mesh:
+        raise UsageError(f"clusters {a.a} and {a.b} are not connected (tkctl get clusters)")
+    mesh.disconnect(ctx, peer, a.b)
     return 0
 
 

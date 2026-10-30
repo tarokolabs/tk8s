@@ -4,7 +4,7 @@ import pytest
 
 from tests.fixtures import argvs, make_ctx, two_router_user
 from tests.test_kubeconfig import ADMIN as KUBEADM_ADMIN
-from tk8s import delete, kubeconfig, lifecycle, podman
+from tk8s import delete, kubeconfig, lifecycle, model, podman
 from tk8s.host import FakeHost, HostError, Result
 from tk8s.phases import Context, PhaseFailed, Runner
 
@@ -31,7 +31,17 @@ def test_a_full_delete_removes_everything_in_order(ctx: Context, host: FakeHost)
     everything_there(ctx, host)
     Runner([delete.PHASE], record=False).run(ctx)
     phases = [line.split("]")[0][1:] for line in host.lines if line.startswith("[")]
-    names = ("stop", "containers", "volumes", "units", "network", "routes", "state", "kubeconfig")
+    names = (
+        "mesh",
+        "stop",
+        "containers",
+        "volumes",
+        "units",
+        "network",
+        "routes",
+        "state",
+        "kubeconfig",
+    )
     assert phases == [f"delete/{p}" for p in names]
     a = argvs(host)
     assert ["systemctl", "disable", "--now", "demo.target"] in a
@@ -322,3 +332,88 @@ def test_delete_multi_host_removes_the_operators_state_last(
     state = lines.index("[delete/state] remove the state directory, PVC data included")
     visited = [ln.strip() for ln in lines[state + 1 :] if ln.startswith("  host ")]
     assert visited == ["host b:", "host c:", "host a:"]  # cluster.yaml on the operator last
+
+
+def with_peer(ctx: Context, host: FakeHost, *, present: bool) -> None:
+    """demo lists other as a mesh peer; other's cluster.yaml is on the host (Ready, running)
+    when present."""
+    from tests.fixtures import mesh_ctx
+
+    c = ctx.require_cluster()
+    status = model.Status(phase="Ready", tk8s="test", cluster_id=1, cilium="1.20.4", mesh=["other"])
+    ctx.cluster = c.model_copy(update={"status": status})
+    host.files[ctx.state_dir / "cluster.yaml"] = model.dumps(ctx.cluster)
+    if present:
+        other, _ = mesh_ctx(ctx.paths.data_dir, "other", 1)
+        other.state_dir.mkdir(parents=True)  # load_cluster reads the real file system
+        (other.state_dir / "cluster.yaml").write_text(model.dumps(other.require_cluster()))
+        host.active.add("other.target")
+
+
+def test_delete_disconnects_from_every_peer_first(ctx: Context, host: FakeHost) -> None:
+    everything_there(ctx, host)
+    with_peer(ctx, host, present=True)
+    Runner([delete.PHASE], record=False).run(ctx)
+    phases = [line.split("]")[0][1:] for line in host.lines if line.startswith("[")]
+    assert phases[:2] == ["delete/mesh", "delete/stop"]
+    a = argvs(host)
+    d = [
+        "cilium",
+        "clustermesh",
+        "disconnect",
+        "--context",
+        "demo",
+        "--destination-context",
+        "other",
+    ]
+    assert a.index(d) < a.index(["systemctl", "disable", "--now", "demo.target"])
+    other = model.load_text(host.files[ctx.paths.state_dir("other") / "cluster.yaml"])  # saved
+    assert other.status is not None and other.status.mesh == []
+
+
+def test_delete_with_a_missing_peer_warns_and_goes_on(ctx: Context, host: FakeHost) -> None:
+    everything_there(ctx, host)
+    with_peer(ctx, host, present=False)
+    Runner([delete.PHASE], record=False).run(ctx)
+    assert (
+        "  warning: peer other is not reachable; other still lists demo "
+        "(tkctl disconnect cluster other demo there)"
+    ) in host.lines
+    assert not any(x[:3] == ["cilium", "clustermesh", "disconnect"] for x in argvs(host))
+    assert not host.exists(ctx.state_dir)
+
+
+def test_delete_of_a_stopped_cluster_forgets_itself_on_the_running_peer(
+    ctx: Context, host: FakeHost
+) -> None:
+    """The cluster being deleted may not answer (that is often why it goes): its own apiserver
+    never blocks the delete; the peer's secret is what gets cleaned."""
+    everything_there(ctx, host)
+    with_peer(ctx, host, present=True)
+    host.active.discard("demo.target")
+    host.responses[("kubectl", "-n", "kube-system", "get", "secret", "cilium-clustermesh")] = (
+        Result(0, '{"demo":"x","demo.etcd-client-ca.crt":"y","other":"z"}', "")
+    )
+    Runner([delete.PHASE], record=False).run(ctx)
+    assert not any(x[:3] == ["cilium", "clustermesh", "disconnect"] for x in argvs(host))
+    patches = [x for x in argvs(host) if x[:4] == ["kubectl", "-n", "kube-system", "patch"]]
+    assert any("/data/demo.etcd-client-ca.crt" in p[-1] for p in patches)  # other forgets demo
+    assert "  warning: demo is not running; other forgets it without a cilium disconnect" in (
+        host.lines
+    )
+    other = model.load_text(host.files[ctx.paths.state_dir("other") / "cluster.yaml"])
+    assert other.status is not None and other.status.mesh == []
+    assert not host.exists(ctx.state_dir)
+
+
+def test_delete_removes_every_nodes_host_route(ctx: Context, host: FakeHost) -> None:
+    from tests.test_units import with_pod_cidrs
+
+    ctx.cluster = with_pod_cidrs(ctx.require_cluster())
+    everything_there(ctx, host)
+    assert delete.subnets(ctx) == [
+        "10.244.0.0/21",
+        "10.98.0.0/24",
+        "10.244.1.0/24",
+        "10.244.2.0/24",
+    ]

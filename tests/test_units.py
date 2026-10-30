@@ -1,3 +1,4 @@
+from ipaddress import IPv4Network
 from pathlib import Path
 
 from tk8s import model
@@ -513,3 +514,38 @@ def test_macvlan_routes_unit_waits_for_the_network(
     by = {hf.name: hf for hf in units.per_host(ctx)}
     routes = by["a"].files[SYSTEMD / "demo-routes.service"]
     assert "Wants=network-online.target\nAfter=network-online.target\n" in routes
+
+
+def with_pod_cidrs(c: model.Cluster) -> model.Cluster:
+    """Every node with the pod CIDR Kubernetes gave it: 10.244.<i>.0/24 in cluster.yaml order."""
+    nodes = [
+        n.model_copy(update={"pod_cidr": IPv4Network(f"10.244.{i}.0/24")})
+        for i, n in enumerate(c.spec.nodes)
+    ]
+    return c.model_copy(update={"spec": c.spec.model_copy(update={"nodes": nodes})})
+
+
+def test_host_routes_reach_every_other_nodes_pods_straight_not_through_the_control_plane(
+    ctx: Context,
+) -> None:
+    """Pods on a worker are not reachable through control-plane-1 (its BPF host routing does
+    not forward TCP to another node): once Kubernetes has handed out the pod CIDRs, the host
+    routes each node's /24 to that node; the /21 through control-plane-1 stays underneath."""
+    ctx.cluster = with_pod_cidrs(ctx.require_cluster())
+    unit = units.render(ctx)[ctx.paths.systemd_dir / "demo-routes.service"]
+    assert "ExecStart=ip route replace 10.244.0.0/21 via 172.22.0.1\n" in unit
+    assert "ExecStart=ip route replace 10.244.1.0/24 via 172.22.0.2\n" in unit
+    assert "ExecStart=ip route replace 10.244.2.0/24 via 172.22.0.3\n" in unit
+    assert "ExecStop=-ip route del 10.244.1.0/24 via 172.22.0.2\n" in unit
+    assert "10.244.0.0/24" not in unit  # control-plane-1's own /24 is covered by the /21
+    assert unit.count("ExecStart=") == 4 and unit.count("ExecStop=") == 4
+
+
+def test_multi_host_routes_reach_every_other_nodes_pods_through_the_shim(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, _ = multi_ctx
+    ctx.cluster = with_pod_cidrs(ctx.require_cluster())
+    unit = units.render(ctx, ctx.cluster, "a")[ctx.paths.systemd_dir / "demo-routes.service"]
+    assert "ExecStart=ip route replace 10.244.1.0/24 via 192.168.1.69 dev tk8s-demo\n" in unit
+    assert "ExecStop=-ip route del 10.244.4.0/24 via 192.168.1.81 dev tk8s-demo\n" in unit

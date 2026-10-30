@@ -7,6 +7,7 @@ from pathlib import Path
 from . import hosts, kubeconfig, model
 from .create import PHASES, units
 from .create.kubeadm import kubectl
+from .describe_mesh import describe_mesh
 from .describe_router import describe_router
 from .host import Host, HostError
 from .phases import Context, poll_until
@@ -86,29 +87,26 @@ def list_clusters(ctx: Context) -> None:
     if not dirs:
         ctx.say("no clusters")
         return
-    ctx.say(
-        f"{'NAME':<12} {'NODES':<7} {'K8S':<8} {'DATAPATH':<9} {'STATE':<9} {'HOSTS':<6} SUBNET"
-    )
+    rows: list[tuple[str, ...] | str] = []  # a tuple is a row; a str is a line of its own
     for d in dirs:
         name = d.name
         path = d / "cluster.yaml"
         if not path.exists():
             # a create interrupted before plan: the directory is there, nothing else is, and a
             # second create of the name would fail on a clash the student cannot see
-            ctx.say(
-                f"{name:<12} {'-':<7} {'-':<8} {'-':<9} {'Incomplete':<9} {'-':<6} "
-                f"no cluster.yaml (tkctl delete cluster {name})"
-            )
+            why = f"no cluster.yaml (tkctl delete cluster {name})"
+            rows.append((name, "-", "-", "-", "Incomplete", "-", "-", why))
             continue
         try:
             c = model.load(path)
         except model.ClusterFileError as err:
-            ctx.say(f"{name:<12} {err}")  # one bad file must not hide the other clusters
+            rows.append(f"{name:<12} {err}")  # one bad file must not hide the other clusters
             continue
         s = c.spec
         nodes = f"{len(c.control_planes)}+{len(c.workers)}"
         datapath = s.datapath_resolved or s.datapath
         count = str(len(c.host_names)) if c.multi_host else "-"
+        peers = ", ".join(c.status.mesh) if c.status is not None and c.status.mesh else "-"
         op = managed_from(ctx, c) if c.multi_host else None
         if op is not None:  # a copy: the operator's hosts are not ours to ask
             state, tail = "managed", f" from {op}"
@@ -121,9 +119,22 @@ def list_clusters(ctx: Context) -> None:
                 else {}
             )
             state, tail = state_of(row, c), ""
+        rows.append(
+            (name, nodes, s.kubernetes, datapath, state, count, peers, f"{s.network.nodes}{tail}")
+        )
+    # the MESH column is as wide as its longest entry (several peers, long names)
+    width = max([4, *(len(r[6]) for r in rows if isinstance(r, tuple))])
+    ctx.say(
+        f"{'NAME':<12} {'NODES':<7} {'K8S':<8} {'DATAPATH':<9} {'STATE':<9} {'HOSTS':<6} "
+        f"{'MESH':<{width}} SUBNET"
+    )
+    for r in rows:
+        if isinstance(r, str):
+            ctx.say(r)
+            continue
+        name, nodes, k8s, dp, state, count, peers, last = r
         ctx.say(
-            f"{name:<12} {nodes:<7} {s.kubernetes:<8} {datapath:<9} {state:<9} {count:<6} "
-            f"{s.network.nodes}{tail}"
+            f"{name:<12} {nodes:<7} {k8s:<8} {dp:<9} {state:<9} {count:<6} {peers:<{width}} {last}"
         )
 
 
@@ -163,6 +174,7 @@ def describe(ctx: Context, c: model.Cluster, output: str | None) -> None:
     describe_status(ctx, c)
     describe_addons(ctx, c, state)
     describe_router(ctx, c, state)
+    describe_mesh(ctx, c, state)
     ctx.say("Access:")
     routers = " and ".join(r.name for r in c.routers)
     spread = "spreads" if len(c.routers) == 1 else "spread"

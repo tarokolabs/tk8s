@@ -364,6 +364,7 @@ def test_create_runs_every_phase_and_marks_the_cluster_ready(
         "kubeadm/join",
         "cni/install",
         "cni/nodes-ready",
+        "cni/host-routes",
         "addons/runtimeclass",
         "addons/gvisor",
         "addons/metrics-server",
@@ -400,7 +401,7 @@ def test_verify_cluster_verb(
     rc, out = run(capsys, "verify", "cluster", "--list-phases")
     first, second = out.splitlines()[:2]
     assert rc == 0 and first.startswith("hosts") and second.startswith("nodes")
-    assert "tcproute" in out
+    assert "tcproute" in out and "mesh" in out
 
 
 def test_stdout_is_line_buffered_so_redirected_logs_show_each_step(
@@ -869,3 +870,76 @@ def test_a_malformed_ip_range_is_a_usage_error_not_a_traceback(
     rc, out = run(capsys, "create", "cluster", *argv)
     assert rc == 1 and "invalid --ip-range '192.168.1.70-79,x'" in out
     assert "Traceback" not in out
+
+
+def test_connect_cluster_verb(
+    capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tk8s import verbs
+    from tk8s.host import FakeHost
+    from tk8s.mesh import ops
+
+    host = FakeHost()
+    monkeypatch.setattr(verbs, "make_context", lambda **kw: fake_context(host, **kw))
+    for args in (("connect", "cluster"), ("connect", "cluster", "demo")):
+        rc, out = run(capsys, *args)
+        assert rc == 1 and "usage: tkctl connect cluster A B [C...]" in out
+    rc, out = run(capsys, "connect", "cluster", "demo", "demo")
+    assert rc == 1 and "cluster demo is listed twice" in out
+    rc, out = run(capsys, "connect", "cluster", "demo", "nope")
+    assert rc == 1 and f"cluster demo not found under {data_dir}/clusters" in out
+    called: list[list[str]] = []
+    monkeypatch.setattr(ops, "connect", lambda ctxs: called.append([c.cluster_name for c in ctxs]))
+    for name, index in (("demo", 0), ("other", 1)):
+        state = data_dir / "clusters" / name
+        state.mkdir(parents=True)
+        text = TAKEN.replace("taken", name).replace("index: 0", f"index: {index}")
+        text = text.replace("172.22.0.", f"172.22.{index}.")
+        (state / "cluster.yaml").write_text(text)
+    rc, out = run(capsys, "connect", "cluster", "other", "demo")
+    assert rc == 0 and called == [["demo", "other"]]  # members() sorts by name
+    rc, out = run(capsys, "--help")
+    assert "tkctl connect cluster A B [C...]" in out and "tkctl disconnect cluster A B" in out
+
+
+def test_disconnect_cluster_verb(
+    capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tk8s import verbs
+    from tk8s.host import FakeHost
+    from tk8s.mesh import ops
+
+    host = FakeHost()
+    monkeypatch.setattr(verbs, "make_context", lambda **kw: fake_context(host, **kw))
+    for args in (("disconnect", "cluster"), ("disconnect", "cluster", "demo")):
+        rc, out = run(capsys, *args)
+        assert rc == 1 and "usage: tkctl disconnect cluster A B" in out
+    rc, out = run(capsys, "disconnect", "cluster", "demo", "demo")
+    assert rc == 1 and "cluster demo is listed twice" in out
+    called: list[tuple[str, str | None, str]] = []
+
+    def fake(ctx: object, peer: object, name: str) -> None:
+        called.append((ctx.cluster_name, peer.cluster_name if peer else None, name))  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(ops, "disconnect", fake)
+    for name, index in (("demo", 0), ("other", 1)):
+        state = data_dir / "clusters" / name
+        state.mkdir(parents=True)
+        text = TAKEN.replace("taken", name).replace("index: 0", f"index: {index}")
+        (state / "cluster.yaml").write_text(text.replace("172.22.0.", f"172.22.{index}."))
+    rc, out = run(capsys, "disconnect", "cluster", "demo", "other")
+    assert rc == 1 and "clusters demo and other are not connected (tkctl get clusters)" in out
+    text = (data_dir / "clusters" / "demo" / "cluster.yaml").read_text()
+    (data_dir / "clusters" / "demo" / "cluster.yaml").write_text(
+        text.replace("tk8s: test}", "tk8s: test, mesh: [other]}")
+    )
+    rc, out = run(capsys, "disconnect", "cluster", "demo", "other")
+    assert rc == 0 and called == [("demo", "other", "other")]
+    rc, out = run(capsys, "disconnect", "cluster", "demo", "nope")  # never connected: refused
+    assert rc == 1 and "clusters demo and nope are not connected (tkctl get clusters)" in out
+    text = (data_dir / "clusters" / "demo" / "cluster.yaml").read_text()
+    (data_dir / "clusters" / "demo" / "cluster.yaml").write_text(
+        text.replace("mesh: [other]", "mesh: [nope, other]")
+    )
+    rc, out = run(capsys, "disconnect", "cluster", "demo", "nope")  # recorded, file gone
+    assert rc == 0 and called[-1] == ("demo", None, "nope")

@@ -153,6 +153,14 @@ def units_run(ctx: Context) -> None:
     its host), then systemd there and the router learn about it."""
     n = require_node(ctx)
     host = _host(ctx)
+    gone = find(ctx.require_cluster(), n)
+    if gone is not None and gone.pod_cidr is not None:  # the host's route to its pods
+        ctx.host.run(
+            ["ip", "route", "del", str(gone.pod_cidr), "via", str(gone.ip)],
+            sudo=True,
+            capture=True,
+            check=False,
+        )
     units.run(ctx, trimmed(ctx))
     host.run(["rm", "-f", str(unit_file(ctx))], sudo=True)
     host.run(["rm", "-rf", str(node_dir(ctx))])

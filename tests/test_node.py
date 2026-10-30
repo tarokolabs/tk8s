@@ -17,7 +17,7 @@ from tests.fixtures import (
     vtysh_route,
 )
 from tk8s import lifecycle, model
-from tk8s.create import units
+from tk8s.create import cni, units
 from tk8s.host import FakeHost, Result
 from tk8s.node import add as node_add
 from tk8s.node import common as node_common
@@ -134,6 +134,12 @@ def node_ctx(tmp_path: Path) -> tuple[Context, FakeHost]:
 def test_add_worker_runs_plan_units_start_addons_join_in_order(tmp_path: Path) -> None:
     ctx, host = node_ctx(tmp_path)
     new_node_answers(host, "demo-worker-3", ready_after=1)
+    host.responses[("kubectl", "get", "nodes", "-o", f"jsonpath={cni.POD_CIDRS}")] = Result(
+        0,
+        "demo-control-plane-1 10.244.0.0/24\ndemo-worker-1 10.244.1.0/24\n"
+        "demo-worker-2 10.244.2.0/24\ndemo-worker-3 10.244.3.0/24\n",
+        "",
+    )
     ctx.request = model.NodeRequest(role="worker")
     Runner([node_add.add_phase(join=True)], record=False).run(ctx)
     assert phases_of(host) == [
@@ -146,11 +152,15 @@ def test_add_worker_runs_plan_units_start_addons_join_in_order(tmp_path: Path) -
         "add/gvisor",
         "add/kubeadm",
         "add/ready",
+        "add/host-routes",
         "add/record",
     ]
     assert ctx.node == "demo-worker-3"
     saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
     assert [n.name for n in saved.spec.nodes][-1] == "demo-worker-3" and saved.spec.nodes[-1].join
+    assert str(saved.spec.nodes[-1].pod_cidr) == "10.244.3.0/24"
+    routes = host.files[ctx.paths.systemd_dir / "demo-routes.service"]
+    assert "ExecStart=ip route replace 10.244.3.0/24 via 172.22.0.4\n" in routes
     assert saved.status is not None and saved.status.phase == "Ready"  # untouched
     unit = ctx.paths.unit_dir / "demo" / "demo-worker-3.container"
     assert (
@@ -279,7 +289,11 @@ def test_join_node_finishes_an_add_interrupted_before_the_unit_existed(tmp_path:
 
 
 def test_delete_node_drains_stops_removes_and_rerenders(tmp_path: Path) -> None:
+    from tests.test_units import with_pod_cidrs
+
     ctx, host = node_ctx(tmp_path)
+    ctx.cluster = with_pod_cidrs(ctx.require_cluster())
+    host.files[ctx.state_dir / "cluster.yaml"] = model.dumps(ctx.cluster)
     host.responses = {
         ("kubectl", "get", "node", "demo-worker-2"): [
             Result(0, "demo-worker-2", ""),
@@ -292,6 +306,8 @@ def test_delete_node_drains_stops_removes_and_rerenders(tmp_path: Path) -> None:
     names = ("drain", "stop", "container", "volumes", "units", "entry")
     assert phases_of(host) == [f"delete/{p}" for p in names]
     a = argvs(host)
+    assert ["ip", "route", "del", "10.244.2.0/24", "via", "172.22.0.3"] in a  # its host route
+    assert "10.244.2.0/24" not in host.files[ctx.paths.systemd_dir / "demo-routes.service"]
     drain_argv = [
         "kubectl",
         "drain",

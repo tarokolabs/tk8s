@@ -22,6 +22,8 @@ CILIUM_DRY = (
     '      image: "quay.io/cilium/cilium:v1.20.4@sha256:aaaa"\n'
     '      image: "quay.io/cilium/operator-generic:v1.20.4@sha256:bbbb"\n'
     '      image: "quay.io/cilium/cilium-envoy:v1.37.6-1@sha256:cccc"\n'
+    '      image: "quay.io/cilium/clustermesh-apiserver:v1.20.4@sha256:dddd"\n'
+    '      image: "quay.io/cilium/certgen:v0.4.13@sha256:eeee"\n'
 )
 MISSING = Result(1, "", "")
 PRESENT = Result(0, "", "")
@@ -49,7 +51,9 @@ def store_pulls(host: FakeHost) -> list[str]:
 def test_wanted_is_derived_sorted_and_unique(ctx: Context, host: FakeHost) -> None:
     sources(host)
     w = images.wanted(ctx, K8S)
-    assert w == sorted(set(w)) and len(w) == 15
+    assert w == sorted(set(w)) and len(w) == 17
+    assert "quay.io/cilium/clustermesh-apiserver:v1.20.4@sha256:dddd" in w
+    assert "quay.io/cilium/certgen:v0.4.13@sha256:eeee" in w
     assert f"registry.k8s.io/kube-apiserver:v{K8S}" in w
     assert "quay.io/cilium/cilium:v1.20.4@sha256:aaaa" in w
     assert "registry.k8s.io/metrics-server/metrics-server:v0.9.1" in w
@@ -59,6 +63,15 @@ def test_wanted_is_derived_sorted_and_unique(ctx: Context, host: FakeHost) -> No
     assert kube.argv[-3:] == ["list", "--kubernetes-version", f"v{K8S}"] and kube.sudo
     cil = next(c for c in host.calls if c.argv[0] == "cilium")
     assert "--chart-directory" in cil.argv
+    # the chart renders the clustermesh-apiserver only when asked, and cilium clustermesh
+    # enable makes certgen (a Job) issue its certificates: connect needs both images
+    assert cil.argv[-5:] == [
+        "--set",
+        "clustermesh.useAPIServer=true",
+        "--set",
+        "clustermesh.apiserver.tls.auto.method=cronJob",
+        "--dry-run",
+    ]
     assert cil.env == {"KUBECONFIG": "/nonexistent", "HOME": "/tmp"}
 
 
@@ -92,10 +105,10 @@ def test_ensure_fresh_host_pulls_everything_once_under_the_lock(
     host.responses[("podman", "image", "exists", NODE)] = [MISSING, Result(0, "", "")]
     host.responses[("podman", "image", "exists")] = MISSING
     images.ensure(ctx, K8S)
-    assert len(store_pulls(host)) == 15
+    assert len(store_pulls(host)) == 17
     assert any(c.argv[:2] == ["mkdir", str(ctx.paths.images_dir / K8S)] for c in host.calls)
     assert host.files[images.conf_path(ctx.paths, K8S)] == images.storage_conf(ctx.paths, K8S)
-    assert any(line.startswith(f"  images {K8S}: 0 present, 15 pulled in ") for line in host.lines)
+    assert any(line.startswith(f"  images {K8S}: 0 present, 17 pulled in ") for line in host.lines)
     assert f"  {NODE} pulled" in host.lines
 
 
@@ -104,7 +117,7 @@ def test_ensure_again_pulls_nothing(ctx: Context, host: FakeHost) -> None:
     images.ensure(ctx, K8S)
     assert store_pulls(host) == []
     where = ctx.paths.images_dir / K8S
-    assert f"  images {K8S}: 15 present, nothing to pull ({where})" in host.lines
+    assert f"  images {K8S}: 17 present, nothing to pull ({where})" in host.lines
 
 
 def test_ensure_pulls_only_the_missing_image(ctx: Context, host: FakeHost) -> None:
@@ -112,7 +125,7 @@ def test_ensure_pulls_only_the_missing_image(ctx: Context, host: FakeHost) -> No
     host.responses[("podman", "image", "exists", "registry.k8s.io/pause:3.10.2")] = MISSING
     images.ensure(ctx, K8S)
     assert store_pulls(host) == ["registry.k8s.io/pause:3.10.2"]
-    assert any(line.startswith(f"  images {K8S}: 14 present, 1 pulled") for line in host.lines)
+    assert any(line.startswith(f"  images {K8S}: 16 present, 1 pulled") for line in host.lines)
 
 
 def test_offline_lists_the_missing_images_and_pulls_nothing(ctx: Context, host: FakeHost) -> None:
@@ -387,7 +400,7 @@ def test_multi_host_images_phase_fills_every_hosts_store_from_one_list(
     assert not images_phase.done(ctx)
     images_phase.run(ctx)
     for name, h in hosts.items():
-        assert len(store_pulls(h)) == 15, name
+        assert len(store_pulls(h)) == 17, name
         assert ["podman", "pull", NODE] in [c.argv for c in h.calls], name
         assert any(c.argv[:2] == ["mkdir", str(ctx.paths.images_dir / K8S)] for c in h.calls)
     # the list is computed on the operator only; the cilium CLI is installed there only

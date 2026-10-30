@@ -59,9 +59,9 @@ def test_list_shows_every_cluster_and_its_state(ctx: Context, host: FakeHost) ->
     (broken / "cluster.yaml").write_text("metadata: {name: broken}\nspec: {nodes: []}\n")
     lifecycle.list_clusters(ctx)
     out = "\n".join(host.lines)
-    header = ["NAME", "NODES", "K8S", "DATAPATH", "STATE", "HOSTS", "SUBNET"]
+    header = ["NAME", "NODES", "K8S", "DATAPATH", "STATE", "HOSTS", "MESH", "SUBNET"]
     assert out.splitlines()[0].split() == header
-    assert "demo         1+2     1.37.2   auto      Creating  -      172.22.0.0/24" in out
+    assert "demo         1+2     1.37.2   auto      Creating  -      -    172.22.0.0/24" in out
     assert "broken       " in out and "cluster.yaml" in out  # an unreadable file hides nothing
 
 
@@ -319,7 +319,7 @@ def test_describe_bgp_cluster_router_section(bgp_ctx: Context, host: FakeHost) -
     bgp_router_answers(host, established=2, hops=2)
     lifecycle.describe(bgp_ctx, c, None)
     out = "\n".join(host.lines)
-    assert "lb-ipam 172.22.0.200-172.22.0.219  router 172.22.0.253  vip 172.23.0.1" in out
+    assert "lb-ipam 172.22.0.201-172.22.0.219  router 172.22.0.253  vip 172.23.0.1" in out
     i = host.lines.index("Router:")
     section = [line for line in host.lines[i + 1 :] if not line.startswith("  $ ")]  # no echoes
     assert section[:5] == [
@@ -549,22 +549,24 @@ def test_get_clusters_shows_the_host_count_and_managed_from(
     ctx, hosts = multi_ctx
     multi_on_disk(ctx, hosts)
     lifecycle.list_clusters(ctx)
-    out = "\n".join(hosts["a"].lines)
+    out = "\n".join(line for line in hosts["a"].lines if not line.startswith("  $"))
     header = out.splitlines()[0].split()
-    assert header == ["NAME", "NODES", "K8S", "DATAPATH", "STATE", "HOSTS", "SUBNET"]
-    assert "demo         3+2     1.37.2   auto      Creating  3      192.168.1.0/24" in out
+    assert header == ["NAME", "NODES", "K8S", "DATAPATH", "STATE", "HOSTS", "MESH", "SUBNET"]
+    assert "demo         3+2     1.37.2   auto      Creating  3      -    192.168.1.0/24" in out
     hosts["a"].responses[("hostname",)] = Result(0, "pve-b\n", "")
     hosts["a"].lines.clear()
     lifecycle.list_clusters(ctx)
     out = "\n".join(hosts["a"].lines)
-    assert "demo         3+2     1.37.2   auto      managed   3      192.168.1.0/24 from op" in out
+    row = "demo         3+2     1.37.2   auto      managed   3      -    192.168.1.0/24"
+    assert f"{row} from op" in out
 
 
 def test_single_host_list_prints_a_dash_for_hosts(ctx: Context, host: FakeHost) -> None:
     on_disk(ctx, host)
     lifecycle.list_clusters(ctx)
-    assert "demo         1+2     1.37.2   auto      Creating  -      172.22.0.0/24" in "\n".join(
-        host.lines
+    assert (
+        "demo         1+2     1.37.2   auto      Creating  -      -    172.22.0.0/24"
+        in "\n".join(host.lines)
     )
 
 
@@ -664,8 +666,9 @@ def test_get_clusters_judges_a_multi_host_cluster_by_every_host(
     ctx.cluster = None  # get clusters starts from nothing: every row is its own cluster
     hosts["b"].active.add("demo.target")  # the operator's own target is down
     lifecycle.list_clusters(ctx)
-    assert "demo         3+2     1.37.2   auto      Degraded  3      192.168.1.0/24" in "\n".join(
-        hosts["a"].lines
+    assert (
+        "demo         3+2     1.37.2   auto      Degraded  3      -    192.168.1.0/24"
+        in "\n".join(hosts["a"].lines)
     )
 
 
@@ -732,3 +735,111 @@ def test_stop_and_start_skip_an_unreachable_host_and_name_it(
     with pytest.raises(lifecycle.ClusterError, match="host b unreachable; started c, a"):
         lifecycle.start(ctx, c)
     assert ["systemctl", "start", "demo.target"] in [k.argv for k in hosts["c"].calls]
+
+
+def mesh_on_disk(ctx: Context, host: FakeHost, **status: object) -> model.Cluster:
+    c = ctx.require_cluster()
+    assert c.status is not None
+    st = c.status.model_copy(update={"phase": "Ready", **status})
+    ctx.cluster = c.model_copy(update={"status": st})
+    return on_disk(ctx, host)
+
+
+def test_describe_mesh_section_on_a_stopped_cluster(ctx: Context, host: FakeHost) -> None:
+    c = mesh_on_disk(ctx, host, cluster_id=1, cilium="1.20.4")
+    lifecycle.describe(ctx, c, None)
+    i = host.lines.index("Mesh:")
+    assert host.lines[i + 1 : i + 7] == [
+        "  peers:      none",
+        "  endpoint:   172.22.0.200 (clustermesh-apiserver)",
+        "  global services:",
+        "    unavailable (cluster is not running)",
+        "  entrypoints:",
+        "    unavailable (cluster is not running)",
+    ]
+    assert host.lines[i + 7] == "Access:"
+
+
+def test_describe_mesh_section_lists_global_services_and_entrypoints_when_running(
+    ctx: Context, host: FakeHost
+) -> None:
+    from tests.test_mesh_services import CILIUM_DBG, DBG_JSON, SVC_LIST
+
+    c = mesh_on_disk(ctx, host, mesh=["other"], cluster_id=1, cilium="1.20.4")
+    host.active.add("demo.target")
+    host.responses[SVC_LIST] = Result(0, "default/echo 10.98.0.20 true\n", "")
+    host.responses[CILIUM_DBG] = Result(0, DBG_JSON, "")
+    host.responses[("kubectl", "get", "gateway", "-A", "-o")] = Result(
+        0, "default/gw 172.22.0.205\n", ""
+    )
+    host.responses[("kubectl", "get", "svc", "-A", "--field-selector")] = Result(
+        0, "default/db 172.22.0.206\n", ""
+    )
+    lifecycle.describe(ctx, c, None)
+    assert "  peers:      other" in host.lines
+    assert "    default/echo             local 1  remote 1" in host.lines
+    assert "    gateway  default/gw      172.22.0.205" in host.lines
+    assert "    service  default/db      172.22.0.206" in host.lines
+
+
+def test_describe_mesh_running_but_not_connected_says_so(ctx: Context, host: FakeHost) -> None:
+    c = mesh_on_disk(ctx, host, cluster_id=1, cilium="1.20.4")
+    host.active.add("demo.target")
+    host.responses[("kubectl", "get", "gateway", "-A", "-o")] = Result(0, "", "")
+    host.responses[("kubectl", "get", "svc", "-A", "--field-selector")] = Result(0, "", "")
+    lifecycle.describe(ctx, c, None)
+    lines = [line for line in host.lines if not line.startswith("  $ ")]
+    i = lines.index("  global services:")
+    assert lines[i + 1] == "    none (not connected)"
+    assert lines[i + 3] == "    none"
+
+
+def test_describe_mesh_on_a_cluster_from_before_mesh_support(ctx: Context, host: FakeHost) -> None:
+    c = ctx.require_cluster()
+    net = c.spec.network.model_copy(update={"mesh": None})
+    ctx.cluster = c.model_copy(update={"spec": c.spec.model_copy(update={"network": net})})
+    c = mesh_on_disk(ctx, host)
+    lifecycle.describe(ctx, c, None)
+    i = host.lines.index("Mesh:")
+    assert host.lines[i + 1] == "  unavailable (created before mesh support; recreate to connect)"
+    assert host.lines[i + 2] == "Access:"
+
+
+def test_get_clusters_lists_mesh_peers(ctx: Context, host: FakeHost) -> None:
+    mesh_on_disk(ctx, host, mesh=["other", "third"])
+    lifecycle.list_clusters(ctx)
+    out = "\n".join(host.lines)
+    assert (
+        "demo         1+2     1.37.2   auto      Stopped   -      other, third 172.22.0.0/24" in out
+    )
+
+
+def test_get_clusters_mesh_column_widens_for_many_peers(ctx: Context, host: FakeHost) -> None:
+    mesh_on_disk(ctx, host, mesh=["other", "third", "fourth"])
+    lifecycle.list_clusters(ctx)
+    header, row = [line for line in host.lines if not line.startswith("  $")][:2]
+    assert header.index("SUBNET") == row.index("172.22.0.0/24")
+    assert "other, third, fourth" in row
+
+
+def test_describe_mesh_queries_a_degraded_multi_host_cluster(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, hosts = multi_ctx
+    c = ctx.require_cluster()
+    assert c.status is not None
+    ctx.cluster = c.model_copy(
+        update={
+            "status": c.status.model_copy(
+                update={"phase": "Ready", "mesh": ["other"], "cluster_id": 1, "cilium": "1.20.4"}
+            )
+        }
+    )
+    c = multi_on_disk(ctx, hosts)
+    hosts["a"].active.add("demo.target")  # b and c down
+    lifecycle.describe(ctx, c, None)
+    assert "State:       Degraded" in hosts["a"].lines
+    i = hosts["a"].lines.index("Mesh:")
+    section = [line for line in hosts["a"].lines[i:] if not line.startswith("  $")][:8]
+    assert "    unavailable (cluster is not running)" not in section
+    assert "    none (no Service annotated service.cilium.io/global)" in section

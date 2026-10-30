@@ -1,4 +1,7 @@
+from pathlib import Path
+
 import pytest
+import yaml
 
 from tk8s import model
 from tk8s.create import cni
@@ -57,7 +60,8 @@ def test_cilium_install_argv_carries_every_setting(ctx: Context) -> None:
         "--set k8sServicePort=6443",
         "--set l2announcements.enabled=true",
         "--set routingMode=native --set autoDirectNodeRoutes=true "
-        "--set ipv4NativeRoutingCIDR=10.244.0.0/21",
+        "--set ipv4NativeRoutingCIDR=10.244.0.0/16",
+        "--set cluster.name=demo --set cluster.id=1",
         "--set bpf.masquerade=true",
         "--set bpf.lbExternalClusterIP=true",
         "--set gatewayAPI.enabled=true --set gatewayAPI.externalTrafficPolicy=Local",
@@ -65,9 +69,52 @@ def test_cilium_install_argv_carries_every_setting(ctx: Context) -> None:
         assert s in joined, s
 
 
-def test_lb_pool_manifest_uses_the_cluster_range(ctx: Context) -> None:
-    text = cni.lb_pool_manifest(ctx)
-    assert "start: 172.22.0.200\n    stop: 172.22.0.219" in text and "${LBNET}" not in text
+def test_lb_pool_manifest_has_a_pool_for_the_mesh_and_keeps_it_out_of_the_default_pool(
+    ctx: Context,
+) -> None:
+    docs = list(yaml.safe_load_all(cni.lb_pool_manifest(ctx)))
+    pools = {d["metadata"]["name"]: d for d in docs if d["kind"] == "CiliumLoadBalancerIPPool"}
+    assert pools["default-pool"]["spec"]["blocks"] == [
+        {"start": "172.22.0.201", "stop": "172.22.0.219"}
+    ]
+    expr = pools["default-pool"]["spec"]["serviceSelector"]["matchExpressions"]
+    assert expr == [
+        {
+            "key": "io.kubernetes.service.name",
+            "operator": "NotIn",
+            "values": ["clustermesh-apiserver"],
+        }
+    ]
+    assert pools["mesh-pool"]["spec"]["blocks"] == [
+        {"start": "172.22.0.200", "stop": "172.22.0.200"}
+    ]
+    assert pools["mesh-pool"]["spec"]["serviceSelector"]["matchLabels"] == {
+        "io.kubernetes.service.namespace": "kube-system",
+        "io.kubernetes.service.name": "clustermesh-apiserver",
+    }
+    assert [d["kind"] for d in docs] == [
+        "CiliumLoadBalancerIPPool",
+        "CiliumLoadBalancerIPPool",
+        "CiliumL2AnnouncementPolicy",
+    ]
+
+
+def test_lb_pool_manifest_without_a_mesh_address_is_the_old_single_pool(ctx: Context) -> None:
+    c = ctx.require_cluster()
+    net = c.spec.network.model_copy(update={"mesh": None, "lb_range": "172.22.0.200-172.22.0.219"})
+    ctx.cluster = c.model_copy(update={"spec": c.spec.model_copy(update={"network": net})})
+    docs = list(yaml.safe_load_all(cni.lb_pool_manifest(ctx)))
+    pools = [d for d in docs if d["kind"] == "CiliumLoadBalancerIPPool"]
+    assert len(pools) == 1 and "serviceSelector" not in pools[0]["spec"]
+    assert pools[0]["spec"]["blocks"] == [{"start": "172.22.0.200", "stop": "172.22.0.219"}]
+
+
+def test_record_cni_writes_cluster_id_and_cilium_version(ctx: Context, host: FakeHost) -> None:
+    cni.record_cni(ctx, "veth")
+    c = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
+    assert c.spec.datapath_resolved == "veth"
+    assert c.status is not None and c.status.cluster_id == 1
+    assert c.status.cilium == ctx.versions.cilium
 
 
 def test_healthy_cilium_path(ctx: Context, host: FakeHost) -> None:
@@ -81,7 +128,7 @@ def test_healthy_cilium_path(ctx: Context, host: FakeHost) -> None:
     assert installs(host)[0][1] == "install"
     assert ["cilium", "status", "--wait", "--wait-duration", "5m"] in a
     pool = next(c for c in host.calls if c.argv == ["kubectl", "apply", "-f", "-"])
-    assert pool.input is not None and "start: 172.22.0.200" in pool.input
+    assert pool.input is not None and "start: 172.22.0.201" in pool.input
     assert [
         "kubectl",
         "wait",
@@ -91,7 +138,7 @@ def test_healthy_cilium_path(ctx: Context, host: FakeHost) -> None:
         "--timeout=120s",
     ] in a
     assert f"  cilium {ctx.versions.cilium} ok (install)" in host.lines
-    assert "  LB-IPAM pool 172.22.0.200-172.22.0.219" in host.lines
+    assert "  LB-IPAM pool 172.22.0.201-172.22.0.219" in host.lines
     saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
     assert saved.spec.datapath_resolved == "netkit"
     kube = [
@@ -170,3 +217,65 @@ def test_auto_datapath_takes_the_lowest_kernel(
     assert cni.resolve_datapath(ctx) == "veth"
     hosts["b"].responses[("uname", "-r")] = Result(0, "6.8.0\n", "")
     assert cni.resolve_datapath(ctx) == "netkit"
+
+
+def test_cilium_outputs_land_under_the_clusters_logs(ctx: Context, host: FakeHost) -> None:
+    healthy(host, ctx)
+    cni.install_cilium(ctx)
+    logs = ctx.state_dir / "logs"
+    assert logs / "cilium.out" in host.files and logs / "cilium-status.out" in host.files
+    # nothing lands straight in /tmp (pytest's own tmp_path may live under /tmp on Linux)
+    assert not any(p.parent == Path("/tmp") for p in host.files)
+
+
+POD_CIDRS = (
+    "demo-control-plane-1 10.244.0.0/24\ndemo-worker-1 10.244.1.0/24\ndemo-worker-2 10.244.2.0/24\n"
+)
+
+
+def test_host_routes_phase_records_pod_cidrs_and_rewrites_the_routes_unit(
+    ctx: Context, host: FakeHost
+) -> None:
+    host.responses[("kubectl", "get", "nodes", "-o", f"jsonpath={cni.POD_CIDRS}")] = Result(
+        0, POD_CIDRS, ""
+    )
+    assert not cni.host_routes_done(ctx)
+    Runner([cni.PHASE], only="cni/host-routes").run(ctx)
+    saved = model.load_text(host.files[ctx.state_dir / "cluster.yaml"])
+    assert [str(n.pod_cidr) for n in saved.spec.nodes] == [
+        "10.244.0.0/24",
+        "10.244.1.0/24",
+        "10.244.2.0/24",
+    ]
+    unit = host.files[ctx.paths.systemd_dir / "demo-routes.service"]
+    assert "ExecStart=ip route replace 10.244.2.0/24 via 172.22.0.3\n" in unit
+    a = [c.argv for c in host.calls]
+    reload_ = a.index(["systemctl", "daemon-reload"])
+    assert reload_ < a.index(["systemctl", "restart", "demo-routes.service"])
+    assert "  host routes: demo-worker-1 10.244.1.0/24, demo-worker-2 10.244.2.0/24" in host.lines
+    assert cni.host_routes_done(ctx)
+
+
+def test_host_routes_phase_is_not_done_while_a_node_has_no_cidr_yet(
+    ctx: Context, host: FakeHost
+) -> None:
+    host.responses[("kubectl", "get", "nodes", "-o", f"jsonpath={cni.POD_CIDRS}")] = Result(
+        0, "demo-control-plane-1 10.244.0.0/24\ndemo-worker-1 \n", ""
+    )
+    with pytest.raises(PhaseFailed, match=r"demo-worker-1 has no pod CIDR yet"):
+        Runner([cni.PHASE], only="cni/host-routes").run(ctx)
+
+
+def test_host_routes_refuses_a_pod_cidr_outside_the_clusters_pod_subnet(
+    ctx: Context, host: FakeHost
+) -> None:
+    """What the apiserver reports becomes a host route: only a /24 inside the cluster's own
+    pod subnet is accepted."""
+    host.responses[("kubectl", "get", "nodes", "-o", f"jsonpath={cni.POD_CIDRS}")] = Result(
+        0, "demo-control-plane-1 10.244.0.0/24\ndemo-worker-1 192.168.1.0/24\n", ""
+    )
+    with pytest.raises(
+        PhaseFailed, match=r"demo-worker-1 reports pod CIDR 192.168.1.0/24 outside 10.244.0.0/21"
+    ):
+        Runner([cni.PHASE], only="cni/host-routes").run(ctx)
+    assert "pod_cidr" not in host.files.get(ctx.state_dir / "cluster.yaml", "")

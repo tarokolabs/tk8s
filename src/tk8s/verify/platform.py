@@ -1,8 +1,6 @@
 """[nodes] [kubelet] [system] [metrics-server] [local-path]: the cluster itself, cilium and the
 addons every cluster has."""
 
-from pathlib import Path
-
 from .. import podman
 from ..create import nodefs
 from ..create.kubeadm import kubectl_env
@@ -126,7 +124,6 @@ def check_kube_system(r: Report) -> None:
 
 
 def check_cilium(r: Report) -> None:
-    c = r.ctx.require_cluster()
     have_cli = r.ctx.host.run(["cilium", "version", "--client"], capture=True, check=False)
     if have_cli.returncode != 0:
         r.skip("cilium status", "cilium CLI not on the host")
@@ -137,7 +134,7 @@ def check_cilium(r: Report) -> None:
             capture=True,
             check=False,
         )
-        out = Path(f"/tmp/{c.name}-verify-cilium.out")
+        out = r.ctx.log_path("verify-cilium.out")
         r.ctx.host.write(out, st.stdout + st.stderr)
         if st.returncode == 0:
             r.ok("cilium status")

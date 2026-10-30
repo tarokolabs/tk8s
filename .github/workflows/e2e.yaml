@@ -52,6 +52,11 @@ jobs:
           - k8s: ${{ needs.versions.outputs.default }}
             ha: bgp
             routers: 2
+          # Cluster Mesh once, on the default/proxy entry: a second cluster on the previous
+          # Kubernetes, connect, a global service across both, disconnect, delete
+          - k8s: ${{ needs.versions.outputs.default }}
+            ha: proxy
+            mesh: true
     steps:
       - uses: actions/checkout@v4
       - name: Prepare the runner (podman 5 built from source, helpers from OBS, swap off, sudo)
@@ -88,6 +93,12 @@ jobs:
           k8s="${{ matrix.k8s }}"; crio=$(sed -nE "s/^  \"${k8s%.*}\": *\"([^\"]+)\".*/\1/p" versions.yaml)
           [ -n "$crio" ] || { echo "versions.yaml has no crio entry for Kubernetes minor ${k8s%.*}"; exit 1; }
           sudo podman build --build-arg VER="$k8s" --build-arg CRIO="$crio" --force-rm -t "ghcr.io/tarokolabs/tk8s/node:v$k8s" images/node >/tmp/node-build.log 2>&1 || { tail -30 /tmp/node-build.log; exit 1; }
+      - name: Build the node image of the previous Kubernetes (mesh)
+        if: matrix.mesh
+        run: |
+          prev=$(sed -nE 's/^  previous: *"([^"]+)"/\1/p' versions.yaml); crio=$(sed -nE "s/^  \"${prev%.*}\": *\"([^\"]+)\".*/\1/p" versions.yaml)
+          [ -n "$prev" ] && [ -n "$crio" ] || { echo "versions.yaml has no previous Kubernetes or its crio entry"; exit 1; }
+          sudo podman build --build-arg VER="$prev" --build-arg CRIO="$crio" --force-rm -t "ghcr.io/tarokolabs/tk8s/node:v$prev" images/node >/tmp/node-prev-build.log 2>&1 || { tail -30 /tmp/node-prev-build.log; exit 1; }
       - name: Build the router image from this checkout
         run: |
           vyos=$(sed -nE 's/^vyos: *"([^"]+)".*/\1/p' versions.yaml); sha=$(sed -nE 's/^vyos_sha256: *"([^"]+)".*/\1/p' versions.yaml)
@@ -102,6 +113,11 @@ jobs:
           tkctl get images --k8s "${{ matrix.k8s }}"
           # Everything else a create fetches on the host: the CNI plugins (cilium's CLI came with pull images).
           tkctl create cluster ci --workers 1 --k8s "${{ matrix.k8s }}" --phase nodes/cni-plugins
+      - name: Fill the store for the previous Kubernetes too (mesh)
+        if: matrix.mesh
+        run: |
+          prev=$(sed -nE 's/^  previous: *"([^"]+)"/\1/p' versions.yaml)
+          tkctl pull images --k8s "$prev"
       - name: Block every host tkctl downloads from
         run: |
           # The runner must keep talking to GitHub, so this is a hosts-file block rather than an egress
@@ -114,6 +130,54 @@ jobs:
         run: time tkctl create cluster ci --workers 1 --k8s "${{ matrix.k8s }}" --datapath "$DATAPATH" --ha "${{ matrix.ha }}" --routers "${{ matrix.routers || 1 }}"
       - name: Verify
         run: tkctl verify cluster ci
+      - name: Mesh with a second cluster on the previous Kubernetes
+        if: matrix.mesh
+        env:
+          TK_OFFLINE: "1"
+        run: |
+          set -eux
+          prev=$(sed -nE 's/^  previous: *"([^"]+)"/\1/p' versions.yaml)
+          # The runner's Docker sets FORWARD to DROP: traffic between the two clusters' bridges needs a way through.
+          sudo iptables -I DOCKER-USER -j ACCEPT
+          time tkctl create cluster ci2 --workers 1 --memory 2G --k8s "$prev" --ha proxy
+          tkctl connect cluster ci ci2 | tee /tmp/connect.txt
+          grep -q "clusters ci, ci2 connected" /tmp/connect.txt
+          tkctl get clusters | tee /tmp/get.txt
+          grep -E "^ci +.* ci2 +172" /tmp/get.txt
+          export KUBECONFIG=/opt/taroko/clusters/ci/kubeconfig
+          [ "$(kubectl -n kube-system get svc clustermesh-apiserver -o jsonpath='{.status.loadBalancer.ingress[0].ip}')" = 172.22.0.200 ]
+          agnhost=$(sed -nE 's/^verify_agnhost: *"([^"]+)"/\1/p' versions.yaml)
+          busybox=$(sed -nE 's/^verify_busybox: *"([^"]+)"/\1/p' versions.yaml)
+          for c in ci ci2; do
+            KUBECONFIG=/opt/taroko/clusters/$c/kubeconfig kubectl apply -f - <<EOF
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: echo
+            annotations:
+              service.cilium.io/global: "true"
+          spec:
+            selector:
+              app: echo
+            ports:
+              - port: 80
+                targetPort: 8080
+          EOF
+          done
+          # the Deployment lives in ci2 only: every answer ci gets comes from the other cluster
+          KUBECONFIG=/opt/taroko/clusters/ci2/kubeconfig kubectl create deploy echo --image="$agnhost" -- /agnhost netexec --http-port=8080
+          KUBECONFIG=/opt/taroko/clusters/ci2/kubeconfig kubectl rollout status deploy/echo --timeout=180s
+          for i in $(seq 1 12); do
+            out=$(kubectl run probe-$i --image="$busybox" --restart=Never --rm -i --attach --quiet --command -- wget -qO- -T 5 http://echo.default/hostname 2>/dev/null || true)
+            case "$out" in echo-*) break ;; esac; sleep 5
+          done
+          echo "answer: $out"; case "$out" in echo-*) ;; *) echo "no answer from the global service across the mesh"; exit 1 ;; esac
+          tkctl describe cluster ci | tee /tmp/describe.txt
+          grep -E "default/echo +local 0 +remote 1" /tmp/describe.txt
+          tkctl verify cluster ci --phase mesh
+          tkctl disconnect cluster ci ci2 | tee /tmp/disconnect.txt
+          grep -q "clusters ci and ci2 disconnected" /tmp/disconnect.txt
+          # ci2 stays up for the pull check and the logs; the last step deletes it
       - name: One router down (routers 2)
         if: matrix.routers == 2
         run: |
@@ -131,7 +195,7 @@ jobs:
       - name: No node pulled an image
         run: |
           rc=0
-          for n in ci-control-plane-1 ci-worker-1; do
+          for n in ci-control-plane-1 ci-worker-1 $([ -n "${{ matrix.mesh }}" ] && echo ci2-control-plane-1 ci2-worker-1); do
             c=$(sudo podman exec "$n" journalctl -u crio --no-pager | grep -c 'Pulled image' || true)
             echo "$n: $c pulled"; [ "$c" -eq 0 ] || { sudo podman exec "$n" journalctl -u crio --no-pager | grep 'Pulled image'; rc=1; }
           done
@@ -147,12 +211,12 @@ jobs:
             sudo podman exec "$r" vtysh -c 'show bgp summary' -c 'show ip route' -c 'show bfd peers' > "logs/$r-frr.txt" 2>&1 || true
             sudo podman exec "$r" /opt/vyatta/bin/vyatta-op-cmd-wrapper show vrrp > "logs/$r-vrrp.txt" 2>&1 || true
           done
-          for n in ci-control-plane-1 ci-worker-1; do
+          for n in ci-control-plane-1 ci-worker-1 $([ -n "${{ matrix.mesh }}" ] && echo ci2-control-plane-1 ci2-worker-1); do
             sudo podman logs "$n" > "logs/$n.log" 2>&1 || true
             sudo podman exec "$n" journalctl -u kubelet -u crio --no-pager > "logs/$n-node.log" 2>&1 || true
             sudo podman exec "$n" journalctl -u crio --no-pager | grep -E 'Pull|pull' > "logs/$n-pulls.log" 2>&1 || true
           done
-          cp /tmp/ci-cilium*.out logs/ 2>/dev/null || true
+          for d in /opt/taroko/clusters/*/logs; do n=$(basename "$(dirname "$d")"); for f in "$d"/*.out; do [ -f "$f" ] && cp "$f" "logs/$n-$(basename "$f")"; done; done 2>/dev/null || true
           export KUBECONFIG=/opt/taroko/clusters/ci/kubeconfig
           kubectl get pods -A -o wide > logs/pods.txt 2>&1 || true
           # pod-level reachability of the API ClusterIP from each node, cilium service map, host firewall
@@ -176,8 +240,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: e2e-logs-${{ github.run_id }}-${{ matrix.k8s }}-${{ matrix.ha }}-r${{ matrix.routers || 1 }}
+          name: e2e-logs-${{ github.run_id }}-${{ matrix.k8s }}-${{ matrix.ha }}-r${{ matrix.routers || 1 }}${{ matrix.mesh && '-mesh' || '' }}
           path: logs/
       - name: Delete the cluster
         if: always()
-        run: tkctl delete cluster ci --yes || true
+        run: |
+          tkctl delete cluster ci --yes || true
+          [ -z "${{ matrix.mesh }}" ] || tkctl delete cluster ci2 --yes || true

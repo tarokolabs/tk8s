@@ -90,10 +90,10 @@ def lines(host: FakeHost, prefix: str) -> list[str]:
     return [line for line in host.lines if line.startswith(prefix)]
 
 
-def test_all_healthy_is_16_pass_1_skip(ctx: Context, host: FakeHost) -> None:
+def test_all_healthy_is_16_pass_2_skip(ctx: Context, host: FakeHost) -> None:
     healthy(ctx, host)
     assert verify.run(ctx) == 0
-    assert host.lines[-1] == "PASS 16  FAIL 0  SKIP 1"
+    assert host.lines[-1] == "PASS 16  FAIL 0  SKIP 2"
     for s in (
         "PASS  nodes: 3/3 Ready",
         "PASS  node sizes: capacity and allocatable follow cluster.yaml (kubeReserved 500m/512Mi)",
@@ -133,7 +133,7 @@ def test_one_broken_component_is_one_fail_and_exit_1(ctx: Context, host: FakeHos
     host.responses[("kubectl", "top", "nodes")] = Result(1, "", "")
     assert verify.run(ctx) == 1
     assert "FAIL  kubectl top nodes — metrics-server not ready" in host.lines
-    assert host.lines[-1] == "PASS 15  FAIL 1  SKIP 1"
+    assert host.lines[-1] == "PASS 15  FAIL 1  SKIP 2"
 
 
 def test_kubelet_noise_is_reported_with_the_cgroup(ctx: Context, host: FakeHost) -> None:
@@ -603,3 +603,91 @@ def test_hosts_check_wants_the_shim_to_carry_its_address(
     hosts["a"].lines.clear()
     check_hosts(r)
     assert hosts["a"].lines[-1] == "PASS  hosts: 3/3 reachable, target active, shim tk8s-demo up"
+
+
+def connected_to(ctx: Context, host: FakeHost, peer: str, *, lists_us: bool = True) -> None:
+    """demo lists `peer`; the peer's cluster.yaml is on the operator (listing demo back unless
+    told otherwise), running, with a coredns pod to ping."""
+    from tests.fixtures import mesh_ctx
+
+    c = ctx.require_cluster()
+    assert c.status is not None
+    ctx.cluster = c.model_copy(
+        update={"status": c.status.model_copy(update={"mesh": [peer], "cluster_id": 1})}
+    )
+    other, _ = mesh_ctx(ctx.paths.data_dir, peer, 1)
+    oc = other.require_cluster()
+    assert oc.status is not None
+    oc = oc.model_copy(
+        update={"status": oc.status.model_copy(update={"mesh": ["demo"] if lists_us else []})}
+    )
+    other.state_dir.mkdir(parents=True, exist_ok=True)
+    (other.state_dir / "cluster.yaml").write_text(model.dumps(oc))
+    host.active.add(f"{peer}.target")
+    host.responses[("kubectl", "-n", "kube-system", "get", "pod", "-l", "k8s-app=kube-dns")] = (
+        Result(0, "10.244.8.5", "")
+    )
+
+
+def test_mesh_check_skips_when_not_connected(ctx: Context, host: FakeHost) -> None:
+    healthy(ctx, host)
+    verify.run(ctx, only="mesh")
+    assert "SKIP  mesh — not connected to any cluster" in host.lines
+    assert "[mesh]" in host.lines
+
+
+def test_mesh_check_passes_with_a_connected_peer(ctx: Context, host: FakeHost) -> None:
+    healthy(ctx, host)
+    connected_to(ctx, host, "other")
+    assert verify.run(ctx, only="mesh") == 0
+    assert "PASS  clustermesh status: 1 peer(s) connected" in host.lines
+    assert "PASS  pods of other reachable" in host.lines
+    status = next(c for c in host.calls if c.argv[:3] == ["cilium", "clustermesh", "status"])
+    assert status.argv[3:] == ["--wait", "--wait-duration", "15s"]
+    assert status.env == {"KUBECONFIG": str(ctx.state_dir / "kubeconfig")}
+
+
+def test_mesh_check_fails_by_name_when_the_peer_is_gone(ctx: Context, host: FakeHost) -> None:
+    healthy(ctx, host)
+    c = ctx.require_cluster()
+    assert c.status is not None
+    ctx.cluster = c.model_copy(update={"status": c.status.model_copy(update={"mesh": ["other"]})})
+    assert verify.run(ctx, only="mesh") == 1
+    assert (
+        "FAIL  mesh peer other — cluster.yaml not found (deleted? tkctl disconnect cluster "
+        "demo other)"
+    ) in host.lines
+
+
+def test_mesh_check_fails_when_the_peer_does_not_list_us(ctx: Context, host: FakeHost) -> None:
+    healthy(ctx, host)
+    connected_to(ctx, host, "other", lists_us=False)
+    assert verify.run(ctx, only="mesh") == 1
+    assert (
+        "FAIL  mesh peer other — other does not list demo (tkctl connect cluster demo other)"
+        in (host.lines)
+    )
+
+
+def test_mesh_check_fails_when_clustermesh_status_is_not_ready(
+    ctx: Context, host: FakeHost
+) -> None:
+    healthy(ctx, host)
+    connected_to(ctx, host, "other")
+    host.responses[("cilium", "clustermesh", "status")] = Result(1, "", "waiting")
+    host.responses[("kubectl", "run", "tk-mesh-probe-other")] = Result(1, "", "")
+    assert verify.run(ctx, only="mesh") == 2
+    out = ctx.state_dir / "logs" / "verify-clustermesh.out"
+    assert f"FAIL  clustermesh status — see {out}" in host.lines
+    assert host.files[out] == "waiting"
+    assert (
+        "FAIL  pods of other — demo -> other: pod 10.244.8.5 unreachable from a pod in demo"
+        in host.lines
+    )
+
+
+def test_cilium_status_output_lands_under_the_clusters_logs(ctx: Context, host: FakeHost) -> None:
+    healthy(ctx, host)
+    host.responses[("cilium", "status")] = Result(0, "KVStore: Ok", "")
+    verify.run(ctx, only="cilium")
+    assert host.files[ctx.state_dir / "logs" / "verify-cilium.out"] == "KVStore: Ok"

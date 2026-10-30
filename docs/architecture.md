@@ -50,11 +50,13 @@ templates/                  # 寫到主機上的檔，與實際內容只差 $變
 
 | 網段 | 範圍 | 固定位址 |
 |---|---|---|
-| 節點 | `172.22.N.0/24` | router `.253`（節點的預設閘道，`spec.network.router` 可改）、主機 bridge `.254`（router 的上游）、LoadBalancer 池 `.200`–`.219` |
+| 節點 | `172.22.N.0/24` | router `.253`（節點的預設閘道，`spec.network.router` 可改）、主機 bridge `.254`（router 的上游）、Cluster Mesh 的 apiserver `.200`、LoadBalancer 池 `.201`–`.219` |
 | pod | `10.244.(8N).0/21` | |
 | service | `10.98.N.0/24` | |
 
 要自行指定就寫在 `spec.network`；與既有叢集重疊會被拒絕，`--allow-overlap` 允許。
+
+主機到叢集的路由（`<名稱>-routes.service`）：service 網段與整個 pod /21 經 control-plane-1，另外每個其他節點的 pod /24 直接指到那個節點（`cni/host-routes` 在節點 Ready 後讀 `spec.podCIDR` 記進 cluster.yaml 的 `pod_cidr`，`add node`／`delete node` 跟著更新）。後者是因為 control-plane-1 的 Cilium 走 BPF host routing（netkit 必須），不會把 TCP 轉送給別的節點上的 pod：主機直接打 worker 上的 pod、以及兩個單主機叢集之間的 pod 流量（Cluster Mesh 的回程經主機）都靠這些 /24。
 
 節點的預設路由指向 router，不是主機的 bridge：`.network` 設 `no_default_route=1` 並以 `--route 0.0.0.0/0,<router>` 發給每個容器。router 自己也會拿到那條指向自己的路由，而且 zebra 把它當 kernel route 壓過 VyOS 的 static default，所以 `router/scripts/vyos-postconfig-bootup.script` 開機時把它刪掉，之後 zebra 才裝上指向 `.254` 的那條；容器停止時 netavark 會再刪一次同一條路由，找不到就讓 unit 以失敗收場，所以同一個腳本登記一個 transient unit 在關機時把它放回去；同一個腳本也關掉 router 的 ICMP redirect（主機 bridge 和節點在同一條 link 上，否則 router 轉送每個封包都會叫節點直接走 `.254`）。
 
@@ -130,7 +132,7 @@ tkctl 渲染的是 `tkctl.boot`；VyOS 開機前的 `vyos-preconfig-bootup.scrip
 
 **操作台與 ssh。** 跑 `tkctl` 的機器是操作台：`cluster.yaml` 正本、kubeconfig、`logs/`、`.certificate-key` 在它上面，`kubectl` 與 `cilium` CLI 在它上面跑。對其他主機的每一道指令都是一次 `ssh`（`host.py` 的 `SshHost`，跟本機的 `Host` 同一組方法：`run` 是 `ssh <目標> '<指令>'`，`write` 是 `install -D -m <mode> /dev/stdin <路徑>` 從 stdin 餵內容，`read` 是 `cat`），印出來的 `$` 行就是可以貼回終端的 ssh 形式。ssh 固定 `BatchMode=yes`（host key 未信任或金鑰被拒立刻以 255 失敗，不掛住）與 `ControlMaster=auto`／`ControlPersist=60`（一次 create 對一台主機要跑上百道指令，共用一條連線），socket 放 `$XDG_RUNTIME_DIR/tk8s/`（沒有就暫存目錄下的 `tk8s-<uid>`，必須是自己擁有、別人進不去的真目錄）。`Context.hosts` 是名稱到 Host 的對照，`ctx.host_for(容器名)` 回它所在的主機；對容器做事的程式碼（`podman.exec_`、unit、`systemctl start`）用它，對主機本身做事的 phase（preflight、images、cni-plugins、nodes/up、delete 的大半）對每台各跑一次（`ctx.on(host)`）。叢集跑起來後不依賴操作台：每台主機的 target 重開機自己起來；操作台掛了，把 `clusters/<名稱>/` 搬到別台一樣能管。操作台必須在同一個 L2（preflight 檢查），不能是 macOS。
 
-**網路：macvlan。** 單主機的 bridge 換成 Quadlet 的 `Driver=macvlan`，`parent` 是該主機預設路由出去的介面（每台各自，plan 時從每台的 `ip -j route show default` 與該介面的位址查出，網段與閘道必須一致，記進 `cluster.yaml`，preflight 每次比對）；節點、router 拿 LAN 的位址，跟 LAN 上的一台 VM 沒兩樣。位址來自使用者保留的位址池 `spec.network.range`（一段或多段 `A-B`，逗號分隔；結尾可只寫最後一組，存檔時寫成完整形式），依固定順序切：第 1 個是 router 的浮動位址（`network.router`：節點的閘道、proxy 模式的 apiserver 入口、兩台 router 時的 VRRP 位址），`routers: 2` 時第 2、3 個是 router-1、router-2，操作台若也是節點主機再一個 shim（`network.shim`），接著節點依展開順序，池的最後 5 個是 LoadBalancer 池（Cilium 的 pool 一段一個 block），中間剩下的給 `add node`。pod、service 網段與 bgp 的 VIP 仍用叢集索引 N（`10.244.(8N).0/21`、`10.98.N.0/24`、`172.23.N.1`），索引以操作台上看得到的叢集決定（副本也算），跟單主機一樣可用 `spec.network` 明寫。每個容器的 MAC 由 IP 算出（`02:54:4b:` 加 IP 後三個 byte）：netavark 預設每次建容器都換 MAC，Quadlet 每次啟動都重建容器，固定 IP 換 MAC 會讓 LAN 上的 ARP cache 指到舊 MAC 直到過期。Cilium 的 native routing 加 `autoDirectNodeRoutes` 與 LoadBalancer 的 L2 announcement 都要求節點在同一個 L2，macvlan 剛好滿足；LoadBalancer 的 IP 因此 LAN 上任何機器都連得到。router 仍是節點的預設閘道（它在這個架構裡扮演 ToR：閘道、haproxy 或 BGP 鄰居都是它），再轉給 LAN 的真閘道；bgp 模式的 VIP 路由因此不用改，主機的 `routes.service` 仍是 `VIP/32 via <router 浮動位址>`。
+**網路：macvlan。** 單主機的 bridge 換成 Quadlet 的 `Driver=macvlan`，`parent` 是該主機預設路由出去的介面（每台各自，plan 時從每台的 `ip -j route show default` 與該介面的位址查出，網段與閘道必須一致，記進 `cluster.yaml`，preflight 每次比對）；節點、router 拿 LAN 的位址，跟 LAN 上的一台 VM 沒兩樣。位址來自使用者保留的位址池 `spec.network.range`（一段或多段 `A-B`，逗號分隔；結尾可只寫最後一組，存檔時寫成完整形式），依固定順序切：第 1 個是 router 的浮動位址（`network.router`：節點的閘道、proxy 模式的 apiserver 入口、兩台 router 時的 VRRP 位址），`routers: 2` 時第 2、3 個是 router-1、router-2，操作台若也是節點主機再一個 shim（`network.shim`），接著節點依展開順序，池的最後 6 個：倒數第 6 個保留給 Cluster Mesh 的 apiserver，最後 5 個是 LoadBalancer 池（Cilium 的 pool 一段一個 block），中間剩下的給 `add node`。pod、service 網段與 bgp 的 VIP 仍用叢集索引 N（`10.244.(8N).0/21`、`10.98.N.0/24`、`172.23.N.1`），索引以操作台上看得到的叢集決定（副本也算），跟單主機一樣可用 `spec.network` 明寫。每個容器的 MAC 由 IP 算出（`02:54:4b:` 加 IP 後三個 byte）：netavark 預設每次建容器都換 MAC，Quadlet 每次啟動都重建容器，固定 IP 換 MAC 會讓 LAN 上的 ARP cache 指到舊 MAC 直到過期。Cilium 的 native routing 加 `autoDirectNodeRoutes` 與 LoadBalancer 的 L2 announcement 都要求節點在同一個 L2，macvlan 剛好滿足；LoadBalancer 的 IP 因此 LAN 上任何機器都連得到。router 仍是節點的預設閘道（它在這個架構裡扮演 ToR：閘道、haproxy 或 BGP 鄰居都是它），再轉給 LAN 的真閘道；bgp 模式的 VIP 路由因此不用改，主機的 `routes.service` 仍是 `VIP/32 via <router 浮動位址>`。
 
 **主機 shim。** macvlan 的設計是 parent 介面與它的子介面互不相通：主機自己連不到它上面的節點與 router。需要從主機網路連叢集的只有操作台（kubectl、`/readyz`、verify 的 curl），所以只有「操作台同時是節點主機」時它的 `<名稱>-routes.service`（樣板 `routes-macvlan.service`）在今天的路由之前多建一個 macvlan 子介面 `tk8s-<名稱>`（叢集名稱超過 10 字取前 7 字加兩位 hash，塞進核心的 15 字上限），掛 `/32` 的 shim 位址（不是 LAN 的 prefix：parent 已經有一條 LAN 的 connected route，再掛一條會互相競爭），到 `range` 的路由 `dev tk8s-<名稱> src <shim 位址>`，pod、service、VIP 的路由也都從這個介面出去。其他節點主機沒有 routes unit（tkctl 在它們上面只做 `podman exec`、`systemctl`、寫檔，不經網路）。用 systemd oneshot 而不是主機的網路服務（ifupdown、netplan、NetworkManager、networkd）：主機的網路服務不只一種、shim 的生命週期要跟叢集的 target 走、不碰主機管理員的設定檔。NetworkManager 與 systemd-networkd 會看到新介面，preflight 用它們各自的標準機制排除 `tk8s-*`：`/etc/NetworkManager/conf.d/90-tk8s.conf`（`unmanaged-devices=interface-name:tk8s-*`）與 `/etc/systemd/network/90-tk8s-unmanaged.network`（`Unmanaged=yes`），跟寫 sysctl drop-in 同一類事。操作台不是節點主機時不需要 shim：它到 router 浮動位址走 LAN，只要一份今天的 `routes.service`（pod、service、VIP 三條路由）和一個只 Wants 它的 target，`nodes/up`、`start`、`stop`、`delete` 都把它當一台主機處理。pod／service 的路由跟單主機一樣經 control-plane-1，這是主機上的便利路徑（verify、使用者 curl ClusterIP），不是叢集運作的一部分。
 
@@ -145,6 +147,20 @@ tkctl 渲染的是 `tkctl.boot`；VyOS 開機前的 `vyos-preconfig-bootup.scrip
 **主機的核心參數。** shim 的來源位址是池裡的 `/32`，封包從 shim 出去、回覆從 parent 介面進來：主機若把 `rp_filter` 設成 1（RHEL 系的預設；Debian 是 0 或 2），回覆會被當成來源不對而丟掉，preflight 沒有檢查這個，症狀是操作台 ping 得到容器卻收不到回覆，把該介面的 `net.ipv4.conf.<iface>.rp_filter` 設成 2 即可。`arp_ignore=0`（預設）下，同一台主機上 parent 與 shim 都會回答對方位址的 ARP（ARP flux），對 macvlan 沒有影響，但 `ip neigh` 看到 shim 位址對應 parent 的 MAC 不要意外。
 
 **看得到的現象與邊界。** 主機的 `eth0` 位址連不到自己這台的容器（操作台經 shim），容器也連不到主機的 `eth0` 位址；`lscpu`／`nproc` 等節點內的現象同單主機。`verify` 多一段 `[hosts]`（每台 ssh 可達、target active、shim 存在），單主機不印。這版不支援：`--gvisor`（tarball 要送到每台）、`spec.network.nodes`／`router` 明寫、建立後增減主機（`spec.hosts` 固定；要加主機就重建）、不在同一個 L2 的操作台、把操作台搬到另一台**節點**主機（它需要 shim；搬到非節點的機器只要改 `status.operator` 並補上原操作台的 `ssh`）、`tkctl pull images --hosts`（在每台主機各跑，或讓 create 的 images phase 做）。沒有 `cluster.yaml` 的 `delete cluster` 只認得操作台這台，其他主機要各自跑一次。
+
+## Cluster Mesh
+
+`tkctl connect cluster` 用的是 Cilium Cluster Mesh，叢集本身不多裝什麼，只有建叢集時就備好的三件事：
+
+- cilium 裝的時候帶 `cluster.name=<名稱>`、`cluster.id=<index + 1>`（Cilium 要 1–255，tk8s 的 index 從 0 起）、`ipv4NativeRoutingCIDR=10.244.0.0/16`。前兩個事後改要重啟全部 workload，所以這版之前建的叢集沒有 `status.cluster_id`，`connect` 拒絕並要求重建。第三個是 native routing 下 Cluster Mesh 的要求：涵蓋所有叢集的 pod 網段，`bpf.masquerade` 才不會把跨叢集的 pod 流量 SNAT 成節點位址。cni phase 把 `cluster_id` 與裝的 Cilium 版本記進 `status`。
+- 兩個 LB-IPAM 池，由 tkctl 依 cluster.yaml 生成（`manifests/cilium-lb.yaml` 只剩 L2 policy）：`default-pool` 是 `lb_range`，selector 排除名為 `clustermesh-apiserver` 的 Service；`mesh-pool` 只有 `network.mesh` 那一個位址，selector 只配 `kube-system/clustermesh-apiserver`。位址在 plan 就切好（單主機 `.200`，多主機池尾端倒數第 6 個），`cilium clustermesh enable` 建出 Service 時自動拿到，不用事後 patch。
+- `connect` 的步驟：核對（Running、cluster_id、同形態、id 不同、Cilium 差 ≤ 1 minor）→ 每個叢集 `cilium clustermesh enable --service-type LoadBalancer`，等 Service 拿到保留位址 → 一次 `cilium clustermesh connect --connection-mode mesh --allow-mismatching-ca`（每個叢集保留自己的 CA，對方的加進信任清單；`KUBECONFIG` 以冒號串起每個叢集的檔，context 名就是叢集名）→ 每個 `clustermesh status --wait` → 兩兩探測（control-plane-1 容器 ping 對面的、短命 busybox pod ping 對面的 coredns）→ `status.mesh` 記在每個叢集（多主機的副本一起）。接進已有 mesh 的叢集會把它跟每個成員都接上，mesh 永遠是完全圖。
+
+`disconnect` 跑 `cilium clustermesh disconnect`、兩邊拿掉記錄；對面的 cluster.yaml 已經不在時，改從這邊的 `cilium-clustermesh` secret 刪掉它的 key。`delete cluster` 的第一個 phase `mesh` 先對每個 peer 做這件事，連不上的 peer 只在這邊忘掉並警告。
+
+單主機與多主機不能互接：單主機的節點在主機 bridge 後面，出 LAN 被 podman 的 NAT 換成主機位址，LAN 上的節點也沒有路由回到 bridge 網段，而 Cluster Mesh 要節點位址原樣互通、pod 對 pod 不 SNAT；同一台主機上的 macvlan 節點與主機 bridge 又是隔開的。
+
+為什麼不搬 LoadBalancer 位址：Cilium 與 K8s 都沒有「把一個 LB 位址從這個叢集搬到那個叢集」的機制，要做得自己發明一層（L2 宣告的 selector、每位址一個池、GitOps 會還原的 label），而 Cilium 縮小一個池會讓池裡所有 Service 重配位址（cilium/cilium#40358）。入口位址本來就該由外部 LB 或 DNS 指，所以每個叢集各有自己的入口，切換在外面做。
 
 ## 主機的 sysctl
 

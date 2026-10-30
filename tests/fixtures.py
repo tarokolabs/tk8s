@@ -74,7 +74,7 @@ def ha_user() -> model.UserCluster:
 # resolved from the pool 192.168.1.64-70,192.168.1.80-89 (17 addresses) on the hosts' LAN
 # 192.168.1.0/24 (c reaches it by eth0, the others by ens18): router .64 floating, router-1 .65
 # (a), router-2 .66 (b), the operator's shim .67, control planes .68/.69/.70 on a/b/c, workers
-# .80/.81 on a/b, .82-.84 free for add node, LoadBalancer pool .85-.89, VIP 172.23.0.1.
+# .80/.81 on a/b, .82-.83 free for add node, mesh .84, LoadBalancer pool .85-.89, VIP 172.23.0.1.
 MULTI_YAML = """\
 apiVersion: taroko.io/v1alpha1
 kind: Cluster
@@ -101,6 +101,7 @@ spec:
       - a
       - b
     shim: 192.168.1.67
+    mesh: 192.168.1.84
   nodes:
     - role: control-plane
       name: demo-control-plane-1
@@ -467,3 +468,34 @@ def running_multi_answers(hosts: dict[str, FakeHost], ctx: Context) -> None:
         for r in c.routers:
             if r.host == name:
                 bgp_router_answers(h, router=r.name, ips=cps)
+
+
+def mesh_ctx(
+    data_dir: Path,
+    name: str,
+    index: int,
+    *,
+    cluster_id: bool = True,
+    cilium: str | None = None,
+    user: model.UserCluster | None = None,
+) -> tuple[Context, FakeHost]:
+    """A Ready, Running single-host cluster of the given name and subnet index on its own fake
+    host, with what Cluster Mesh looks at: status.cluster_id (index + 1, or None for a cluster
+    from before mesh support), status.cilium (the pinned version unless given), its
+    cluster.yaml and kubeconfig on disk, the target active."""
+    host = FakeHost()
+    u = (user or DEMO_USER).model_copy(update={"metadata": model.Metadata(name=name)})
+    ctx = make_ctx(host, data_dir, user=None)
+    c = resolved(u, used_indices=set(range(index)))
+    status = model.Status(
+        phase="Ready",
+        tk8s="test",
+        node_capacity=True,
+        cluster_id=index + 1 if cluster_id else None,
+        cilium=cilium or ctx.versions.cilium,
+    )
+    ctx.cluster = c.model_copy(update={"status": status})
+    host.active.add(f"{name}.target")
+    host.files[ctx.state_dir / "cluster.yaml"] = model.dumps(ctx.cluster)
+    host.files[ctx.state_dir / "kubeconfig"] = "kind: Config\n"
+    return ctx, host

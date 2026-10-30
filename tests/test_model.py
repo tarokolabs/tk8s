@@ -236,3 +236,31 @@ def test_a_node_host_on_a_single_host_cluster_is_refused() -> None:
 def test_peek_text_reads_index_and_version_from_any_text() -> None:
     assert model.peek_text("spec: {network: {index: 3}, kubernetes: '1.37.2'}") == (3, "1.37.2")
     assert model.peek_text("garbage: [") == (None, None)
+
+
+def test_node_pod_cidr_is_optional_and_round_trips() -> None:
+    c = model.load_text(GOOD)
+    assert all(n.pod_cidr is None for n in c.spec.nodes)
+    nodes = [c.spec.nodes[0].model_copy(update={"pod_cidr": IPv4Network("10.244.24.0/24")})]
+    text = model.dumps(c.model_copy(update={"spec": c.spec.model_copy(update={"nodes": nodes})}))
+    assert "pod_cidr: 10.244.24.0/24" in text
+    assert model.load_text(text).spec.nodes[0].pod_cidr == IPv4Network("10.244.24.0/24")
+
+
+def test_mesh_fields_default_empty_and_old_files_still_load() -> None:
+    c = model.load_text(GOOD).model_copy(update={"status": model.Status(phase="Ready", tk8s="v1")})
+    assert c.spec.network.mesh is None
+    assert c.status is not None and c.status.cluster_id is None and c.status.cilium is None
+    assert c.status.mesh == []
+    assert "mesh" not in model.dumps(c)  # an empty list is left out of the file
+
+
+def test_mesh_status_round_trips_through_dumps() -> None:
+    c = model.load_text(GOOD).model_copy(update={"status": model.Status(phase="Ready", tk8s="v1")})
+    assert c.status is not None
+    st = c.status.model_copy(update={"cluster_id": 1, "cilium": "1.20.4", "mesh": ["b", "c"]})
+    text = model.dumps(c.model_copy(update={"status": st}))
+    assert "cluster_id: 1" in text and "cilium: 1.20.4" in text
+    assert "mesh:\n    - b\n    - c" in text
+    again = model.load_text(text)
+    assert again.status is not None and again.status.mesh == ["b", "c"]
