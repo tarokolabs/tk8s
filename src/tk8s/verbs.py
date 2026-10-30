@@ -19,6 +19,7 @@ from .args import (
 from .create import DRY_RUN_PHASES, PHASES
 from .create.plan import load_existing, parse_range, resolve, used_indices, used_indices_on
 from .host import DryRunHost, Host
+from .mesh import ops as mesh
 from .node import add as node_add
 from .node import common as node_common
 from .node import delete as node_delete
@@ -161,6 +162,25 @@ def cmd_cluster(verb: str, a: argparse.Namespace) -> int:
     else:
         lifecycle.use(ctx, c)
     return 0
+
+
+# ---- connect / disconnect cluster
+
+
+def cmd_connect(a: argparse.Namespace) -> int:
+    names = list(a.names)
+    if len(names) < 2:
+        raise UsageError("usage: tkctl connect cluster A B [C...]")
+    for n in names:
+        validate_name(n)
+        if names.count(n) > 1:
+            raise UsageError(f"cluster {n} is listed twice")
+    mesh.connect(mesh.members(lambda n: cluster_context(n, "connect"), names))
+    return 0
+
+
+def cmd_disconnect(a: argparse.Namespace) -> int:
+    raise UsageError("usage: tkctl disconnect cluster A B")  # filled in with disconnect
 
 
 # ---- delete cluster

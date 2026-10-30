@@ -8,7 +8,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import images, lifecycle, model, verify, versions
+from . import images, lifecycle, mesh, model, verify, versions
 from .args import UsageError, add_create_flags
 from .create.plan import PlanError
 from .datatree import PreflightError
@@ -19,9 +19,11 @@ from .verbs import (
     HOME,
     cmd_add_node,
     cmd_cluster,
+    cmd_connect,
     cmd_create,
     cmd_delete_cluster,
     cmd_delete_node,
+    cmd_disconnect,
     cmd_get_clusters,
     cmd_images,
     cmd_join_node,
@@ -41,6 +43,10 @@ Usage:
   tkctl start cluster NAME
   tkctl use cluster NAME
   tkctl verify cluster NAME [--phase P] [--list-phases]
+  tkctl connect cluster A B [C...]
+                         (Cilium Cluster Mesh between clusters managed from this host; every
+                         member is connected to every other)
+  tkctl disconnect cluster A B
   tkctl add node CLUSTER --role worker|control-plane [--cpu N] [--memory SIZE] [--host NAME]
                          [--no-join]
   tkctl delete node CLUSTER NODE [--yes] [--phase P] [--list-phases]
@@ -103,6 +109,8 @@ KNOWN_VERBS = {
     "start",
     "use",
     "verify",
+    "connect",
+    "disconnect",
     "add",
     "join",
     "pull",
@@ -118,6 +126,8 @@ NOUNS = {
     "stop": {"cluster"},
     "start": {"cluster"},
     "use": {"cluster"},
+    "connect": {"cluster"},
+    "disconnect": {"cluster"},
     "add": {"node"},
     "join": {"node"},
 }
@@ -210,6 +220,19 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("name", nargs="?")
         if verb == "describe":
             p.add_argument("-o", dest="output", choices=["yaml"])
+    cc = (
+        sub.add_parser("connect", add_help=False)
+        .add_subparsers(dest="noun")
+        .add_parser("cluster", add_help=False)
+    )
+    cc.add_argument("names", nargs="*")
+    dc2 = (
+        sub.add_parser("disconnect", add_help=False)
+        .add_subparsers(dest="noun")
+        .add_parser("cluster", add_help=False)
+    )
+    dc2.add_argument("a", nargs="?")
+    dc2.add_argument("b", nargs="?")
     return ap
 
 
@@ -242,6 +265,7 @@ def main(argv: list[str] | None = None) -> int:
         PreflightError,
         verify.VerifyError,
         lifecycle.ClusterError,
+        mesh.MeshError,
     ) as err:
         print(f"tkctl: {err}", file=sys.stderr)
         return 1
@@ -259,6 +283,8 @@ def _usage_of(verb: str) -> str:
         "stop": "usage: tkctl stop cluster NAME",
         "start": "usage: tkctl start cluster NAME",
         "use": "usage: tkctl use cluster NAME",
+        "connect": "usage: tkctl connect cluster A B [C...]",
+        "disconnect": "usage: tkctl disconnect cluster A B",
         "add": "usage: tkctl add node CLUSTER --role worker|control-plane "
         "[--cpu N] [--memory SIZE] [--host NAME] [--no-join]",
         "join": "usage: tkctl join node CLUSTER NODE",
@@ -305,6 +331,10 @@ def _main(args: list[str]) -> int:
         return cmd_delete_node(a)
     if a.verb in ("describe", "stop", "start", "use") and a.noun == "cluster":
         return cmd_cluster(a.verb, a)
+    if a.verb == "connect" and a.noun == "cluster":
+        return cmd_connect(a)
+    if a.verb == "disconnect" and a.noun == "cluster":
+        return cmd_disconnect(a)
     if a.noun == "images":
         return cmd_images(a.verb, a)
     raise UsageError(f"unknown command '{' '.join(args[:2])}' (see tkctl --help)")

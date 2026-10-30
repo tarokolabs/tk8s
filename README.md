@@ -248,6 +248,8 @@ tkctl stop cluster <名稱>
 tkctl start cluster <名稱>
 tkctl use cluster <名稱>
 tkctl verify cluster <名稱> [--phase P] [--list-phases]
+tkctl connect cluster <a> <b> [<c>...]
+tkctl disconnect cluster <a> <b>
 tkctl add node <叢集> --role worker|control-plane [--cpu N] [--memory SIZE] [--host 名稱] [--no-join]
 tkctl join node <叢集> <節點>
 tkctl delete node <叢集> <節點> [--yes] [--phase P] [--list-phases]

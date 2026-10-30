@@ -869,3 +869,33 @@ def test_a_malformed_ip_range_is_a_usage_error_not_a_traceback(
     rc, out = run(capsys, "create", "cluster", *argv)
     assert rc == 1 and "invalid --ip-range '192.168.1.70-79,x'" in out
     assert "Traceback" not in out
+
+
+def test_connect_cluster_verb(
+    capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tk8s import verbs
+    from tk8s.host import FakeHost
+    from tk8s.mesh import ops
+
+    host = FakeHost()
+    monkeypatch.setattr(verbs, "make_context", lambda **kw: fake_context(host, **kw))
+    for args in (("connect", "cluster"), ("connect", "cluster", "demo")):
+        rc, out = run(capsys, *args)
+        assert rc == 1 and "usage: tkctl connect cluster A B [C...]" in out
+    rc, out = run(capsys, "connect", "cluster", "demo", "demo")
+    assert rc == 1 and "cluster demo is listed twice" in out
+    rc, out = run(capsys, "connect", "cluster", "demo", "nope")
+    assert rc == 1 and f"cluster demo not found under {data_dir}/clusters" in out
+    called: list[list[str]] = []
+    monkeypatch.setattr(ops, "connect", lambda ctxs: called.append([c.cluster_name for c in ctxs]))
+    for name, index in (("demo", 0), ("other", 1)):
+        state = data_dir / "clusters" / name
+        state.mkdir(parents=True)
+        text = TAKEN.replace("taken", name).replace("index: 0", f"index: {index}")
+        text = text.replace("172.22.0.", f"172.22.{index}.")
+        (state / "cluster.yaml").write_text(text)
+    rc, out = run(capsys, "connect", "cluster", "other", "demo")
+    assert rc == 0 and called == [["demo", "other"]]  # members() sorts by name
+    rc, out = run(capsys, "--help")
+    assert "tkctl connect cluster A B [C...]" in out and "tkctl disconnect cluster A B" in out
