@@ -129,7 +129,6 @@ def wait_booted(ctx: Context, r: model.Router) -> None:
     """The boot-time config load holds VyOS for a few seconds after start; a load alongside it
     fails ("Failed to generate committed config") with exit status 0."""
     wait_for(
-        ctx,
         lambda: booted(ctx, r),
         rounds=30,
         delay=ctx.options.poll,
@@ -153,7 +152,7 @@ def wait_synced(ctx: Context, r: model.Router, c: model.Cluster) -> None:
             f"(podman exec {r.name} {show(c)})"
         )
 
-    wait_for(ctx, lambda: synced(ctx, r, c), rounds=30, delay=ctx.options.poll, failure=mismatch)
+    wait_for(lambda: synced(ctx, r, c), rounds=30, delay=ctx.options.poll, failure=mismatch)
     got = len(c.control_planes)
     ctx.say(f"  {r.name}: VyOS up, {got} control plane {kind(c)}(s) at {r.ip}")
 

@@ -234,7 +234,6 @@ def nodes_ready_run(ctx: Context) -> None:
         return pending == []
 
     wait_for(
-        ctx,
         all_ready,
         rounds=60,
         delay=ctx.options.poll_slow,

@@ -19,7 +19,6 @@ from tk8s.create.plan import (
     expand_nodes,
     load_existing,
     majority_host,
-    normalize_range,
     parse_range,
     pick_index,
     place,
@@ -369,7 +368,7 @@ def test_parse_range_takes_several_segments_with_a_short_end() -> None:
         ip(80),
         ip(81),
     ]
-    assert normalize_range("192.168.1.64-66, 192.168.1.80-81") == (
+    assert ranges_text(parse_range("192.168.1.64-66, 192.168.1.80-81")) == (
         "192.168.1.64-192.168.1.66,192.168.1.80-192.168.1.81"
     )
     assert ranges_text([ip(85), ip(86), ip(87), ip(89)]) == "192.168.1.85-192.168.1.87,192.168.1.89"
@@ -384,15 +383,14 @@ def test_parse_range_takes_several_segments_with_a_short_end() -> None:
 def test_allocate_cuts_the_pool_in_the_fixed_order() -> None:
     pool = parse_range("192.168.1.64-70,192.168.1.80-89")  # 17 addresses
     a = allocate(pool, shim=True, routers=2, nodes=5)
-    assert a.router == ip(64) and a.routers == [ip(65), ip(66)] and a.shim == ip(67)
+    assert a.router == ip(64) and a.shim == ip(67)  # .65/.66 are the two routers' own
     assert a.nodes == [ip(68), ip(69), ip(70), ip(80), ip(81)]
     assert a.lb_range == "192.168.1.85-192.168.1.89"
-    assert a.mesh == ip(84)  # just before the LoadBalancer tail
-    assert a.free == [ip(82), ip(83)]
+    assert a.mesh == ip(84)  # just before the LoadBalancer tail; .82-.83 stay free for add node
     one = allocate(pool, shim=False, routers=1, nodes=1)
-    assert one.routers == [] and one.shim is None and one.nodes == [ip(65)]
+    assert one.shim is None and one.nodes == [ip(65)]
     tail = allocate(parse_range("192.168.1.64-70,192.168.1.80-82"), shim=False, routers=1, nodes=3)
-    assert tail.mesh == ip(68) and tail.free == []
+    assert tail.mesh == ip(68)
     assert tail.lb_range == "192.168.1.69-192.168.1.70,192.168.1.80-192.168.1.82"  # the last 5
 
 
@@ -571,7 +569,7 @@ def test_a_pool_touching_the_networks_own_addresses_is_refused() -> None:
 
 def test_a_segment_may_be_a_single_address() -> None:
     assert parse_range("192.168.1.70-72,192.168.1.216") == [ip(70), ip(71), ip(72), ip(216)]
-    assert normalize_range("192.168.1.216") == "192.168.1.216"
+    assert ranges_text(parse_range("192.168.1.216")) == "192.168.1.216"
     u = multi_user()
     pool = "192.168.1.64-70,192.168.1.80-88,192.168.1.90"
     net = model.UserNetwork(ha="bgp", routers=2, range=pool)

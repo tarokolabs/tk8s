@@ -8,7 +8,7 @@ from .. import model, podman
 from ..create import kubeadm, nodefs, router, units
 from ..delete import node_volumes_gone, remove_containers, remove_node_volumes
 from ..host import Host
-from ..lifecycle import ClusterError, save_cluster
+from ..lifecycle import ClusterError
 from ..phases import Context, Phase, PhaseFailed, confirm, wait_for
 from .common import find, require_node, unit_file, without_node
 
@@ -79,7 +79,7 @@ def _wait_router_forgot(ctx: Context, n: model.Node) -> None:
             f"(podman exec {last[0]} {router.show_path(c)})"
         )
 
-    wait_for(ctx, forgotten, rounds=16, delay=ctx.options.poll, failure=still)
+    wait_for(forgotten, rounds=16, delay=ctx.options.poll, failure=still)
 
 
 DRAIN = Phase(
@@ -182,7 +182,7 @@ def entry_done(ctx: Context) -> bool:
 
 
 def entry_run(ctx: Context) -> None:
-    save_cluster(ctx, without_node(ctx.require_cluster(), require_node(ctx)))
+    ctx.save_cluster(without_node(ctx.require_cluster(), require_node(ctx)))
 
 
 ENTRY = Phase("entry", "remove the node from cluster.yaml", entry_done, entry_run)

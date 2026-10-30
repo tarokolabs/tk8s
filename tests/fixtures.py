@@ -308,7 +308,6 @@ def vtysh_bfd(router: str = "demo-router") -> tuple[str, ...]:
 
 VTYSH_SUMMARY = vtysh_summary()
 VTYSH_ROUTE = vtysh_route()
-VTYSH_BFD = vtysh_bfd()
 
 SHOW_VRRP = (
     "Name    Interface      VRID  State      Priority  Last Transition\n"

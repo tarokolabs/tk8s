@@ -208,7 +208,6 @@ def poll_until(probe: Callable[[], bool], *, rounds: int, delay: float) -> bool:
 
 
 def wait_for(
-    ctx: Context,
     probe: Callable[[], bool],
     *,
     rounds: int,

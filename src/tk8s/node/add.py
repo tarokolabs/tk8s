@@ -6,7 +6,7 @@ from ..create import addons, cni, frr, kubeadm, nodes, preflight, router, units
 from ..create import images as create_images
 from ..create.plan import PlanError, check_memory_minimum
 from ..datatree import PreflightError
-from ..lifecycle import ClusterError, save_cluster
+from ..lifecycle import ClusterError
 from ..phases import Context, Phase, PhaseFailed, wait_for
 from .common import (
     find,
@@ -45,7 +45,7 @@ def plan_run(ctx: Context) -> None:
         except (PlanError, PreflightError) as err:
             ctx.cluster = c
             raise PhaseFailed(str(err)) from err
-    save_cluster(ctx, grown)
+    ctx.save_cluster(grown)
     ctx.node = n.name
     where = f" on {n.host}" if n.host else ""
     ctx.say(f"  {n.name}: {n.role} at {n.ip}{where}, {n.cpu} cpu, {n.memory}")
@@ -107,7 +107,6 @@ def ready_done(ctx: Context) -> bool:
 def ready_run(ctx: Context) -> None:
     n = node_of(ctx)
     wait_for(
-        ctx,
         lambda: node_ready(ctx, n.name),
         rounds=60,
         delay=ctx.options.poll_slow,
@@ -131,7 +130,7 @@ def record_done(ctx: Context) -> bool:
 
 
 def record_run(ctx: Context) -> None:
-    save_cluster(ctx, marked_joined(ctx.require_cluster(), require_node(ctx)))
+    ctx.save_cluster(marked_joined(ctx.require_cluster(), require_node(ctx)))
 
 
 RECORD = Phase("record", "record join: true in cluster.yaml", record_done, record_run)

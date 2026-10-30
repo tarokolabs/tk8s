@@ -68,7 +68,7 @@ def remove_stale_volumes(ctx: Context, nodes: list[model.Node] | None = None) ->
     """A leftover <node>-var volume from an earlier cluster carries old kubelet/etcd state and
     makes kubeadm preflight fail. Drop it when the node container is new and no cluster exists.
     `nodes`: the ones on ctx.host (a host of a multi-host cluster); the kubeconfig that says
-    "a cluster exists" is the operator's, so the caller passes `has_kubeconfig`."""
+    "a cluster exists" is the operator's,."""
     c = ctx.require_cluster()
     if nodes is None and ctx.host.exists(ctx.state_dir / "kubeconfig"):
         return
@@ -91,14 +91,12 @@ def wait_node(ctx: Context, node: str) -> None:
         return last[-1] in ("running", "degraded")
 
     wait_for(
-        ctx,
         systemd_up,
         rounds=90,
         delay=ctx.options.poll,
         failure=lambda: f"{node} did not reach a running systemd state (journalctl -u {node})",
     )
     wait_for(
-        ctx,
         lambda: podman.node_active(ctx, node, "crio"),
         rounds=60,
         delay=ctx.options.poll,

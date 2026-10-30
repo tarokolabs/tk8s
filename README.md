@@ -155,7 +155,7 @@ sudo route -n add 172.22.0.0/24 <主機 IP>          # macOS
 route add 172.22.0.0 mask 255.255.255.0 <主機 IP>  # Windows
 ```
 
-多主機叢集的節點與 LoadBalancer IP 本來就在 LAN 上，區網內任何機器直接連得到，不用加路由；ClusterIP 只有叢集的主機（經 `tk8s-<名稱>` 這個 shim 介面）連得到。
+多主機叢集的節點與 LoadBalancer IP 本來就在 LAN 上，區網內任何機器直接連得到，不用加路由；ClusterIP 只有操作台連得到（它的 routes unit 經 `tk8s-<名稱>` 這個 shim 介面把路由指進叢集）。
 
 ### 多主機
 
@@ -184,7 +184,7 @@ tkctl disconnect cluster a b        # 斷開一對；delete cluster 會自己先
 
 - 條件（`connect` 會核對，不過就拒絕並說明）：兩個叢集都 Running；都是這版之後建的（Cilium 的 `cluster.name`／`cluster.id` 裝的時候就要設好，之前建的要重建）；同一種形態（都單主機或都多主機，混接不支援：單主機的節點躲在主機的 NAT 後面，LAN 上的節點連不到它們）；Cilium 版本差不超過一個 minor（藍綠升版時舊叢集的 Cilium 本來就可能舊一版）。
 - 每個叢集的 LB 池留了一個位址給 clustermesh-apiserver（單主機 `.200`，多主機池尾端倒數第 6 個），`connect` 時才會真的裝上去。
-- `connect` 做完會從兩邊各 ping 對面的節點與 pod；探測失敗會印 `FAIL` 並以結束碼 1 收場，但 mesh 已經接上（問題在網路，`disconnect` 可以還原）。
+- `connect` 做完會從兩邊探測對面：節點之間 ping，pod 之間以 HTTP 打對面 coredns 的 readiness（pod 沒有 NET_RAW，不能 ping）；探測失敗會印 `FAIL` 並以結束碼 1 收場，但 mesh 已經接上（問題在網路，`disconnect` 可以還原）。
 - global service 是 Cilium 原生的，tkctl 不包也不代標：兩邊同 namespace 同 name 的 Service 都加 `service.cilium.io/global: "true"`（一邊沒有 pod 也可以，流量就全去另一邊）；`service.cilium.io/shared: "false"` 讓這邊的 backend 不分享出去；`service.cilium.io/affinity: local|remote|none` 調偏好。`externalTrafficPolicy: Local` 的 Service 從 LoadBalancer 位址或 NodePort 進來只打本節點的 backend，對面永遠不算；叢集內用 ClusterIP 不受影響。
 - DNS：每個叢集的 cluster domain 是 `<名稱>.k8s`，pod 用短名（`echo`、`echo.default`、`echo.default.svc`）兩邊都通；寫死完整 FQDN 的 workload 搬叢集要改最後一段。
 - 對外入口：HTTP/HTTPS/gRPC 走 Gateway API（一個叢集一個入口位址，換叢集時外面只改一個位址，HTTPRoute 的權重就是逐步切流量的工具）；非 HTTP 走 LoadBalancer Service；前面已有外部負載平衡器時讓它只做 L4，L7 交給叢集裡的 Gateway。Cilium 的 Gateway controller 在 cilium-operator 重啟後可能不回來（上游 cilium/cilium#48083，`verify` 的 `cilium-operator` 檢查會指出），復原是 `kubectl -n kube-system rollout restart deploy/cilium-operator`。

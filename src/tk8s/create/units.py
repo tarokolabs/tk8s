@@ -222,9 +222,8 @@ def node_routes(c: model.Cluster, verb: str, dev: str) -> str:
     )
 
 
-def routes_current(ctx: Context, cluster: model.Cluster | None = None) -> bool:
+def routes_current(ctx: Context, c: model.Cluster) -> bool:
     """The routes unit on the host that has one holds exactly what cluster.yaml renders."""
-    c = cluster or ctx.require_cluster()
     path = ctx.paths.systemd_dir / f"{c.name}-routes.service"
     for hf in per_host(ctx, c):
         if path in hf.files and hf.host.read(path, sudo=needs_sudo(ctx, path)) != hf.files[path]:
@@ -232,10 +231,9 @@ def routes_current(ctx: Context, cluster: model.Cluster | None = None) -> bool:
     return True
 
 
-def write_routes(ctx: Context, cluster: model.Cluster | None = None) -> None:
+def write_routes(ctx: Context, c: model.Cluster) -> None:
     """The routes unit rendered again (the pod CIDRs changed) on the host that has one, then
     reloaded and restarted so the routes follow."""
-    c = cluster or ctx.require_cluster()
     path = ctx.paths.systemd_dir / f"{c.name}-routes.service"
     for hf in per_host(ctx, c):
         if path not in hf.files:
