@@ -461,15 +461,17 @@ def test_cluster_verbs_reach_lifecycle(
     (state / "cluster.yaml").write_text(host.files[state / "cluster.yaml"])
     rc, out = run(capsys, "get", "clusters")
     assert rc == 0 and out.startswith("NAME") and "demo " in out
-    assert asked[-1].get("quiet") is True  # read-only verbs print no `$` lines
-    rc, out = run(capsys, "describe", "cluster", "demo")
+    assert not asked[-1].get("verbose")  # read-only verbs never print `$` lines
+    rc, out = run(capsys, "describe", "cluster", "demo", "-v")
     assert rc == 0 and "Name:        demo" in out and "Status:" in out
-    assert asked[-1].get("quiet") is True
+    assert not asked[-1].get("verbose")
     rc, out = run(capsys, "describe", "cluster", "demo", "-o", "yaml")
     assert rc == 0 and out.startswith("apiVersion")
     rc, out = run(capsys, "stop", "cluster", "demo")
     assert rc == 0 and out.rstrip().endswith("cluster demo stopped")
-    assert not asked[-1].get("quiet")
+    assert not asked[-1].get("verbose") and "  $ " not in out  # the default is the short form
+    rc, out = run(capsys, "-v", "stop", "cluster", "demo")  # -v before the verb reaches the context
+    assert rc == 0 and asked[-1].get("verbose") is True
     rc, out = run(capsys, "start", "cluster", "demo")
     assert rc == 0 and ["systemctl", "start", "demo.target"] in [k.argv for k in host.calls]
     monkeypatch.setenv("HOME", str(data_dir / "home"))
@@ -943,3 +945,18 @@ def test_disconnect_cluster_verb(
     )
     rc, out = run(capsys, "disconnect", "cluster", "demo", "nope")  # recorded, file gone
     assert rc == 0 and called[-1] == ("demo", None, "nope")
+
+
+def test_verbose_adds_the_command_lines_and_quiet_is_gone(
+    capsys: pytest.CaptureFixture[str], data_dir: Path
+) -> None:
+    rc, out = run(capsys, "create", "cluster", "demo", "--dry-run")
+    assert rc == 0 and "[units]" in out and "  $ " not in out
+    rc, out = run(capsys, "create", "cluster", "demo", "--dry-run", "-v")
+    assert rc == 0 and "  $ ln -sfn /sys/devices/system/cpu/cpu0 " in out
+    rc, out = run(capsys, "--verbose", "create", "cluster", "demo", "--dry-run")
+    assert rc == 0 and "  $ ln -sfn " in out
+    rc, out = run(capsys, "create", "cluster", "demo", "--dry-run", "--quiet")
+    assert rc != 0 and "unrecognized arguments: --quiet" in out
+    rc, out = run(capsys, "--help")
+    assert "-v, --verbose" in out and "--quiet" not in out

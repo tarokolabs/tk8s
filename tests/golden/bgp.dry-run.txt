@@ -688,16 +688,6 @@ ExecStop=-ip route del 10.244.0.0/21 via 172.22.0.1
 ExecStop=-ip route del 10.98.0.0/24 via 172.22.0.1
 ExecStop=-ip route del 172.23.0.1/32 via 172.22.0.253
 
-  $ ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/bgp/nodes/bgp-control-plane-1/sys-node/node0/cpu0
-  $ ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/bgp/nodes/bgp-control-plane-1/sys-node/node0/cpu1
-  $ ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/bgp/nodes/bgp-control-plane-2/sys-node/node0/cpu0
-  $ ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/bgp/nodes/bgp-control-plane-2/sys-node/node0/cpu1
-  $ ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/bgp/nodes/bgp-control-plane-3/sys-node/node0/cpu0
-  $ ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/bgp/nodes/bgp-control-plane-3/sys-node/node0/cpu1
-  $ ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/bgp/nodes/bgp-worker-1/sys-node/node0/cpu0
-  $ ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/bgp/nodes/bgp-worker-1/sys-node/node0/cpu1
-  $ ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/bgp/nodes/bgp-worker-2/sys-node/node0/cpu0
-  $ ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/bgp/nodes/bgp-worker-2/sys-node/node0/cpu1
 
 [kubeadm/render] write the kubeadm init configuration into the state dir
 # ---- <TMP>/clusters/bgp/init-config.yaml

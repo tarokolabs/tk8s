@@ -76,7 +76,7 @@ tkctl create cluster bare --skip-phases cni,addons    # 只做到 kubeadm，CNI 
 cluster demo is ready
 ```
 
-每個 `[phase]` 一行，其下每道指令一行 `$ …`（寫入檔案的內容用 `--dry-run` 看）；`already done` 表示這一步先前已完成。中斷後再執行同一個指令，已完成的跳過、未完成的接著做；`tkctl describe cluster demo` 的 `Status:` 列出哪些 phase 何時完成、下一步是什麼。
+每個 `[phase]` 一行，其下是結果行；加 `-v`（放哪裡都行，`tkctl -v create …`）會多印每道指令一行 `$ …`，貼回去就能重跑（上面的範例是 `-v` 的輸出；寫入檔案的內容用 `--dry-run` 看）；`already done` 表示這一步先前已完成。中斷後再執行同一個指令，已完成的跳過、未完成的接著做；`tkctl describe cluster demo` 的 `Status:` 列出哪些 phase 何時完成、下一步是什麼。
 
 步驟的切法仿照 kubeadm 的 phase，`--phase`、`--skip-phases`、`--list-phases` 的用法也一樣：
 
@@ -266,13 +266,13 @@ tkctl create cluster -f tkdt.yaml
 
 ## 指令
 
-kubectl 風格，動詞在前。全部如下：
+kubectl 風格，動詞在前，`-v`／`--verbose` 可以加在任何位置（多印每道 `$` 指令）。全部如下：
 
 ```
 tkctl create cluster [名稱] [--control-planes N] [--workers N] [--cpu N] [--memory SIZE]
                      [--k8s 版本] [--datapath auto|netkit|veth] [--gvisor] [--ha proxy|bgp] [--defer-join]
                      [--routers 1|2] [--hosts 清單] [--ip-range A-B] [--mode lab|ha] [-f cluster.yaml]
-                     [--allow-overlap] [--dry-run] [--phase P] [--skip-phases P,...] [--list-phases] [--quiet]
+                     [--allow-overlap] [--dry-run] [--phase P] [--skip-phases P,...] [--list-phases]
 tkctl delete cluster <名稱> [--yes] [--phase P] [--list-phases]
 tkctl get clusters
 tkctl describe cluster <名稱> [-o yaml]

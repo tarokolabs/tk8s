@@ -53,7 +53,7 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
     topo = any(a == f or a.startswith(f + "=") for a in raw for f in flags)  # --ha bgp, --ha=bgp
     mode = apply_mode(a, raw)
     user = user_cluster_from_file(a, topo) if a.file else user_cluster_from_flags(a)
-    ctx = make_context(dry_run=a.dry_run, quiet=a.quiet, mode=mode)
+    ctx = make_context(dry_run=a.dry_run, verbose=a.verbose, mode=mode)
     name = user.metadata.name
     existing = load_existing(ctx.paths, name)
     if existing is not None and existing.status is None:
@@ -68,7 +68,7 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
     lans, operator = None, None
     if user.spec.hosts is not None:
         ctx.hosts = hosts.build(
-            ctx.host, user.spec.hosts, say=print, quiet=a.quiet, dry_run=a.dry_run
+            ctx.host, user.spec.hosts, say=print, quiet=not a.verbose, dry_run=a.dry_run
         )
         if a.dry_run:
             assert user.spec.network is not None and user.spec.network.range is not None
@@ -126,7 +126,9 @@ def cmd_verify(a: argparse.Namespace) -> int:
     if a.list_phases:
         print("\n".join(tree(verify.PHASES)))
         return 0
-    ctx = cluster_context(a.name, "verify", usage="usage: tkctl verify cluster NAME [--phase P]")
+    ctx = cluster_context(
+        a.name, "verify", verbose=a.verbose, usage="usage: tkctl verify cluster NAME [--phase P]"
+    )
     return 1 if verify.run(ctx, only=a.phase) else 0
 
 
@@ -134,24 +136,24 @@ def cmd_verify(a: argparse.Namespace) -> int:
 
 
 def cluster_context(
-    name: str | None, verb: str, *, quiet: bool = False, usage: str | None = None
+    name: str | None, verb: str, *, verbose: bool = False, usage: str | None = None
 ) -> Context:
     """The context of an existing cluster, for the verbs that take `cluster NAME`."""
     if not name:
         raise UsageError(usage or f"usage: tkctl {verb} cluster NAME")
-    ctx = make_context(quiet=quiet)
+    ctx = make_context(verbose=verbose)
     lifecycle.load_cluster(ctx, validate_name(name))
     return ctx
 
 
 def cmd_get_clusters() -> int:
-    lifecycle.list_clusters(make_context(quiet=True))
+    lifecycle.list_clusters(make_context())
     return 0
 
 
 def cmd_cluster(verb: str, a: argparse.Namespace) -> int:
     looking = verb == "describe"  # read-only verbs print no `$` lines: nothing to redo
-    ctx = cluster_context(a.name, verb, quiet=looking)
+    ctx = cluster_context(a.name, verb, verbose=a.verbose and not looking)
     c = ctx.require_cluster()
     if verb == "describe":
         lifecycle.describe(ctx, c, a.output)
@@ -175,7 +177,7 @@ def cmd_connect(a: argparse.Namespace) -> int:
         validate_name(n)
         if names.count(n) > 1:
             raise UsageError(f"cluster {n} is listed twice")
-    mesh.connect(mesh.members(lambda n: cluster_context(n, "connect"), names))
+    mesh.connect(mesh.members(lambda n: cluster_context(n, "connect", verbose=a.verbose), names))
     return 0
 
 
@@ -186,9 +188,9 @@ def cmd_disconnect(a: argparse.Namespace) -> int:
     validate_name(a.b)
     if a.a == a.b:
         raise UsageError(f"cluster {a.a} is listed twice")
-    ctx = cluster_context(a.a, "disconnect")
+    ctx = cluster_context(a.a, "disconnect", verbose=a.verbose)
     try:
-        peer: Context | None = cluster_context(a.b, "disconnect")
+        peer: Context | None = cluster_context(a.b, "disconnect", verbose=a.verbose)
     except lifecycle.ClusterNotFound:
         peer = None  # gone: its side cannot be told, ours forgets it
     c = ctx.require_cluster()
@@ -208,7 +210,7 @@ def cmd_delete_cluster(a: argparse.Namespace) -> int:
     if not a.name:
         raise UsageError("usage: tkctl delete cluster NAME [--yes]")
     name = validate_name(a.name)
-    ctx = make_context(assume_yes=a.yes)
+    ctx = make_context(assume_yes=a.yes, verbose=a.verbose)
     ctx.name = name
     try:
         lifecycle.load_cluster(ctx, name)
@@ -255,7 +257,7 @@ def cmd_add_node(a: argparse.Namespace) -> int:
     if a.cpu is not None and a.cpu < 1:
         raise UsageError("--cpu must be a positive integer")
     memory = normalize_memory(a.memory) if a.memory else None
-    ctx = make_context()
+    ctx = make_context(verbose=a.verbose)
     c = running_cluster(ctx, a.cluster)
     ctx.request = model.NodeRequest(role=a.role, cpu=a.cpu, memory=memory, host=a.host)
     Runner([node_add.add_phase(join=not a.no_join)], record=False).run(ctx)
@@ -271,7 +273,7 @@ def cmd_join_node(a: argparse.Namespace) -> int:
     if not a.cluster or not a.node:
         raise UsageError("usage: tkctl join node CLUSTER NODE")
     validate_node_name(a.node)
-    ctx = make_context()
+    ctx = make_context(verbose=a.verbose)
     c = running_cluster(ctx, a.cluster)
     if node_common.find(c, a.node) is None:
         raise lifecycle.ClusterError(f"node {a.node} not found in cluster {c.name}")
@@ -289,7 +291,7 @@ def cmd_delete_node(a: argparse.Namespace) -> int:
     if not a.cluster or not a.node:
         raise UsageError("usage: tkctl delete node CLUSTER NODE [--yes]")
     validate_node_name(a.node)
-    ctx = make_context(assume_yes=a.yes)
+    ctx = make_context(assume_yes=a.yes, verbose=a.verbose)
     c = running_cluster(ctx, a.cluster)
     ctx.node = a.node
     # entry is the last phase: an interrupted delete still finds the node
@@ -310,7 +312,11 @@ def cmd_images(verb: str, a: argparse.Namespace) -> int:
         validate_k8s(a.k8s)
     if verb == "delete" and not a.k8s:
         raise UsageError("usage: tkctl delete images --k8s VERSION [--yes]")
-    ctx = make_context(assume_yes=getattr(a, "yes", False), refresh=getattr(a, "refresh", False))
+    ctx = make_context(
+        assume_yes=getattr(a, "yes", False),
+        refresh=getattr(a, "refresh", False),
+        verbose=a.verbose,
+    )
     k8s = a.k8s or ctx.versions.kubernetes.default
     if verb == "pull":
         images.ensure(ctx, k8s)
@@ -329,7 +335,7 @@ def cmd_images(verb: str, a: argparse.Namespace) -> int:
 def make_context(
     *,
     dry_run: bool = False,
-    quiet: bool = False,
+    verbose: bool = False,
     assume_yes: bool = False,
     refresh: bool = False,
     mode: str | None = None,
@@ -343,6 +349,7 @@ def make_context(
         refresh=refresh,
         verify_timeout=int(os.environ.get("TK_VERIFY_TIMEOUT") or 180),
     )
+    quiet = not verbose  # the `$ command` lines are -v's; [phase] and result lines always show
     host: Host = DryRunHost(print, quiet=quiet) if dry_run else Host(print, quiet=quiet)
     return Context(
         host=host,

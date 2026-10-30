@@ -129,7 +129,6 @@ def add_create_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--phase")
     p.add_argument("--skip-phases", default="")
     p.add_argument("--list-phases", action="store_true")
-    p.add_argument("--quiet", action="store_true")
 
 
 def user_cluster_from_flags(a: argparse.Namespace) -> model.UserCluster:

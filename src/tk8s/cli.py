@@ -34,6 +34,7 @@ USAGE = """\
 tkctl: create and manage tk8s Kubernetes clusters on one podman host or several (--hosts).
 
 Usage:
+  tkctl [-v] <verb> <noun> ...   (-v, --verbose: also print each `$ command`; goes anywhere)
   tkctl create cluster [NAME] [flags]
   tkctl create cluster --list-phases
   tkctl delete cluster NAME [--yes] [--phase P] [--list-phases]
@@ -87,7 +88,6 @@ Create flags:
                          the host
   --phase P              run one phase (or one subtree, e.g. kubeadm) instead of all of them
   --skip-phases P,...    phases to skip
-  --quiet                hide the `$ command` lines (the [phase] lines always show)
 
 NAME must match ^[a-z][a-z0-9-]{0,15}$ (it becomes the DNS domain NAME.k8s).
 
@@ -298,6 +298,13 @@ def _main(args: list[str]) -> int:
         if plugins:
             print(f"Plugins found on PATH: {' '.join(plugins)}   (tkctl <plugin> ...)")
         return 0 if args else 1
+    # -v anywhere on the line (before or after the verb); a plugin's own -v is its business
+    verbose = any(x in ("-v", "--verbose") for x in args)
+    stripped = [x for x in args if x not in ("-v", "--verbose")]
+    if stripped and stripped[0] in KNOWN_VERBS:
+        args = stripped
+    else:
+        verbose = False
     verb = args[0]
     if verb == "version":
         print(f"tkctl {tk8s_version(HOME)}")
@@ -315,6 +322,7 @@ def _main(args: list[str]) -> int:
         a = build_parser().parse_args(args)
     except SystemExit as err:  # argparse already printed "unrecognized arguments: ..."
         return int(err.code or 1)
+    a.verbose = verbose
     if a.verb == "create" and a.noun == "cluster":
         return cmd_create(a, args)
     if a.verb == "verify" and a.noun == "cluster":

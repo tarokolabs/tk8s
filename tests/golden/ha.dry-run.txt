@@ -642,26 +642,6 @@ ExecStart=ip route replace 10.98.0.0/24 via 172.22.0.1
 ExecStop=-ip route del 10.244.0.0/21 via 172.22.0.1
 ExecStop=-ip route del 10.98.0.0/24 via 172.22.0.1
 
-  $ ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/ha/nodes/ha-control-plane-1/sys-node/node0/cpu0
-  $ ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/ha/nodes/ha-control-plane-1/sys-node/node0/cpu1
-  $ ln -sfn /sys/devices/system/cpu/cpu2 <TMP>/clusters/ha/nodes/ha-control-plane-1/sys-node/node0/cpu2
-  $ ln -sfn /sys/devices/system/cpu/cpu3 <TMP>/clusters/ha/nodes/ha-control-plane-1/sys-node/node0/cpu3
-  $ ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/ha/nodes/ha-control-plane-2/sys-node/node0/cpu0
-  $ ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/ha/nodes/ha-control-plane-2/sys-node/node0/cpu1
-  $ ln -sfn /sys/devices/system/cpu/cpu2 <TMP>/clusters/ha/nodes/ha-control-plane-2/sys-node/node0/cpu2
-  $ ln -sfn /sys/devices/system/cpu/cpu3 <TMP>/clusters/ha/nodes/ha-control-plane-2/sys-node/node0/cpu3
-  $ ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/ha/nodes/ha-control-plane-3/sys-node/node0/cpu0
-  $ ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/ha/nodes/ha-control-plane-3/sys-node/node0/cpu1
-  $ ln -sfn /sys/devices/system/cpu/cpu2 <TMP>/clusters/ha/nodes/ha-control-plane-3/sys-node/node0/cpu2
-  $ ln -sfn /sys/devices/system/cpu/cpu3 <TMP>/clusters/ha/nodes/ha-control-plane-3/sys-node/node0/cpu3
-  $ ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/ha/nodes/ha-worker-1/sys-node/node0/cpu0
-  $ ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/ha/nodes/ha-worker-1/sys-node/node0/cpu1
-  $ ln -sfn /sys/devices/system/cpu/cpu2 <TMP>/clusters/ha/nodes/ha-worker-1/sys-node/node0/cpu2
-  $ ln -sfn /sys/devices/system/cpu/cpu3 <TMP>/clusters/ha/nodes/ha-worker-1/sys-node/node0/cpu3
-  $ ln -sfn /sys/devices/system/cpu/cpu0 <TMP>/clusters/ha/nodes/ha-worker-2/sys-node/node0/cpu0
-  $ ln -sfn /sys/devices/system/cpu/cpu1 <TMP>/clusters/ha/nodes/ha-worker-2/sys-node/node0/cpu1
-  $ ln -sfn /sys/devices/system/cpu/cpu2 <TMP>/clusters/ha/nodes/ha-worker-2/sys-node/node0/cpu2
-  $ ln -sfn /sys/devices/system/cpu/cpu3 <TMP>/clusters/ha/nodes/ha-worker-2/sys-node/node0/cpu3
 
 [kubeadm/render] write the kubeadm init configuration into the state dir
 # ---- <TMP>/clusters/ha/init-config.yaml
