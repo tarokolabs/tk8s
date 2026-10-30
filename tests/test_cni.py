@@ -261,3 +261,18 @@ def test_host_routes_phase_is_not_done_while_a_node_has_no_cidr_yet(
     )
     with pytest.raises(PhaseFailed, match=r"demo-worker-1 has no pod CIDR yet"):
         Runner([cni.PHASE], only="cni/host-routes").run(ctx)
+
+
+def test_host_routes_refuses_a_pod_cidr_outside_the_clusters_pod_subnet(
+    ctx: Context, host: FakeHost
+) -> None:
+    """What the apiserver reports becomes a host route: only a /24 inside the cluster's own
+    pod subnet is accepted."""
+    host.responses[("kubectl", "get", "nodes", "-o", f"jsonpath={cni.POD_CIDRS}")] = Result(
+        0, "demo-control-plane-1 10.244.0.0/24\ndemo-worker-1 192.168.1.0/24\n", ""
+    )
+    with pytest.raises(
+        PhaseFailed, match=r"demo-worker-1 reports pod CIDR 192.168.1.0/24 outside 10.244.0.0/21"
+    ):
+        Runner([cni.PHASE], only="cni/host-routes").run(ctx)
+    assert "pod_cidr" not in host.files.get(ctx.state_dir / "cluster.yaml", "")

@@ -275,11 +275,21 @@ def node_pod_cidrs(ctx: Context) -> dict[str, str]:
 
 def with_pod_cidrs(c: model.Cluster, cidrs: dict[str, str]) -> model.Cluster:
     """cluster.yaml's nodes with the pod CIDRs Kubernetes reports; a node Kubernetes has not
-    registered keeps what it had."""
-    nodes = [
-        n.model_copy(update={"pod_cidr": IPv4Network(cidrs[n.name])}) if cidrs.get(n.name) else n
-        for n in c.spec.nodes
-    ]
+    registered keeps what it had. What is reported becomes a host route, so only a prefix inside
+    the cluster's own pod subnet is accepted."""
+    pods = c.spec.network.pods
+    nodes: list[model.Node] = []
+    for n in c.spec.nodes:
+        if not cidrs.get(n.name):
+            nodes.append(n)
+            continue
+        try:
+            cidr = IPv4Network(cidrs[n.name])
+        except ValueError as err:
+            raise PhaseFailed(f"{n.name} reports pod CIDR {cidrs[n.name]!r}: {err}") from err
+        if not cidr.subnet_of(pods) or cidr == pods:
+            raise PhaseFailed(f"{n.name} reports pod CIDR {cidr} outside {pods}")
+        nodes.append(n.model_copy(update={"pod_cidr": cidr}))
     return c.model_copy(update={"spec": c.spec.model_copy(update={"nodes": nodes})})
 
 
