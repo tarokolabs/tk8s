@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -222,7 +224,8 @@ def test_cilium_outputs_land_under_the_clusters_logs(ctx: Context, host: FakeHos
     cni.install_cilium(ctx)
     logs = ctx.state_dir / "logs"
     assert logs / "cilium.out" in host.files and logs / "cilium-status.out" in host.files
-    assert not any(str(p).startswith("/tmp/") for p in host.files)
+    # nothing lands straight in /tmp (pytest's own tmp_path may live under /tmp on Linux)
+    assert not any(p.parent == Path("/tmp") for p in host.files)
 
 
 POD_CIDRS = (
