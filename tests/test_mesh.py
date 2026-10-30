@@ -75,7 +75,8 @@ def test_connect_enables_connects_waits_probes_and_records(tmp_path: Path) -> No
         f"{b.state_dir}/kubeconfig",
     ]
     order = [c.argv[2] for c in ha.calls if c.argv[:2] == ["cilium", "clustermesh"]]
-    assert order == ["enable", "status", "enable", "status", "connect", "status", "status"]
+    # other is already enabled (its Service holds the address from the start): no enable
+    assert order == ["enable", "status", "status", "connect", "status", "status"]
     assert peers(ha, a) == ["other"] and peers(hb, b) == ["demo"]
     assert "  demo: peers other" in ha.lines and "  other: peers demo" in ha.lines
     assert ha.lines[-1] == "clusters demo, other connected"
