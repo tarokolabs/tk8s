@@ -146,6 +146,20 @@ tkctl 渲染的是 `tkctl.boot`；VyOS 開機前的 `vyos-preconfig-bootup.scrip
 
 **看得到的現象與邊界。** 主機的 `eth0` 位址連不到自己這台的容器（操作台經 shim），容器也連不到主機的 `eth0` 位址；`lscpu`／`nproc` 等節點內的現象同單主機。`verify` 多一段 `[hosts]`（每台 ssh 可達、target active、shim 存在），單主機不印。這版不支援：`--gvisor`（tarball 要送到每台）、`spec.network.nodes`／`router` 明寫、建立後增減主機（`spec.hosts` 固定；要加主機就重建）、不在同一個 L2 的操作台、把操作台搬到另一台**節點**主機（它需要 shim；搬到非節點的機器只要改 `status.operator` 並補上原操作台的 `ssh`）、`tkctl pull images --hosts`（在每台主機各跑，或讓 create 的 images phase 做）。沒有 `cluster.yaml` 的 `delete cluster` 只認得操作台這台，其他主機要各自跑一次。
 
+## Cluster Mesh
+
+`tkctl connect cluster` 用的是 Cilium Cluster Mesh，叢集本身不多裝什麼，只有建叢集時就備好的三件事：
+
+- cilium 裝的時候帶 `cluster.name=<名稱>`、`cluster.id=<index + 1>`（Cilium 要 1–255，tk8s 的 index 從 0 起）、`ipv4NativeRoutingCIDR=10.244.0.0/16`。前兩個事後改要重啟全部 workload，所以這版之前建的叢集沒有 `status.cluster_id`，`connect` 拒絕並要求重建。第三個是 native routing 下 Cluster Mesh 的要求：涵蓋所有叢集的 pod 網段，`bpf.masquerade` 才不會把跨叢集的 pod 流量 SNAT 成節點位址。cni phase 把 `cluster_id` 與裝的 Cilium 版本記進 `status`。
+- 兩個 LB-IPAM 池，由 tkctl 依 cluster.yaml 生成（`manifests/cilium-lb.yaml` 只剩 L2 policy）：`default-pool` 是 `lb_range`，selector 排除名為 `clustermesh-apiserver` 的 Service；`mesh-pool` 只有 `network.mesh` 那一個位址，selector 只配 `kube-system/clustermesh-apiserver`。位址在 plan 就切好（單主機 `.200`，多主機池尾端倒數第 6 個），`cilium clustermesh enable` 建出 Service 時自動拿到，不用事後 patch。
+- `connect` 的步驟：核對（Running、cluster_id、同形態、id 不同、Cilium 差 ≤ 1 minor）→ 每個叢集 `cilium clustermesh enable --service-type LoadBalancer`，等 Service 拿到保留位址 → 一次 `cilium clustermesh connect --connection-mode mesh --allow-mismatching-ca`（每個叢集保留自己的 CA，對方的加進信任清單；`KUBECONFIG` 以冒號串起每個叢集的檔，context 名就是叢集名）→ 每個 `clustermesh status --wait` → 兩兩探測（control-plane-1 容器 ping 對面的、短命 busybox pod ping 對面的 coredns）→ `status.mesh` 記在每個叢集（多主機的副本一起）。接進已有 mesh 的叢集會把它跟每個成員都接上，mesh 永遠是完全圖。
+
+`disconnect` 跑 `cilium clustermesh disconnect`、兩邊拿掉記錄；對面的 cluster.yaml 已經不在時，改從這邊的 `cilium-clustermesh` secret 刪掉它的 key。`delete cluster` 的第一個 phase `mesh` 先對每個 peer 做這件事，連不上的 peer 只在這邊忘掉並警告。
+
+單主機與多主機不能互接：單主機的節點在主機 bridge 後面，出 LAN 被 podman 的 NAT 換成主機位址，LAN 上的節點也沒有路由回到 bridge 網段，而 Cluster Mesh 要節點位址原樣互通、pod 對 pod 不 SNAT；同一台主機上的 macvlan 節點與主機 bridge 又是隔開的。
+
+為什麼不搬 LoadBalancer 位址：Cilium 與 K8s 都沒有「把一個 LB 位址從這個叢集搬到那個叢集」的機制，要做得自己發明一層（L2 宣告的 selector、每位址一個池、GitOps 會還原的 label），而 Cilium 縮小一個池會讓池裡所有 Service 重配位址（cilium/cilium#40358）。入口位址本來就該由外部 LB 或 DNS 指，所以每個叢集各有自己的入口，切換在外面做。
+
 ## 主機的 sysctl
 
 前置檢查會把主機的 `net.bridge.bridge-nf-call-iptables` 設為 0 並寫入 `/etc/sysctl.d/90-tk8s.conf`：節點之間的橋接流量不經主機 iptables，否則裝了 Docker 的主機（FORWARD 預設 DROP）會擋掉 pod 到其他節點的流量。`net.ipv4.ip_forward` 必須是 1：節點的網路命名空間建立時複製主機的這個值，未啟用時 kubeadm 的 preflight 會在節點裡失敗。
