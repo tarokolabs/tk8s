@@ -33,11 +33,15 @@ $(sort "$digests"/*.digest | awk '{printf "| `%s` | `%s` |\n", $1, $2}')
 | CNI | cilium $(v cilium)（kube-proxy replacement、LB-IPAM、L2 announcement、netkit/veth）|
 | Gateway API | cilium 內建 controller（Gateway API $(v gateway_api)，experimental channel CRD）|
 | Router | 每叢集一個 VyOS rolling $(v vyos) 容器：節點的預設閘道，也是 apiserver 的入口。\`proxy\`（預設）：\`load-balancing haproxy\`，TCP 檢查；\`--ha bgp\`：每台 control plane 以 FRR 只在 apiserver ready 時宣告 VIP，router 做 ECMP，BFD 300 ms × 3 收斂；image 自本 tag 的配方建置 |
-| Router HA | \`--routers 2\`：兩台 VyOS router 跑 VRRP，節點閘道與 apiserver 入口 \`.253\` 在兩台之間漂移（約 3 秒），一台停掉叢集照常（停一台用 \`systemctl stop <叢集>-router-1.service\`）；\`--preset ha\` = \`--control-planes 3 --workers 3 --ha bgp --routers 2\`，\`--preset lab\` = 今天的預設，建立時印出展開的旗標；單 router 叢集的 \`cluster.yaml\` 多一行 \`routers: 1\` |
+| Router HA | \`--routers 2\`：兩台 VyOS router 跑 VRRP，節點閘道與 apiserver 入口 \`.253\` 在兩台之間漂移（約 3 秒），一台停掉叢集照常（停一台用 \`systemctl stop <叢集>-router-1.service\`）；\`--mode ha\` = \`--control-planes 3 --workers 3 --ha bgp --routers 2\`，\`--mode lab\` = 今天的預設，建立時印出展開的旗標（原 \`--preset\`）；單 router 叢集的 \`cluster.yaml\` 多一行 \`routers: 1\` |
 | 相容 | 叢集由建立時寫下的 \`cluster.yaml\` 描述；v2026.10.7 之前建立的（沒有 \`status\` 區塊）不再視為 Ready，\`create\` 也不會續跑它，請 \`tkctl delete cluster\` 後重建 |
 | apiserver 入口 | \`api.<叢集>.k8s:6443\` 解析到 router（proxy）或 anycast VIP \`172.23.N.1\`（bgp）；\`--control-planes 3\` 以上多 control plane |
 | 節點規格 | capacity 就是 \`cpu\`／\`memory\`，allocatable 再扣 kubeReserved 500m／512Mi 與 evictionHard 500Mi（2 核 4G → 1500m／3084Mi），和同規格的 VM 跑 kubeadm 一樣；記憶體至少 2G、節點不可超過主機；\`verify\` 的 \`node sizes\` 檢查這些數字；這版之前建的叢集仍回報整台主機，\`verify\` 對它們印 SKIP，重建即可 |
-| 多主機 | \`--hosts a,b=tux@host,c --ip-range A-B\`：節點容器與 router 分散到同一個 L2 的多台主機（Quadlet macvlan，節點拿 LAN 的位址、固定 MAC），一個操作台透過 ssh 管全部，叢集不依賴操作台；control plane、worker、router 輪流分散（\`-f\` 可寫 \`host:\`），每台主機一個 \`tk8s-<叢集>\` shim 介面讓主機連得到自己的容器；\`add node --host\`、\`verify\` 的 \`[hosts]\`；單主機叢集完全不變 |
+| 多主機 | \`--hosts a,b=tux@host,c --ip-range A-B\`：節點容器與 router 分散到同一個 L2 的多台主機（Quadlet macvlan，節點拿 LAN 的位址、固定 MAC），一個操作台透過 ssh 管全部，叢集不依賴操作台；control plane、worker、router 輪流分散（\`-f\` 可寫 \`host:\`），每台主機一個 \`tk8s-<叢集>\` shim 介面讓主機連得到自己的容器；\`add node --host\`、\`verify\` 的 \`[hosts]\`；池的最後 6 個是 Cluster Mesh 的 apiserver 位址加 5 個 LoadBalancer |
+| 聯邦（Cluster Mesh）| \`tkctl connect cluster A B [C...]\`／\`disconnect cluster A B\`：同一台操作台管理的叢集接成 Cilium Cluster Mesh，pod 互通，同 namespace 同 name 的 Service 加 \`service.cilium.io/global: "true"\` 後兩邊的 pod 都是 backend（藍綠換叢集取代原地升版；入口切換在外部 LB／DNS，tkctl 不搬 workload 也不搬位址）；\`get\` 的 MESH 欄、\`describe\` 的 Mesh 段（peers、global service 兩邊 backend 數、入口位址）、\`verify\` 的 \`[mesh]\`；要兩邊同形態（都單主機或都多主機）、Cilium 差不超過一個 minor；這版之前建的叢集要重建才能接；單主機的 LoadBalancer 池改為 \`.201\`–\`.219\`（\`.200\` 給 clustermesh-apiserver）|
+| 主機路由 | 主機到每個 worker 的 pod /24 直接指到該節點（\`cni/host-routes\`，\`cluster.yaml\` 記 \`pod_cidr\`；之前經 control-plane-1 轉送時 TCP 不通）|
+| kubeconfig | 每個叢集的 kubeconfig 以叢集命名（context \`<名稱>\`），\`use cluster\` 合進 \`~/.kube/config\` 不覆蓋其他叢集，\`delete cluster\` 拿掉自己的項目 |
+| 輸出 | 預設只印 \`[phase]\` 行與結果行；\`-v\`／\`--verbose\`（放任何位置）加回每道 \`$ command\` 行；\`--quiet\` 移除 |
 | RuntimeClass | crun（CRI-O 內建）；gVisor $(v gvisor)（\`--gvisor\`，建叢集時裝進節點）|
 | 監控與儲存 | metrics-server $(v metrics_server)、local-path-provisioner $(v local_path_provisioner) |
 | 工具 | uv $(v uv)（Python 3.14 與相依由它安裝）、kubectl ${d}（install.sh 下載）|
