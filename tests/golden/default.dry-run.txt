@@ -56,7 +56,7 @@ Subnet=172.22.0.0/24
 Gateway=172.22.0.254
 # The nodes' default route is the router, not the host bridge at 172.22.0.254; the bridge is the
 # router's upstream. no_default_route keeps netavark from adding the bridge as a default too.
-Options=no_default_route=1
+Options=no_default_route=true
 PodmanArgs=--route 0.0.0.0/0,172.22.0.253
 DNS=1.1.1.1
 DNS=1.0.0.1

@@ -72,7 +72,7 @@ def test_router_container_hostname_matches_the_vyos_host_name(ctx: Context) -> N
 def test_network_sends_the_nodes_to_the_router_not_the_host(ctx: Context) -> None:
     net = units.render(ctx)[ctx.paths.unit_dir / "demo" / "demo.network"]
     assert "Gateway=172.22.0.254" in net
-    assert "Options=no_default_route=1" in net
+    assert "Options=no_default_route=true" in net
     assert "PodmanArgs=--route 0.0.0.0/0,172.22.0.253" in net
 
 
@@ -377,7 +377,7 @@ def test_each_host_gets_its_own_network_units_target_and_routes(
     net = a[UNIT_DIR / "demo.network"]
     assert "Driver=macvlan\nOptions=parent=ens18\n" in net
     assert "Subnet=192.168.1.0/24\nGateway=192.168.1.1\n" in net
-    assert "Options=no_default_route=1\nPodmanArgs=--route 0.0.0.0/0,192.168.1.64\n" in net
+    assert "Options=no_default_route=true\nPodmanArgs=--route 0.0.0.0/0,192.168.1.64\n" in net
     cp1 = a[UNIT_DIR / "demo-control-plane-1.container"]
     assert "IP=192.168.1.68\n" in cp1
     assert "--cpus 2 --memory 4g --mac-address 02:54:4b:a8:01:44\n\n[Service]" in cp1

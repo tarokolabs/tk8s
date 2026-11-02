@@ -277,7 +277,7 @@ Subnet=192.168.1.0/24
 Gateway=192.168.1.1
 # The nodes' default route is the cluster's router (its address floats between the routers on
 # the LAN), not the LAN gateway. no_default_route keeps netavark from adding the gateway too.
-Options=no_default_route=1
+Options=no_default_route=true
 PodmanArgs=--route 0.0.0.0/0,192.168.1.64
 # No resolvers here: netavark serves no DNS on a macvlan network and refuses the setting; the
 # containers carry their own resolvers (set in each .container).
@@ -708,7 +708,7 @@ Subnet=192.168.1.0/24
 Gateway=192.168.1.1
 # The nodes' default route is the cluster's router (its address floats between the routers on
 # the LAN), not the LAN gateway. no_default_route keeps netavark from adding the gateway too.
-Options=no_default_route=1
+Options=no_default_route=true
 PodmanArgs=--route 0.0.0.0/0,192.168.1.64
 # No resolvers here: netavark serves no DNS on a macvlan network and refuses the setting; the
 # containers carry their own resolvers (set in each .container).
@@ -1100,7 +1100,7 @@ Subnet=192.168.1.0/24
 Gateway=192.168.1.1
 # The nodes' default route is the cluster's router (its address floats between the routers on
 # the LAN), not the LAN gateway. no_default_route keeps netavark from adding the gateway too.
-Options=no_default_route=1
+Options=no_default_route=true
 PodmanArgs=--route 0.0.0.0/0,192.168.1.64
 # No resolvers here: netavark serves no DNS on a macvlan network and refuses the setting; the
 # containers carry their own resolvers (set in each .container).
