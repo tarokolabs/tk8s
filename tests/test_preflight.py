@@ -163,8 +163,8 @@ ROUTE_Q = ("ip", "-j", "route", "show", "default")
 ADDR_Q = ("ip", "-j", "-4", "addr", "show", "dev", "ens18")
 ROUTE = '[{"dst":"default","gateway":"192.168.1.1","dev":"ens18"}]'
 ADDR = (
-    '[{"ifname":"ens18","addr_info":[{"family":"inet","local":"192.168.1.230","prefixlen":24,'
-    '"scope":"global"}]}]'
+    '[{"ifname":"ens18","mtu":1500,"addr_info":[{"family":"inet","local":"192.168.1.230",'
+    '"prefixlen":24,"scope":"global"}]}]'
 )
 
 

@@ -6,7 +6,7 @@ Driver=macvlan
 Options=parent=$parent
 Subnet=$nodes
 Gateway=$gateway
-# The nodes' default route is the cluster's router (its address floats between the routers on
+${mtu}# The nodes' default route is the cluster's router (its address floats between the routers on
 # the LAN), not the LAN gateway. no_default_route keeps netavark from adding the gateway too.
 Options=no_default_route=true
 PodmanArgs=--route 0.0.0.0/0,$router_ip

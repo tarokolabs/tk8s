@@ -57,6 +57,7 @@ class UserNetwork(Strict):
     vip: IPv4Address | None = None
     range: str | None = Field(default=None, pattern=RANGE)  # multi-host: A-B on the hosts' LAN
     router_hosts: list[str] | None = None  # multi-host: where the router container(s) run
+    mtu: int | None = Field(default=None, ge=1280, le=16000)  # default: the host NIC's
 
 
 class UserSpec(Strict):
@@ -135,6 +136,9 @@ class Network(Strict):
     # the LoadBalancer address reserved for the clustermesh-apiserver (its own LB-IPAM pool);
     # None on a cluster created before Cluster Mesh support
     mesh: IPv4Address | None = None
+    # the nodes' and the routers' MTU, the host NIC's when created (netavark's own default);
+    # None on a cluster created before #124: its network and routers keep what they had
+    mtu: int | None = Field(default=None, ge=1280, le=16000)
 
     @model_validator(mode="after")
     def _vip_follows_ha(self) -> Network:

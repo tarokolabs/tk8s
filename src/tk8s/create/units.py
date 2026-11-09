@@ -74,11 +74,15 @@ def render(
     mine_nodes = [n for n in c.spec.nodes if not c.multi_host or n.host == host_name]
     mine_routers = [r for r in c.routers if not c.multi_host or r.host == host_name]
     files: dict[Path, str] = {}
+    # one MTU for the nodes and the routers (#124); a cluster from before keeps what it had
+    net_mtu = f"Options=mtu={net.mtu}\n" if net.mtu else ""
+    eth0_mtu = f'        mtu "{net.mtu}"\n' if net.mtu else ""
     if me is not None:
         files[unit_dir / f"{c.name}.network"] = template(
             p.home,
             "cluster-macvlan.network",
             cluster=c.name,
+            mtu=net_mtu,
             parent=me.iface,
             nodes=net.nodes,
             gateway=net.gateway,
@@ -89,6 +93,7 @@ def render(
             p.home,
             "cluster.network",
             cluster=c.name,
+            mtu=net_mtu,
             nodes=net.nodes,
             gateway=net.gateway,
             router_ip=net.router,
@@ -118,6 +123,7 @@ def render(
             prefix=net.nodes.prefixlen,
             gateway=net.gateway,
             vrrp=vrrp + "\n" if vrrp else "",
+            mtu=eth0_mtu,
             **blocks,
         )
         files[state / r.dir / "scripts" / "vyos-preconfig-bootup.script"] = template(

@@ -60,6 +60,8 @@ templates/                  # 寫到主機上的檔，與實際內容只差 $變
 
 節點的預設路由指向 router，不是主機的 bridge：`.network` 設 `no_default_route=true`（netavark 2 只收 true/false，1.x 兩種都收） 並以 `--route 0.0.0.0/0,<router>` 發給每個容器。router 自己也會拿到那條指向自己的路由，而且 zebra 把它當 kernel route 壓過 VyOS 的 static default，所以 `router/scripts/vyos-postconfig-bootup.script` 開機時把它刪掉，之後 zebra 才裝上指向 `.254` 的那條；容器停止時 netavark 會再刪一次同一條路由，找不到就讓 unit 以失敗收場，所以同一個腳本登記一個 transient unit 在關機時把它放回去；同一個腳本也關掉 router 的 ICMP redirect（主機 bridge 和節點在同一條 link 上，否則 router 轉送每個封包都會叫節點直接走 `.254`）。
 
+節點與 router 用同一個 MTU，記在 `cluster.yaml` 的 `spec.network.mtu`：`plan` 讀主機預設路由那張網卡的 MTU（multi-host 取各主機 LAN 網卡中最小的；`--dry-run` 不問主機，假設 1500），`.network` 寫成 `mtu=`，`tkctl.boot` 寫進 router 的 `ethernet eth0`；定義檔可以自己指定。兩邊都要寫：netavark 會讓沒指定 MTU 的網路沿用主機網卡的（jumbo frame 就是 9000），VyOS 卻把沒指定的 `eth0` 設成 1500。proxy 模式的連線終止在 router 上，看不出差別；bgp 模式的 router 只轉送，主機與 control plane 協商出 8960 的 MSS，超過 1500 的封包到 router 就被丟掉，TLS 的 ClientHello 送不到 apiserver（[#124](https://github.com/tarokolabs/tk8s/issues/124)）。接續中斷的 create 沿用 `cluster.yaml` 記的值，因為 podman 不會改既有網路的 MTU；這之前建的叢集 `cluster.yaml` 沒有 `mtu`，檔案照舊產生，要刪除重建才會套用。
+
 ## 狀態目錄與 unit
 
 ```

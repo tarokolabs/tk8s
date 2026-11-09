@@ -12,6 +12,7 @@ from tk8s.hosts import (
     LanFacts,
     build,
     dry_run_lan,
+    host_mtu,
     in_use,
     kernel,
     lan_facts,
@@ -20,8 +21,8 @@ from tk8s.hosts import (
 
 ROUTE = '[{"dst":"default","gateway":"192.168.1.1","dev":"ens18","protocol":"static"}]'
 ADDR = (
-    '[{"ifname":"ens18","addr_info":[{"family":"inet","local":"192.168.1.230","prefixlen":24,'
-    '"scope":"global"}]}]'
+    '[{"ifname":"ens18","mtu":9000,"addr_info":[{"family":"inet","local":"192.168.1.230",'
+    '"prefixlen":24,"scope":"global"}]}]'
 )
 ROUTE_Q = ("ip", "-j", "route", "show", "default")
 ADDR_Q = ("ip", "-j", "-4", "addr", "show", "dev", "ens18")
@@ -34,6 +35,7 @@ def test_lan_facts_from_the_default_route_and_the_interface_address() -> None:
         IPv4Network("192.168.1.0/24"),
         IPv4Address("192.168.1.1"),
         IPv4Address("192.168.1.230"),
+        9000,
     )
 
 
@@ -44,6 +46,7 @@ def test_lan_facts_from_the_default_route_and_the_interface_address() -> None:
         (ROUTE[:-1] + "," + ROUTE[1:], ADDR, "host a: expected one default route, found 2"),
         ("not json", ADDR, "host a: cannot read the default route"),
         (ROUTE, '[{"ifname":"ens18","addr_info":[]}]', "host a: no IPv4 address on ens18"),
+        (ROUTE, ADDR.replace('"mtu":9000,', ""), "host a: no MTU on ens18"),
     ],
 )
 def test_odd_routes_or_addresses_are_a_named_error(route: str, addr: str, message: str) -> None:
@@ -58,7 +61,43 @@ def test_dry_run_lan_is_the_slash_24_around_the_range_start() -> None:
         IPv4Network("192.168.1.0/24"),
         IPv4Address("192.168.1.1"),
         IPv4Address("192.168.1.254"),
+        1500,
     )
+
+
+LINK_Q = ("ip", "-j", "link", "show", "dev", "ens18")
+
+
+def test_host_mtu_is_the_mtu_of_the_default_route_nic() -> None:
+    """What netavark gives a network without an MTU of its own (#124)."""
+    link = Result(0, '[{"ifname":"ens18","mtu":9000}]', "")
+    h = FakeHost(responses={ROUTE_Q: Result(0, ROUTE, ""), LINK_Q: link})
+    assert host_mtu(h, "op") == 9000
+
+
+def test_host_mtu_takes_the_first_of_several_default_routes() -> None:
+    two = ROUTE[:-1] + ',{"dst":"default","gateway":"10.0.0.1","dev":"wlan0","metric":600}]'
+    link = Result(0, '[{"ifname":"ens18","mtu":1450}]', "")
+    h = FakeHost(responses={ROUTE_Q: Result(0, two, ""), LINK_Q: link})
+    assert host_mtu(h, "op") == 1450
+
+
+def test_host_mtu_without_a_default_route_is_1500() -> None:
+    assert host_mtu(FakeHost(responses={ROUTE_Q: Result(0, "[]", "")}), "op") == 1500
+
+
+@pytest.mark.parametrize(
+    ("route", "link", "message"),
+    [
+        ("not json", "[]", "host op: cannot read the default route"),
+        (ROUTE, "not json", "host op: cannot read ens18"),
+        (ROUTE, '[{"ifname":"ens18"}]', "host op: no MTU on ens18"),
+    ],
+)
+def test_host_mtu_unreadable_is_a_named_error(route: str, link: str, message: str) -> None:
+    h = FakeHost(responses={ROUTE_Q: Result(0, route, ""), LINK_Q: Result(0, link, "")})
+    with pytest.raises(HostsError, match=message):
+        host_mtu(h, "op")
 
 
 def test_kernel_is_major_minor_of_uname() -> None:

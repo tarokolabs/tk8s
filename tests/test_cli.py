@@ -24,10 +24,13 @@ def fake_context(host: object, **kw: object) -> object:
     """verbs.make_context with a FakeHost and no waiting; assume_yes follows --yes."""
     from tests.fixtures import make_ctx
     from tk8s import verbs
-    from tk8s.host import FakeHost
+    from tk8s.host import FakeHost, Result
     from tk8s.paths import Paths
 
     assert isinstance(host, FakeHost)
+    # create asks for the host NIC's MTU: no default route reads as 1500, unless a test says
+    route_q = ("ip", "-j", "route", "show", "default")
+    host.responses.setdefault(route_q, Result(0, "[]", ""))
     ctx = make_ctx(
         host,
         Path(os.environ["TK_DATA_DIR"]),
@@ -373,6 +376,33 @@ def test_create_runs_every_phase_and_marks_the_cluster_ready(
     assert "cluster demo is ready" in out and "tkctl use cluster demo" in out
     saved = model.load_text(host.files[data_dir / "clusters" / "demo" / "cluster.yaml"])
     assert saved.status is not None and saved.status.phase == "Ready"
+
+
+def test_create_records_the_mtu_of_the_hosts_default_route_nic(
+    capsys: pytest.CaptureFixture[str], data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#124: the router has to be told the MTU netavark gives the nodes."""
+    from tk8s import model, verbs
+    from tk8s.host import FakeHost, Result
+
+    route = '[{"dst":"default","gateway":"192.168.11.254","dev":"ens18"}]'
+    host = FakeHost(
+        responses={
+            ("ip", "-j", "route", "show", "default"): Result(0, route, ""),
+            ("ip", "-j", "link", "show", "dev", "ens18"): Result(0, '[{"mtu":9000}]', ""),
+        }
+    )
+    monkeypatch.setattr(verbs, "make_context", lambda **kw: fake_context(host, **kw))
+    rc, out = run(capsys, "create", "cluster", "demo", "--phase", "plan")
+    assert rc == 0, out
+    saved = model.load_text(host.files[data_dir / "clusters" / "demo" / "cluster.yaml"])
+    assert saved.spec.network.mtu == 9000
+
+
+def test_dry_run_assumes_an_mtu_of_1500(capsys: pytest.CaptureFixture[str]) -> None:
+    rc, out = run(capsys, "create", "cluster", "--dry-run")
+    assert rc == 0 and "    mtu: 1500\n" in out and "Options=mtu=1500\n" in out
+    assert "ip -j route" not in out  # dry-run asks the host nothing
 
 
 def test_verify_cluster_verb(

@@ -33,6 +33,7 @@ spec:
       - b
     shim: 192.168.1.67
     mesh: 192.168.1.84
+    mtu: 1500
   nodes:
     - role: control-plane
       name: multi-control-plane-1
@@ -119,6 +120,7 @@ spec:
       - b
     shim: 192.168.1.67
     mesh: 192.168.1.84
+    mtu: 1500
   nodes:
     - role: control-plane
       name: multi-control-plane-1
@@ -205,6 +207,7 @@ spec:
       - b
     shim: 192.168.1.67
     mesh: 192.168.1.84
+    mtu: 1500
   nodes:
     - role: control-plane
       name: multi-control-plane-1
@@ -275,6 +278,7 @@ Driver=macvlan
 Options=parent=eth0
 Subnet=192.168.1.0/24
 Gateway=192.168.1.1
+Options=mtu=1500
 # The nodes' default route is the cluster's router (its address floats between the routers on
 # the LAN), not the LAN gateway. no_default_route keeps netavark from adding the gateway too.
 Options=no_default_route=true
@@ -298,6 +302,7 @@ high-availability {
 interfaces {
     ethernet eth0 {
         address "192.168.1.65/24"
+        mtu "1500"
     }
     loopback lo {
     }
@@ -706,6 +711,7 @@ Driver=macvlan
 Options=parent=eth0
 Subnet=192.168.1.0/24
 Gateway=192.168.1.1
+Options=mtu=1500
 # The nodes' default route is the cluster's router (its address floats between the routers on
 # the LAN), not the LAN gateway. no_default_route keeps netavark from adding the gateway too.
 Options=no_default_route=true
@@ -728,6 +734,7 @@ high-availability {
 interfaces {
     ethernet eth0 {
         address "192.168.1.66/24"
+        mtu "1500"
     }
     loopback lo {
     }
@@ -1098,6 +1105,7 @@ Driver=macvlan
 Options=parent=eth0
 Subnet=192.168.1.0/24
 Gateway=192.168.1.1
+Options=mtu=1500
 # The nodes' default route is the cluster's router (its address floats between the routers on
 # the LAN), not the LAN gateway. no_default_route keeps netavark from adding the gateway too.
 Options=no_default_route=true

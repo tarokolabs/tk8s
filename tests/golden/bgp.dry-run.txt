@@ -22,6 +22,7 @@ spec:
     pods: 10.244.0.0/21
     services: 10.98.0.0/24
     mesh: 172.22.0.200
+    mtu: 1500
   nodes:
     - role: control-plane
       name: bgp-control-plane-1
@@ -67,6 +68,7 @@ status:
 NetworkName=bgp
 Subnet=172.22.0.0/24
 Gateway=172.22.0.254
+Options=mtu=1500
 # The nodes' default route is the router, not the host bridge at 172.22.0.254; the bridge is the
 # router's upstream. no_default_route keeps netavark from adding the bridge as a default too.
 Options=no_default_route=true
@@ -80,6 +82,7 @@ DNS=8.8.4.4
 interfaces {
     ethernet eth0 {
         address "172.22.0.253/24"
+        mtu "1500"
     }
     loopback lo {
     }

@@ -1,3 +1,4 @@
+import dataclasses
 from ipaddress import IPv4Address, IPv4Network
 from pathlib import Path
 
@@ -459,7 +460,7 @@ def test_resolve_multi_host_needs_the_lan_facts() -> None:
 
 def test_hosts_on_different_subnets_or_gateways_are_refused() -> None:
     lans = dict(MULTI_LANS)
-    lans["c"] = LanFacts("eth0", IPv4Network("10.0.0.0/24"), IPv4Address("10.0.0.1"), ip(1))
+    lans["c"] = LanFacts("eth0", IPv4Network("10.0.0.0/24"), IPv4Address("10.0.0.1"), ip(1), 1500)
     with pytest.raises(PlanError, match=r"host c is on 10\.0\.0\.0/24 via 10\.0\.0\.1, host a on"):
         resolved(multi_user(), lans=lans, operator="op")
 
@@ -467,7 +468,7 @@ def test_hosts_on_different_subnets_or_gateways_are_refused() -> None:
 def test_resume_with_different_lan_facts_or_hosts_is_refused() -> None:
     existing = model.load_text(MULTI_YAML)
     other = dict(MULTI_LANS)
-    other["a"] = LanFacts("eth9", MULTI_LANS["a"].subnet, MULTI_LANS["a"].gateway, ip(230))
+    other["a"] = LanFacts("eth9", MULTI_LANS["a"].subnet, MULTI_LANS["a"].gateway, ip(230), 1500)
     with pytest.raises(PlanError, match=r"says host a on ens18, the host now says eth9"):
         resolved(multi_user(), existing=existing, lans=other, operator="op")
     again = resolved(multi_user(), existing=existing, lans=MULTI_LANS, operator="op")
@@ -485,7 +486,7 @@ def test_resume_with_different_lan_facts_or_hosts_is_refused() -> None:
 
 def test_range_outside_the_lan_is_refused() -> None:
     far = {
-        n: LanFacts("ens18", IPv4Network("10.0.0.0/24"), IPv4Address("10.0.0.1"), ip(1))
+        n: LanFacts("ens18", IPv4Network("10.0.0.0/24"), IPv4Address("10.0.0.1"), ip(1), 1500)
         for n in "abc"
     }
     with pytest.raises(PlanError, match=r"is outside the hosts' network 10\.0\.0\.0/24"):
@@ -494,7 +495,7 @@ def test_range_outside_the_lan_is_refused() -> None:
 
 def test_a_hosts_own_address_inside_the_range_is_refused() -> None:
     lans = dict(MULTI_LANS)
-    lans["b"] = LanFacts("ens18", MULTI_LANS["b"].subnet, MULTI_LANS["b"].gateway, ip(69))
+    lans["b"] = LanFacts("ens18", MULTI_LANS["b"].subnet, MULTI_LANS["b"].gateway, ip(69), 1500)
     with pytest.raises(PlanError, match=r"host b's own address 192\.168\.1\.69 is inside"):
         resolved(multi_user(), lans=lans, operator="op")
 
@@ -579,3 +580,39 @@ def test_a_segment_may_be_a_single_address() -> None:
     assert c.spec.network.range == full
     assert c.spec.network.lb_range == "192.168.1.85-192.168.1.88,192.168.1.90"
     assert c.spec.network.mesh == ip(84)
+
+
+def test_resolve_takes_the_mtu_of_the_hosts_nic() -> None:
+    """The router's eth0 gets the network's MTU, so the network must say it out loud (#124)."""
+    c = resolved(user(DEMO), host_mtu=9000)
+    assert c.spec.network.mtu == 9000
+    assert "mtu: 9000" in model.dumps(c)
+
+
+def test_resolve_with_an_mtu_in_cluster_yaml_ignores_the_host() -> None:
+    u = user(DEMO + "  network: {mtu: 1450}\n")
+    assert resolved(u, host_mtu=9000).spec.network.mtu == 1450
+
+
+@pytest.mark.parametrize("mtu", [1279, 16001])
+def test_an_mtu_out_of_range_is_refused(mtu: int) -> None:
+    with pytest.raises(model.ClusterFileError, match="mtu"):
+        user(DEMO + f"  network: {{mtu: {mtu}}}\n")
+
+
+def test_resume_keeps_the_recorded_mtu() -> None:
+    """The podman network already exists with the MTU it was created with; podman never changes
+    it, so a resume after the NIC changed must not either. A cluster.yaml from before #124 has
+    none and keeps none (its files render as they did)."""
+    first = resolved(user(DEMO), host_mtu=9000)
+    assert resolved(user(DEMO), existing=first, host_mtu=1500).spec.network.mtu == 9000
+    net = first.spec.network.model_copy(update={"mtu": None})
+    old = first.model_copy(update={"spec": first.spec.model_copy(update={"network": net})})
+    assert resolved(user(DEMO), existing=old, host_mtu=9000).spec.network.mtu is None
+
+
+def test_resolve_multi_host_takes_the_smallest_nic_mtu() -> None:
+    lans = {**MULTI_LANS, "b": dataclasses.replace(MULTI_LANS["b"], mtu=9000)}
+    assert resolved(multi_user(), lans=lans, operator="op").spec.network.mtu == 1500
+    jumbo = {n: dataclasses.replace(f, mtu=9000) for n, f in MULTI_LANS.items()}
+    assert resolved(multi_user(), lans=jumbo, operator="op").spec.network.mtu == 9000

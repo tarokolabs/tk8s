@@ -549,3 +549,45 @@ def test_multi_host_routes_reach_every_other_nodes_pods_through_the_shim(
     unit = units.render(ctx, ctx.cluster, "a")[ctx.paths.systemd_dir / "demo-routes.service"]
     assert "ExecStart=ip route replace 10.244.1.0/24 via 192.168.1.69 dev tk8s-demo\n" in unit
     assert "ExecStop=-ip route del 10.244.4.0/24 via 192.168.1.81 dev tk8s-demo\n" in unit
+
+
+def with_mtu(c: model.Cluster, mtu: int | None) -> model.Cluster:
+    net = c.spec.network.model_copy(update={"mtu": mtu})
+    return c.model_copy(update={"spec": c.spec.model_copy(update={"network": net})})
+
+
+def test_network_and_router_share_the_hosts_mtu(ctx: Context) -> None:
+    """netavark gives the nodes the host NIC's MTU (9000 with jumbo frames) while VyOS keeps a
+    router's eth0 at 1500 unless told; in bgp mode the router only forwards and drops every
+    segment above 1500 that the host and a control plane agreed on (#124)."""
+    files = units.render(ctx, cluster=with_mtu(ctx.require_cluster(), 9000))
+    assert "Gateway=172.22.0.254\nOptions=mtu=9000\n" in files[UNIT_DIR / "demo.network"]
+    boot = files[ctx.state_dir / "router" / "tkctl.boot"]
+    assert 'address "172.22.0.253/24"\n        mtu "9000"\n    }' in boot
+
+
+def test_bgp_and_two_routers_carry_the_mtu_too(bgp_ctx: Context, two_router_ctx: Context) -> None:
+    boot = units.render(bgp_ctx, cluster=with_mtu(bgp_ctx.require_cluster(), 9000))[
+        bgp_ctx.state_dir / "router" / "tkctl.boot"
+    ]
+    assert '        mtu "9000"\n' in boot
+    files = units.render(two_router_ctx, cluster=with_mtu(two_router_ctx.require_cluster(), 9000))
+    for r in ("router-1", "router-2"):
+        assert '        mtu "9000"\n' in files[two_router_ctx.state_dir / r / "tkctl.boot"]
+
+
+def test_a_cluster_from_before_124_renders_no_mtu(ctx: Context, bgp_ctx: Context) -> None:
+    """Its podman network exists with whatever MTU it got; rewriting the files must not move
+    the router away from the 1500 it has run with."""
+    for c in (ctx, bgp_ctx):
+        files = units.render(c, cluster=with_mtu(c.require_cluster(), None))
+        assert "mtu" not in files[UNIT_DIR / "demo.network"]
+        assert "mtu" not in files[c.state_dir / "router" / "tkctl.boot"]
+
+
+def test_macvlan_network_carries_the_mtu(
+    multi_ctx: tuple[Context, dict[str, FakeHost]],
+) -> None:
+    ctx, _ = multi_ctx
+    net = {hf.name: hf for hf in units.per_host(ctx)}["a"].files[UNIT_DIR / "demo.network"]
+    assert "Gateway=192.168.1.1\nOptions=mtu=1500\n" in net
