@@ -407,7 +407,10 @@ def resolve(
     tk8s_version: str,
     lans: dict[str, LanFacts] | None = None,
     operator: str | None = None,
+    host_mtu: int = 1500,
 ) -> model.Cluster:
+    """`host_mtu`: what netavark would give this host's bridge network (a multi-host cluster
+    takes the smallest of its hosts' LAN interfaces instead)."""
     validate(u)
     index = pick_index(u, existing, used_indices)
     if existing is None and index in used_indices and not allow_overlap:
@@ -477,6 +480,13 @@ def resolve(
         hosts = [model.Host(name=h.name, ssh=h.ssh, iface=lans[h.name].iface) for h in s.hosts]
         if existing is not None:
             check_resume(u.metadata.name, existing, hosts, nodes, net)
+    if existing is not None:
+        mtu = existing.spec.network.mtu  # the podman network already has it
+    elif s.network is not None and s.network.mtu is not None:
+        mtu = s.network.mtu
+    else:
+        mtu = min(f.mtu for f in lans.values()) if s.hosts and lans else host_mtu
+    net = net.model_copy(update={"mtu": mtu})
     spec = model.Spec(
         kubernetes=s.kubernetes or k8s_default,
         cni=s.cni,

@@ -1,7 +1,7 @@
 ${vrrp}interfaces {
     ethernet eth0 {
         address "$router_ip/$prefix"
-    }
+${mtu}    }
     loopback lo {
     }
 }

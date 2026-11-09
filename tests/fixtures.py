@@ -102,6 +102,7 @@ spec:
       - b
     shim: 192.168.1.67
     mesh: 192.168.1.84
+    mtu: 1500
   nodes:
     - role: control-plane
       name: demo-control-plane-1
@@ -159,9 +160,9 @@ status:
 _LAN = IPv4Network("192.168.1.0/24")
 _GW = IPv4Address("192.168.1.1")
 MULTI_LANS = {
-    "a": LanFacts("ens18", _LAN, _GW, IPv4Address("192.168.1.230")),
-    "b": LanFacts("ens18", _LAN, _GW, IPv4Address("192.168.1.231")),
-    "c": LanFacts("eth0", _LAN, _GW, IPv4Address("192.168.1.232")),
+    "a": LanFacts("ens18", _LAN, _GW, IPv4Address("192.168.1.230"), 1500),
+    "b": LanFacts("ens18", _LAN, _GW, IPv4Address("192.168.1.231"), 1500),
+    "c": LanFacts("eth0", _LAN, _GW, IPv4Address("192.168.1.232"), 1500),
 }
 
 
@@ -206,6 +207,7 @@ def resolved(
     allow_overlap: bool = False,
     lans: dict[str, LanFacts] | None = None,
     operator: str | None = None,
+    host_mtu: int = 1500,
 ) -> model.Cluster:
     return resolve(
         user,
@@ -216,6 +218,7 @@ def resolved(
         tk8s_version="test",
         lans=lans,
         operator=operator,
+        host_mtu=host_mtu,
     )
 
 

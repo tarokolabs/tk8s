@@ -23,6 +23,7 @@ class LanFacts:
     subnet: IPv4Network
     gateway: IPv4Address
     address: IPv4Address  # the host's own address on that interface
+    mtu: int  # that interface's: a macvlan network without an MTU takes its parent's
 
 
 def _json(host: Host, argv: list[str], name: str, what: str) -> object:
@@ -34,6 +35,26 @@ def _json(host: Host, argv: list[str], name: str, what: str) -> object:
     if data is None:
         raise HostsError(f"host {name}: cannot read {what} ({' '.join(argv)})")
     return data
+
+
+def _link_mtu(links: object, name: str, iface: str) -> int:
+    first = links[0] if isinstance(links, list) and links else None
+    mtu = first.get("mtu") if isinstance(first, dict) else None
+    if not isinstance(mtu, int):
+        raise HostsError(f"host {name}: no MTU on {iface}")
+    return mtu
+
+
+def host_mtu(host: Host, name: str) -> int:
+    """The MTU netavark gives a bridge network that sets none: the first default route's NIC's,
+    or the kernel's 1500 with no default route."""
+    routes = _json(host, ["ip", "-j", "route", "show", "default"], name, "the default route")
+    first = routes[0] if isinstance(routes, list) and routes else None
+    iface = first.get("dev") if isinstance(first, dict) else None
+    if not isinstance(iface, str):
+        return 1500
+    links = _json(host, ["ip", "-j", "link", "show", "dev", iface], name, iface)
+    return _link_mtu(links, name, iface)
 
 
 def lan_facts(host: Host, name: str) -> LanFacts:
@@ -56,14 +77,15 @@ def lan_facts(host: Host, name: str) -> LanFacts:
     if not addrs:
         raise HostsError(f"host {name}: no IPv4 address on {iface}")
     subnet = IPv4Network(f"{addrs[0]['local']}/{addrs[0]['prefixlen']}", strict=False)
-    return LanFacts(iface, subnet, IPv4Address(gateway), IPv4Address(addrs[0]["local"]))
+    mtu = _link_mtu(links, name, iface)
+    return LanFacts(iface, subnet, IPv4Address(gateway), IPv4Address(addrs[0]["local"]), mtu)
 
 
 def dry_run_lan(start: IPv4Address) -> LanFacts:
     """What --dry-run assumes without a host to ask: eth0 on the /24 around the range, the
     host itself at the subnet's last address."""
     subnet = IPv4Network(f"{start}/24", strict=False)
-    return LanFacts("eth0", subnet, subnet.network_address + 1, subnet.broadcast_address - 1)
+    return LanFacts("eth0", subnet, subnet.network_address + 1, subnet.broadcast_address - 1, 1500)
 
 
 def kernel(host: Host) -> tuple[int, int]:

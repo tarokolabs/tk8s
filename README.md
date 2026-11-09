@@ -233,6 +233,7 @@ spec:
     nodes: 172.22.16.0/24
     router: 172.22.16.253    # router 的位址，預設 .253
     ha: proxy                # 目前只有 proxy
+    mtu: 9000                # 節點與 router 的 MTU，預設沿用主機預設路由那張網卡的
 ```
 
 多主機時多一段 `hosts`，`network` 改寫保留範圍（`nodes`、`router` 由 tkctl 從主機的 LAN 查出與切出，不能寫）：

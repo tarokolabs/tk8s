@@ -81,6 +81,10 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
                 hosts.check_reachable(ctx.hosts[h.name], h.name)
                 lans[h.name] = hosts.lan_facts(ctx.hosts[h.name], h.name)
             operator = hosts.local_hostname(ctx.host)
+    # the MTU netavark gives the cluster's bridge, which the router has to be told (#124); a
+    # resume keeps the one in cluster.yaml, and dry-run asks the host nothing
+    asks = existing is None and not a.dry_run and user.spec.hosts is None
+    host_mtu = hosts.host_mtu(ctx.host, "localhost") if asks else 1500
     used = used_indices(ctx.paths)
     for remote in ctx.hosts.values():
         if remote is not ctx.host and not a.dry_run:
@@ -94,6 +98,7 @@ def cmd_create(a: argparse.Namespace, raw: list[str]) -> int:
         tk8s_version=tk8s_version(HOME),
         lans=lans,
         operator=operator,
+        host_mtu=host_mtu,
     )
     phases = DRY_RUN_PHASES if a.dry_run else PHASES
     skip = {s for s in a.skip_phases.split(",") if s}
